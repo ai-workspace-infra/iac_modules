@@ -1,0 +1,13 @@
+# generate.py 渲染产物（由 hosts.yaml 派生，不入库）
+generated_hosts.tf
+terraform.auto.tfvars.json
+cmdb.json
+inventory.ini
+
+# terraform 运行时
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+__pycache__/

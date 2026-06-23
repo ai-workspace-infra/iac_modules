@@ -1,0 +1,69 @@
+# =============================================================================
+# 由 generate.py 从 hosts.yaml 渲染生成 —— 请勿手工编辑
+# 重新生成: python3 generate.py render
+#
+# 约束: 不使用 for_each/count/dynamic 等 HCL 控制结构。
+# 每台主机、每个 SSH key 都渲染成独立的显式 module/resource/data 块。
+# (循环在 Python+Jinja2 侧完成，而非 HCL 侧)
+# =============================================================================
+
+{% for key in ssh_keys -%}
+resource "vultr_ssh_key" "{{ key.name | tf_id }}" {
+  name    = "{{ key.name }}"
+  ssh_key = "{{ key.public }}"
+}
+
+{% endfor -%}
+{% for host in hosts -%}
+{%- set hid = host.name | tf_id -%}
+{%- if host.os_id is not defined or host.os_id is none %}
+data "vultr_os" "{{ hid }}" {
+  filter {
+    name   = "name"
+    values = ["{{ host.os_name }}"]
+  }
+}
+{% endif %}
+module "compute_{{ hid }}" {
+  source = "../../modules/compute"
+
+  label       = "${var.name_prefix}-{{ host.name }}"
+  region      = {% if host.region %}"{{ host.region }}"{% else %}var.region{% endif %}
+
+  plan        = "{{ host.plan | default('vc2-4c-8gb') }}"
+  os_id       = {% if host.os_id %}{{ host.os_id }}{% else %}data.vultr_os.{{ hid }}.id{% endif %}
+
+  enable_ipv6 = {{ 'true' if host.get('enable_ipv6', true) else 'false' }}
+  backups     = {{ 'true' if host.get('backups', false) else 'false' }}
+  tags        = concat([var.name_prefix], {{ host.get('tags', []) | tojson }})
+  ssh_key_ids = [{% for k in ssh_keys %}vultr_ssh_key.{{ k.name | tf_id }}.id{{ ", " if not loop.last }}{% endfor %}]
+  user_data   = file(var.user_data_file)
+}
+
+{% endfor -%}
+# 运行时事实：仅暴露 apply 后才确定的动态值。静态字段(os_name/plan/groups/
+# host_vars 等)由 generate.py 从 hosts.yaml 合并，最终一起写入 cmdb.json。
+output "cmdb_runtime" {
+  description = "name -> {ip, instance_id, os_id}"
+  value = {
+{% for host in hosts -%}
+{%- set hid = host.name | tf_id %}
+    "{{ host.name }}" = {
+      ip          = module.compute_{{ hid }}.main_ip
+      instance_id = module.compute_{{ hid }}.instance_id
+      os_id       = {% if host.os_id %}{{ host.os_id }}{% else %}data.vultr_os.{{ hid }}.id{% endif %}
+
+    }
+{% endfor -%}
+  }
+}
+
+output "hosts_summary" {
+  description = "name -> public_ip"
+  value = {
+{% for host in hosts -%}
+{%- set hid = host.name | tf_id %}
+    "{{ host.name }}" = module.compute_{{ hid }}.main_ip
+{% endfor -%}
+  }
+}

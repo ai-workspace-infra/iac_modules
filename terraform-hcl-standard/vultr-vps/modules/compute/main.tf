@@ -60,7 +60,7 @@ resource "vultr_instance" "this" {
   plan         = var.plan
   os_id        = var.os_id
   enable_ipv6  = var.enable_ipv6
-  backups      = var.backups
+  backups      = var.backups ? "enabled" : "disabled"
   tags         = var.tags
   vpc_ids      = var.vpc_id == null ? [] : [var.vpc_id]
   ssh_key_ids  = var.ssh_key_ids
