@@ -17,7 +17,7 @@ global:
 # 注入实例的登录公钥（公钥非敏感，可入库；私钥/API Key 不要写这里）
 ssh_keys:
   - name: ai-workspace-admin
-    public: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO37O6S1Kf0QRV3/hQ7OVGZetEEcP7AevwXrRi8HRpHg ai-workspace-vultr"
+    public: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDEsuS135lzjVvlH2iNrKz23lDFr7b686xs4d2HINP2glFPmgkgx1D6Dqwisb1UbhWHZmUUzRxXeNlE8fiaO0TXN/C0dsdUxgopnQRyakcA+gfJqqb38Syx8eqdC7mQy9ygOf763dWm6d/SYZ8WgNWLldk4QF9DiZOW9K22DMtY4/1Cqe/YE/WGpOMVr9T9BwvmOjarjWp2OPbx6RVlSOd735Mze5X+cJ9QqdLaisCiSoJ3j9S6dulcxm+7ghPfATvxlJyZWSrRrVqnmV45lPbeuUHlIEyuK1PK2MS6NtUP03ZhdRYJQKZLECpR5xAO/BliOtDdRornvHV1gutYD8/n3IS8sRVzYPvN9DuOhzBnBQUgciu2++R8zMfdVoH7mSbsE8u++vMcBk3UJ1Op0Ct+trl2bsnue96cAnoiII08JKwAaczD5uZIGhdkGV8zKnChNCjzCxP0i4PV/MYW04eWmH+E8G81zq4ZsvrvPYmilBbRrkwHvvbPba3SSb2F2As= shenlan@shenlandeMacBook-Air-2.local"
 
 # 主机清单。map key 风格用 name 字段；每台机器渲染成一个独立 module 块。
 hosts:
@@ -28,11 +28,11 @@ hosts:
     enable_ipv6: true             # 公网 IPv4 默认分配，这里附带开 IPv6
     ansible_user: root
     groups: [ai_workspace, debian]
-    tags: [debian13]
+    tags: [debian]
     host_vars:
       role: primary
       # 逗号分隔的服务域名；cloudflare_dns 角色据此为本机 IP 建 A 记录
-      service_domains: ai-debian13.svc.plus
+      service_domains: xworkmate-bridge-debian-13.svc.plus
 
   - name: ai-ubuntu2604
     os_name: "Ubuntu 26.04 LTS x64"
@@ -41,7 +41,7 @@ hosts:
     enable_ipv6: true
     ansible_user: root
     groups: [ai_workspace, ubuntu]
-    tags: [ubuntu2604]
+    tags: [ubuntu]
     host_vars:
       role: secondary
-      service_domains: ai-ubuntu2604.svc.plus
+      service_domains: xworkmate-bridge-ubuntu-26.svc.plus
