@@ -38,7 +38,8 @@ hosts.yaml (唯一人工入口：资源描述 / CMDB 源)
 - 资源信息由 env 内 `hosts.yaml` 描述；多份资源由 Jinja2 展开为**多个命名唯一的显式块**。
 - YAML 全局段经 `terraform.auto.tfvars.json` 传给 `variables.tf`；逐实例字段由 Jinja2 进 `.tf`。
 - 机密走环境变量（如 `TF_VAR_vultr_api_key`），**禁止**写入 YAML/tfvars；公钥可入 YAML。
-- 每个 env 提供 `generate.py`，至少含 `render` 与 `inventory` 两个子命令（职责见上图）。
+- 共享 `scripts/generate.py`（`--resources`/`--workdir` 参数化）提供 `render` 与
+  `inventory` 两个子命令（职责见上图）；不在每个 env 各放一份。
 - Terraform 只输出运行时才确定的事实；静态字段（os_name/plan/groups/host_vars…）由 Python 合并。
 - 渲染产物（`generated_hosts.tf`、`terraform.auto.tfvars.json`、`cmdb.json`、`inventory.ini`）
   加入 `.gitignore`，不入库。
@@ -50,21 +51,31 @@ hosts.yaml (唯一人工入口：资源描述 / CMDB 源)
 - 每个用到 provider 的子模块声明 `required_providers`（含正确 `source`）。
 - OS 用 `data "vultr_os"` 按 `os_name` 解析 `os_id`，避免硬编码漂移 ID；解析不到时允许直接给 `os_id`。
 
-## Reference Layout（新 env 必备文件）
+## Reference Layout（按职责分层）
+
+声明 / 可复用模板 / 组合三层分离，env 目录只保留组合逻辑：
 
 ```
-envs/<name>/
-  hosts.yaml                 # 唯一人工入口：global / ssh_keys / hosts
-  generate.py                # render + inventory 两个子命令
-  templates/
-    hosts.tf.j2              # 渲染逐实例 module/data + 资源块
-    inventory.ini.j2         # 渲染静态 inventory
-  variables.tf               # 全局变量声明（值来自 tfvars.json）
-  provider.tf
-  provision.sh               # 一键 render -> apply -> inventory -> (可选) ansible
-  .gitignore                 # 忽略渲染产物与 .terraform/tfstate
-  # 渲染产物（不入库）：generated_hosts.tf / terraform.auto.tfvars.json / cmdb.json / inventory.ini
+<provider>-vps/
+  config/resources/<name>-hosts.yaml   # 声明：唯一人工入口 global / ssh_keys / hosts
+  templates/                           # 共享：可复用 .tf 与 Jinja2 模板
+    provider.tf  variables.tf  cloud-init.yaml   # 共享 .tf/配置（render 时拷入 workdir）
+    hosts.tf.j2  inventory.ini.j2                # 渲染模板
+  scripts/                             # 共享：组合逻辑（不依赖具体 env）
+    generate.py                        # render + inventory；--resources / --workdir 参数化
+    provision.sh                       # 一键 render -> apply -> inventory -> (可选) ansible
+  modules/<resource>/                  # 复用的资源模块
+  envs/<name>/                         # 运行目录（terraform workdir）
+    README.md  .gitignore              # 唯二入库文件；其余为渲染产物 + tfstate
+  # 渲染产物（落 workdir、不入库）：provider.tf / variables.tf / cloud-init.yaml /
+  #   generated_hosts.tf / terraform.auto.tfvars.json / cmdb.json / inventory.ini
 ```
+
+> 三层共享：**声明**归 `config/resources/`、**可复用 .tf 与模板**归 `templates/`、
+> **组合逻辑**归 `scripts/`；env 退化为运行目录。`scripts/generate.py render` 把
+> `templates/` 下的 provider/variables/cloud-init 拷入 workdir、渲染出 `generated_hosts.tf`，
+> 使 workdir 成为可独立 terraform 的根模块。新增一套主机只加一个 `config/resources/*.yaml`
+> + 一个 workdir，复用同一 scripts/templates。
 
 ## Operator Checklist（提交前自检）
 

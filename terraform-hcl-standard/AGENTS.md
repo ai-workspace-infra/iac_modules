@@ -43,7 +43,8 @@ CMDB (cmdb.json) + Ansible inventory (inventory.ini / 动态 inventory)
 
 ## 2. 资源描述与变量传递（MUST）
 
-- 资源信息**必须**由 env 目录下的 `hosts.yaml`（或等价 `*.yaml`）描述，作为唯一人工入口。
+- 资源信息**必须**由 `config/resources/<name>-hosts.yaml`（或等价 `*.yaml`）声明，作为唯一人工入口；
+  **不**放在 env 目录里。
 - YAML 的全局段经渲染写入 `terraform.auto.tfvars.json`，**传给 `variables.tf`**；
   逐实例字段由 Jinja2 展开进生成的 `.tf`。
 - 机密（API Key、私钥等）**禁止**写入 YAML / tfvars，**必须**走环境变量
@@ -51,14 +52,18 @@ CMDB (cmdb.json) + Ansible inventory (inventory.ini / 动态 inventory)
 
 ## 3. 渲染器约定（MUST）
 
-每个采用本范式的 env **必须**提供 `generate.py`，至少含两个子命令：
+组合逻辑**必须**收敛到共享 `scripts/generate.py`（`--resources`/`--workdir` 参数化，
+不在每个 env 各放一份），至少含两个子命令：
 
-- `render`：`hosts.yaml` → `generated_hosts.tf` + `terraform.auto.tfvars.json`
-- `inventory`：`terraform output`（运行时事实）+ `hosts.yaml`（静态字段）
+- `render`：`config/resources/*.yaml` → workdir 下 `generated_hosts.tf` +
+  `provider.tf`/`variables.tf`/`cloud-init.yaml`（拷自 `templates/`）+ `terraform.auto.tfvars.json`
+- `inventory`：`terraform output`（运行时事实）+ YAML（静态字段）
   → `cmdb.json` + `inventory.ini`
 
 约定：
-- Jinja2 模板放 `templates/*.j2`；标识符经 `tf_id` 过滤器净化为合法 HCL 名。
+- 共享脚本放 `scripts/`，共享 .tf 与 Jinja2 模板放 `templates/`（`provider.tf`/
+  `variables.tf`/`cloud-init.yaml`/`*.j2`）；env 仅作 terraform 运行目录；
+  标识符经 `tf_id` 过滤器净化为合法 HCL 名。
 - Terraform 仅输出 **运行时才确定** 的事实（如 `cmdb_runtime`：ip / instance_id /
   解析后的 os_id）。静态字段（os_name/plan/groups/host_vars 等）由 Python 从 YAML 合并。
 - `inventory.ini` 中含空格的 host_var 值**必须**加引号（`key="a b c"`）。

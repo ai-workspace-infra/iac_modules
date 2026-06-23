@@ -1,5 +1,9 @@
-# generate.py 渲染产物（由 hosts.yaml 派生，不入库）
+# generate.py 渲染产物（由 config/resources/*.yaml 与 templates/ 派生，拷入/渲染进
+# 本运行目录，均不入库）
 generated_hosts.tf
+provider.tf
+variables.tf
+cloud-init.yaml
 terraform.auto.tfvars.json
 cmdb.json
 inventory.ini
