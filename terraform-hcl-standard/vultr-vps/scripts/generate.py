@@ -141,8 +141,14 @@ def cmd_inventory(args):
         host_vars.setdefault("plan", host.get("plan", "vc2-4c-8gb"))
         host_vars.setdefault("region", host.get("region") or default_region)
 
-        cmdb[name] = {
+        # inventory_hostname = service_domains 的首个 FQDN（动态取自资源声明 yaml）；
+        # 无 service_domains 时回退到 name。CMDB / inventory / 分组均以此为键。
+        sd = (host_vars.get("service_domains") or "").split(",")
+        fqdn = next((d.strip() for d in sd if d.strip()), "") or name
+
+        cmdb[fqdn] = {
             "name": name,
+            "fqdn": fqdn,
             "ip": rt.get("ip"),
             "instance_id": rt.get("instance_id"),
             "os_id": rt.get("os_id"),
@@ -154,8 +160,8 @@ def cmd_inventory(args):
             "tags": host.get("tags", []) or [],
             "host_vars": host_vars,
         }
-        for group in cmdb[name]["groups"] or ["ungrouped"]:
-            groups.setdefault(group, []).append(name)
+        for group in cmdb[fqdn]["groups"] or ["ungrouped"]:
+            groups.setdefault(group, []).append(fqdn)
 
     with open(os.path.join(workdir, "cmdb.json"), "w", encoding="utf-8") as fh:
         json.dump(cmdb, fh, indent=2, ensure_ascii=False)
