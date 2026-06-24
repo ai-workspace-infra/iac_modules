@@ -44,6 +44,10 @@ DEFAULT_WORKDIR = os.path.join(VULTR_VPS_ROOT, "envs", "ai-workspace")
 # render 时从 templates/ 拷入运行目录的静态文件（使 workdir 成为独立根模块）。
 COPY_INTO_WORKDIR = ["provider.tf", "variables.tf", "cloud-init.yaml"]
 
+# 逐主机可选字段的缺省值（集中定义，避免散落的硬编码字面量）。
+DEFAULT_PLAN = "vc2-4c-8gb"
+DEFAULT_ANSIBLE_USER = "root"
+
 
 def _tf_id(value):
     """把任意名字转成合法的 Terraform 标识符。"""
@@ -138,7 +142,7 @@ def cmd_inventory(args):
         rt = runtime.get(name, {})
         host_vars = dict(host.get("host_vars", {}) or {})
         host_vars.setdefault("os_name", host.get("os_name", ""))
-        host_vars.setdefault("plan", host.get("plan", "vc2-4c-8gb"))
+        host_vars.setdefault("plan", host.get("plan", DEFAULT_PLAN))
         host_vars.setdefault("region", host.get("region") or default_region)
 
         # inventory_hostname = service_domains 的首个 FQDN（动态取自资源声明 yaml）；
@@ -153,15 +157,30 @@ def cmd_inventory(args):
             "instance_id": rt.get("instance_id"),
             "os_id": rt.get("os_id"),
             "os_name": host.get("os_name", ""),
-            "plan": host.get("plan", "vc2-4c-8gb"),
+            "plan": host.get("plan", DEFAULT_PLAN),
             "region": host.get("region") or default_region,
-            "ansible_user": host.get("ansible_user", "root"),
+            "ansible_user": host.get("ansible_user", DEFAULT_ANSIBLE_USER),
             "groups": host.get("groups", []) or [],
             "tags": host.get("tags", []) or [],
             "host_vars": host_vars,
         }
         for group in cmdb[fqdn]["groups"] or ["ungrouped"]:
             groups.setdefault(group, []).append(fqdn)
+
+    # 非空传递检查：运行时事实(ip/instance_id)必须由 terraform 输出带回，否则下游
+    # inventory 会渲染出空 ansible_host、静默连错主机。缺失即抛错中止（默认要求非空）。
+    problems = []
+    for fqdn, h in cmdb.items():
+        if not str(h.get("ip") or "").strip():
+            problems.append(f"  - {fqdn} (name={h['name']}): 缺少运行时 ip")
+        if not str(h.get("instance_id") or "").strip():
+            problems.append(f"  - {fqdn} (name={h['name']}): 缺少 instance_id")
+    if problems:
+        sys.exit(
+            "CMDB 非空校验失败：以下主机缺少 terraform 运行时事实；请确认已在 "
+            f"{workdir} 完成 terraform apply 且 output cmdb_runtime 覆盖这些主机：\n"
+            + "\n".join(problems)
+        )
 
     with open(os.path.join(workdir, "cmdb.json"), "w", encoding="utf-8") as fh:
         json.dump(cmdb, fh, indent=2, ensure_ascii=False)
