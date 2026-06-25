@@ -23,7 +23,7 @@ ssh_keys:
 hosts:
   - name: ai-debian13
     os_name: "Debian 13 x64 (trixie)"   # Vultr 实际镜像名（含 trixie）；也可写 os_id: 2625
-    plan: vc2-4c-8gb              # 4 核 8G
+    plan: vc2-2c-4gb              # 2 核 4G（临时缩配，验证后改回 vc2-4c-8gb）
     backups: false                # 不开备份
     enable_ipv6: true             # 公网 IPv4 默认分配，这里附带开 IPv6
     ansible_user: root
@@ -36,7 +36,7 @@ hosts:
 
   - name: ai-ubuntu2604
     os_name: "Ubuntu 26.04 LTS x64"
-    plan: vc2-4c-8gb
+    plan: vc2-2c-4gb
     backups: false
     enable_ipv6: true
     ansible_user: root
