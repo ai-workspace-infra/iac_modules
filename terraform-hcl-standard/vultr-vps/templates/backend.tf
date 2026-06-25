@@ -1,6 +1,8 @@
 terraform {
   backend "s3" {
-    endpoint                    = var.object_storage_endpoint
+    endpoints = {
+      s3 = var.object_storage_endpoint
+    }
     bucket                      = var.state_bucket
     key                         = var.state_key
     region                      = var.region
@@ -9,6 +11,8 @@ terraform {
     skip_credentials_validation = true
     skip_region_validation      = true
     skip_requesting_account_id  = true
+    skip_metadata_api_check     = true
+    skip_s3_checksum            = true
     force_path_style            = true
   }
 }
