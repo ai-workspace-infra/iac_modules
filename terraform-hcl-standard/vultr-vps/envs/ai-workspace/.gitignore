@@ -7,6 +7,8 @@ cloud-init.yaml
 terraform.auto.tfvars.json
 cmdb.json
 inventory.ini
+# render_backend_tf.py 渲染的 S3 兼容 backend（含 endpoint，按环境派生，不入库）
+backend.tf
 
 # terraform 运行时
 .terraform/
