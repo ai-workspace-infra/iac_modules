@@ -3,7 +3,7 @@
 渲染 Terraform S3 backend 配置文件（backend.tf）。
 
 用法：
-  TF_STATE_ENDPOINT=https://... python3 render_backend_tf.py [output_path]
+  TF_STATE_ENDPOINT=https://... TF_STATE_REGION=us-east-1 python3 render_backend_tf.py [output_path]
 
 默认输出到当前目录的 backend.tf（在 terraform working-directory 里执行）。
 """
@@ -15,13 +15,18 @@ if not endpoint:
     print("ERROR: TF_STATE_ENDPOINT is not set", file=sys.stderr)
     sys.exit(1)
 
+region = os.environ.get("TF_STATE_REGION", "")
+if not region:
+    print("ERROR: TF_STATE_REGION is not set", file=sys.stderr)
+    sys.exit(1)
+
 output = sys.argv[1] if len(sys.argv) > 1 else "backend.tf"
 
 content = f"""\
 terraform {{
-    backend "s3" {{
+  backend "s3" {{
     endpoints                   = {{ s3 = "{endpoint}" }}
-    region                      = "us-east-1"
+    region                      = "{region}"
     skip_credentials_validation = true
     skip_region_validation      = true
     skip_requesting_account_id  = true
@@ -37,4 +42,4 @@ with open(output, "w") as f:
 
 print(f"backend.tf written to {output}")
 print(f"  endpoint = {endpoint[:40]}...")
-print("  region   = us-east-1")
+print(f"  region   = {region}")
