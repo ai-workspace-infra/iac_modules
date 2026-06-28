@@ -1,0 +1,44 @@
+name: Validate Release PR
+
+# release/* 分支的发布策略门禁：仅接受 hotfix/* 或带 cherry-pick/backport 标签的 PR。
+# 详见 iac_modules/docs/tldr-github-branch-model.md
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  validate-release-source:
+    runs-on: ubuntu-latest
+    if: startsWith(github.base_ref, 'release/')
+    steps:
+      - name: Check PR source branch
+        run: |
+          SRC="${{ github.head_ref }}"
+          TGT="${{ github.base_ref }}"
+          LABELS="${{ join(github.event.pull_request.labels.*.name, ',') }}"
+
+          echo "🔍 Validating PR into release branch"
+          echo "  source: $SRC"
+          echo "  target: $TGT"
+          echo "  labels: $LABELS"
+
+          if [[ "$SRC" =~ ^hotfix/ ]]; then
+            echo "✅ Allowed: hotfix/* branch"
+            exit 0
+          fi
+
+          if [[ "$LABELS" =~ (^|,)(cherry-pick|backport)(,|$) ]]; then
+            echo "✅ Allowed: cherry-pick/backport labeled PR"
+            exit 0
+          fi
+
+          echo "❌ Rejected."
+          echo "release/* 仅接受："
+          echo "  - 来自 hotfix/* 的 PR"
+          echo "  - 带 cherry-pick 或 backport 标签的 PR（已验证 feature 的 backport/cherry-pick）"
+          echo "禁止从 main / develop / feature/* 直接合并到 release/*。"
+          exit 1
