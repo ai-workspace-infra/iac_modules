@@ -147,8 +147,9 @@ def cmd_inventory(args):
 
         # inventory_hostname = service_domains 的首个 FQDN（动态取自资源声明 yaml）；
         # 无 service_domains 时回退到 name。CMDB / inventory / 分组均以此为键。
-        sd = (host_vars.get("service_domains") or "").split(",")
-        fqdn = next((d.strip() for d in sd if d.strip()), "") or name
+        sd_raw = host_vars.get("service_domains") or ""
+        sd = sd_raw if isinstance(sd_raw, list) else sd_raw.split(",")
+        fqdn = next((str(d).strip() for d in sd if str(d).strip()), "") or name
 
         cmdb[fqdn] = {
             "name": name,
