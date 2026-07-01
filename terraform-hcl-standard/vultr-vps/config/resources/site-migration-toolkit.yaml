@@ -11,7 +11,7 @@
 
 global:
   region: nrt          # 默认区域：东京。可选 ewr/sgp/fra ...
-  name_prefix: site-recovery
+  name_prefix: site-migration-toolkit
   user_data_file: cloud-init.yaml
 
 # 注入实例的登录公钥（公钥非敏感，可入库；私钥/API Key 不要写这里）
@@ -21,7 +21,7 @@ ssh_keys:
 
 # 主机清单。map key 风格用 name 字段；每台机器渲染成一个独立 module 块。
 hosts:
-  - name: site-recovery     # 逗号分隔的服务域名；cloudflare_dns 角色据此为本机 IP 建 A 记录
+  - name: site-migration-toolkit     # 逗号分隔的服务域名；cloudflare_dns 角色据此为本机 IP 建 A 记录
     os_name: "Debian 13 x64 (trixie)"   # Vultr 实际镜像名（含 trixie）；也可写 os_id: 2625
     plan: vc2-4c-8gb              # 2 核 4G（临时缩配，验证后改回 vc2-4c-8gb）
     backups: false                # 不开备份
@@ -34,4 +34,4 @@ hosts:
       service_domains: 
         - www.onwalk.net
         - console.onwalk.net
-        - site-recovery.onwalk.net
+        - site-migration-toolkit.onwalk.net
