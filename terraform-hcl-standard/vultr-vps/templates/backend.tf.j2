@@ -1,0 +1,13 @@
+terraform {
+  backend "s3" {
+    endpoints                   = { s3 = "{{ env.get('TF_STATE_ENDPOINT') }}" }
+    region                      = "{{ env.get('TF_STATE_REGION') }}"
+    skip_credentials_validation = true
+    skip_region_validation      = true
+    skip_requesting_account_id  = true
+    skip_metadata_api_check     = true
+    skip_s3_checksum            = true
+    use_path_style              = true
+    workspace_key_prefix        = "{{ env.get('TF_WORKSPACE_PREFIX', 'env') }}"
+  }
+}
