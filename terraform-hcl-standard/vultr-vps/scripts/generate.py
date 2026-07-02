@@ -67,7 +67,10 @@ def _jinja():
 
 def load_yaml(path):
     with open(path, encoding="utf-8") as fh:
-        return yaml.safe_load(fh) or {}
+        content = fh.read()
+    from jinja2 import Template
+    rendered = Template(content).render(env=os.environ)
+    return yaml.safe_load(rendered) or {}
 
 
 def _terraform_output(workdir, name):
@@ -93,6 +96,14 @@ def cmd_render(args):
     )
     with open(os.path.join(workdir, "generated_hosts.tf"), "w", encoding="utf-8") as fh:
         fh.write(rendered)
+
+    rendered_backend = (
+        _jinja()
+        .get_template("backend.tf.j2")
+        .render(env=os.environ)
+    )
+    with open(os.path.join(workdir, "backend.tf"), "w", encoding="utf-8") as fh:
+        fh.write(rendered_backend)
 
     # 共享 provider/variables/cloud-init 拷入运行目录，使 workdir 成为可独立
     # terraform 的根模块（这些是渲染产物，已在 env/.gitignore 忽略）。
