@@ -28,6 +28,10 @@ on:
         type: string
         default: main
 
+permissions:
+  id-token: write
+  contents: read
+
 env:
   TF_WORKDIR: terraform-hcl-standard/aws-cloud
   DEPLOY_ACTION: ${{ github.event.inputs.deploy_action || 'plan' }}

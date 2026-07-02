@@ -33,6 +33,10 @@ on:
         type: string
         default: config/xzerolab/sit/aws-cloud/account/bootstrap.yaml
 
+permissions:
+  id-token: write
+  contents: read
+
 env:
   TG_VERSION: 0.67.14
   TG_ROOT: ${{ github.event.inputs.bootstrap_cloud || 'terraform-hcl-standard/aws-cloud/bootstrap' }}
