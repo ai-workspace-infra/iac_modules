@@ -20,3 +20,16 @@ hosts:
       role: primary
       service_domains: 
         - console.onwalk.net
+
+  - name: postgresql-saas.onwalk.net
+    os_name: "Debian 13 x64 (trixie)"
+    plan: {{ env.get('INSTANCE_PLAN_API', 'vc2-4c-8gb') }}
+    backups: true
+    enable_ipv6: true
+    ansible_user: root
+    groups: [web_saas, debian, database]
+    tags: [debian, database]
+    host_vars:
+      role: database
+      service_domains: 
+        - postgresql-saas.onwalk.net
