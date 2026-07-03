@@ -30,6 +30,20 @@ variable "backups" {
   default     = false
 }
 
+variable "backups_schedule" {
+  description = "自动备份计划（UTC）"
+  type = object({
+    type = string
+    hour = number
+    dow  = optional(number)
+    dom  = optional(number)
+  })
+  default = {
+    type = "daily"
+    hour = 5
+  }
+}
+
 variable "tags" {
   description = "实例标签列表"
   type        = list(string)
@@ -55,16 +69,27 @@ variable "user_data" {
 }
 
 resource "vultr_instance" "this" {
-  label        = var.label
-  region       = var.region
-  plan         = var.plan
-  os_id        = var.os_id
-  enable_ipv6  = var.enable_ipv6
-  backups      = var.backups ? "enabled" : "disabled"
-  tags         = var.tags
-  vpc_ids      = var.vpc_id == null ? [] : [var.vpc_id]
-  ssh_key_ids  = var.ssh_key_ids
-  user_data    = var.user_data
+  label       = var.label
+  region      = var.region
+  plan        = var.plan
+  os_id       = var.os_id
+  enable_ipv6 = var.enable_ipv6
+  backups     = var.backups ? "enabled" : "disabled"
+  tags        = var.tags
+  vpc_ids     = var.vpc_id == null ? [] : [var.vpc_id]
+  ssh_key_ids = var.ssh_key_ids
+  user_data   = var.user_data
+
+  dynamic "backups_schedule" {
+    for_each = var.backups ? [var.backups_schedule] : []
+
+    content {
+      type = backups_schedule.value.type
+      hour = backups_schedule.value.hour
+      dow  = backups_schedule.value.dow
+      dom  = backups_schedule.value.dom
+    }
+  }
 }
 
 output "instance_id" {
