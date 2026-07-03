@@ -11,12 +11,13 @@ hosts:
   - name: infra-platform-node
     os_name: "Debian 13 x64 (trixie)"
     plan: {{ env.get('INSTANCE_PLAN_API', 'vc2-4c-8gb') }}
-    backups: false
+    backups: true
     enable_ipv6: true
     ansible_user: root
-    groups: [infra_platform, debian]
-    tags: [debian]
+    groups: [infra_platform, debian, database]
+    tags: [debian, database]
     host_vars:
       role: primary
       service_domains: 
         - infra-platform.onwalk.net
+        - postgresql-platform.onwalk.net

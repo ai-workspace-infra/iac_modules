@@ -11,12 +11,13 @@ hosts:
   - name: ai-workspace-node
     os_name: "Debian 13 x64 (trixie)"
     plan: {{ env.get('INSTANCE_PLAN_API', 'vc2-4c-8gb') }}
-    backups: false
+    backups: true
     enable_ipv6: true
     ansible_user: root
-    groups: [ai_workspace, debian]
-    tags: [debian]
+    groups: [ai_workspace, debian, database]
+    tags: [debian, database]
     host_vars:
       role: primary
       service_domains: 
         - ai-workspace.onwalk.net
+        - postgresql-ai-workspace.onwalk.net
