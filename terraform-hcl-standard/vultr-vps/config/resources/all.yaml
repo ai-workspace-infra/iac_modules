@@ -33,5 +33,4 @@ hosts:
       role: primary
       service_domains: 
         - www.onwalk.net
-        - console.onwalk.net
         - site-migration-toolkit.onwalk.net
