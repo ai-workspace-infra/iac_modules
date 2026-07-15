@@ -27,7 +27,7 @@ data "vultr_os" "{{ hid }}" {
 module "compute_{{ hid }}" {
   source = "../../modules/compute"
 
-  label       = "${var.name_prefix}-{{ host.name }}"
+  label       = var.name_prefix != "" ? "${var.name_prefix}-{{ host.name }}" : "{{ host.name }}"
   region      = {% if host.region %}"{{ host.region }}"{% else %}var.region{% endif %}
 
   plan        = "{{ host.plan | default('vc2-4c-8gb') }}"
@@ -35,7 +35,7 @@ module "compute_{{ hid }}" {
 
   enable_ipv6 = {{ 'true' if host.get('enable_ipv6', true) else 'false' }}
   backups     = {{ 'true' if host.get('backups', false) else 'false' }}
-  tags        = concat([var.name_prefix], {{ host.get('tags', []) | tojson }})
+  tags        = [for t in concat([var.name_prefix], {{ host.get('tags', []) | tojson }}) : t if t != ""]
   ssh_key_ids = [{% for k in ssh_keys %}vultr_ssh_key.{{ k.name | tf_id }}.id{{ ", " if not loop.last }}{% endfor %}]
   user_data   = file(var.user_data_file)
 }
