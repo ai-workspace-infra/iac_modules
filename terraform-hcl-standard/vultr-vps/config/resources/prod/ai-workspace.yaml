@@ -1,0 +1,23 @@
+global:
+  region: nrt
+  name_prefix: ai-workspace-prod
+  user_data_file: cloud-init.yaml
+
+ssh_keys:
+  - name: ai-workspace-admin
+    public: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDEsuS135lzjVvlH2iNrKz23lDFr7b686xs4d2HINP2glFPmgkgx1D6Dqwisb1UbhWHZmUUzRxXeNlE8fiaO0TXN/C0dsdUxgopnQRyakcA+gfJqqb38Syx8eqdC7mQy9ygOf763dWm6d/SYZ8WgNWLldk4QF9DiZOW9K22DMtY4/1Cqe/YE/WGpOMVr9T9BwvmOjarjWp2OPbx6RVlSOd735Mze5X+cJ9QqdLaisCiSoJ3j9S6dulcxm+7ghPfATvxlJyZWSrRrVqnmV45lPbeuUHlIEyuK1PK2MS6NtUP03ZhdRYJQKZLECpR5xAO/BliOtDdRornvHV1gutYD8/n3IS8sRVzYPvN9DuOhzBnBQUgciu2++R8zMfdVoH7mSbsE8u++vMcBk3UJ1Op0Ct+trl2bsnue96cAnoiII08JKwAaczD5uZIGhdkGV8zKnChNCjzCxP0i4PV/MYW04eWmH+E8G81zq4ZsvrvPYmilBbRrkwHvvbPba3SSb2F2As= shenlan@shenlandeMacBook-Air-2.local"
+
+hosts:
+  - name: ai-workspace-node-prod
+    os_name: "Debian 13 x64 (trixie)"
+    plan: {{ env.get('INSTANCE_PLAN_API', 'vc2-4c-8gb') }}
+    backups: true
+    enable_ipv6: true
+    ansible_user: root
+    groups: [ai_workspace, debian, database]
+    tags: [debian, database]
+    host_vars:
+      role: primary
+      service_domains: 
+        - ai-workspace.onwalk.net
+        - postgresql-ai-workspace.onwalk.net

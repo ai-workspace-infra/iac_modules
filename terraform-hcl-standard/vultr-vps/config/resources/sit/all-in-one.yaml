@@ -11,7 +11,7 @@
 
 global:
   region: nrt          # 默认区域：东京。可选 ewr/sgp/fra ...
-  name_prefix: site-migration-toolkit
+  name_prefix: ai-workspace
   user_data_file: cloud-init.yaml
 
 # 注入实例的登录公钥（公钥非敏感，可入库；私钥/API Key 不要写这里）
@@ -21,58 +21,29 @@ ssh_keys:
 
 # 主机清单。map key 风格用 name 字段；每台机器渲染成一个独立 module 块。
 hosts:
-  - name: console.onwalk.net
-    os_name: "Debian 13 x64 (trixie)"
-    plan: vc2-2c-4gb
-    backups: true
-    enable_ipv6: true
-    ansible_user: root
-    groups: [web_saas, debian, database]
-    tags: [debian, database]
-    host_vars:
-      role: primary
-      service_domains:
-        - console.onwalk.net
-        - postgresql-saas.onwalk.net
-
-  - name: infra-platform-node
-    os_name: "Debian 13 x64 (trixie)"
-    plan: vc2-2c-4gb
-    backups: true
-    enable_ipv6: true
-    ansible_user: root
-    groups: [infra_platform, debian, database]
-    tags: [debian, database]
-    host_vars:
-      role: primary
-      service_domains:
-        - infra-platform.onwalk.net
-        - postgresql-platform.onwalk.net
-
-  - name: ai-workspace-node
-    os_name: "Debian 13 x64 (trixie)"
-    plan: vc2-4c-8gb
-    backups: true
-    enable_ipv6: true
+  - name: ai-debian13
+    os_name: "Debian 13 x64 (trixie)"   # Vultr 实际镜像名（含 trixie）；也可写 os_id: 2625
+    plan: vc2-4c-8gb              # 2 核 4G（临时缩配，验证后改回 vc2-4c-8gb）
+    backups: true                # 开启备份以保护数据库
+    enable_ipv6: true             # 公网 IPv4 默认分配，这里附带开 IPv6
     ansible_user: root
     groups: [ai_workspace, debian, database]
     tags: [debian, database]
     host_vars:
       role: primary
-      service_domains:
-        - ai-workspace.onwalk.net
+      # 逗号分隔的服务域名；cloudflare_dns 角色据此为本机 IP 建 A 记录
+      service_domains: 
+        - xworkmate-bridge-debian-13.svc.plus
         - postgresql-ai-workspace.onwalk.net
 
-  - name: agent-proxy-node
-    os_name: "Debian 13 x64 (trixie)"
-    plan: vc2-1c-2gb
+  - name: ai-ubuntu2604
+    os_name: "Ubuntu 26.04 LTS x64"
+    plan: vc2-4c-8gb
     backups: false
     enable_ipv6: true
     ansible_user: root
-    groups: [agent_proxy, debian]
-    tags: [debian]
+    groups: [ai_workspace, ubuntu]
+    tags: [ubuntu]
     host_vars:
-      role: primary
-      service_domains:
-        - agent-proxy.onwalk.net
-
+      role: secondary
+      service_domains: xworkmate-bridge-ubuntu-26.svc.plus
