@@ -22,5 +22,5 @@ hosts:
     host_vars:
       role: primary
       service_domains:
-        - console.uat.svc.plus
-        - postgresql-saas.uat.svc.plus
+        - console-uat.svc.plus
+        - postgresql-saas-uat.svc.plus
