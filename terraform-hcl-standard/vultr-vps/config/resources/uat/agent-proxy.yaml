@@ -19,4 +19,4 @@ hosts:
     host_vars:
       role: primary
       service_domains:
-        - agent-proxy.onwalk.net
+        - agent-proxy.{{ env.get('TARGET_DOMAIN_BASE', 'onwalk.net') }}

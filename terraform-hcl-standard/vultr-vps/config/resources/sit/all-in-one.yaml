@@ -33,8 +33,8 @@ hosts:
       role: primary
       # 逗号分隔的服务域名；cloudflare_dns 角色据此为本机 IP 建 A 记录
       service_domains: 
-        - xworkmate-bridge-debian-13.svc.plus
-        - postgresql-ai-workspace.onwalk.net
+        - xworkmate-bridge-debian-13.{{ env.get('TARGET_DOMAIN_BASE', 'svc.plus') }}
+        - postgresql-ai-workspace.{{ env.get('TARGET_DOMAIN_BASE', 'onwalk.net') }}
 
   - name: ai-ubuntu2604
     os_name: "Ubuntu 26.04 LTS x64"
@@ -46,4 +46,4 @@ hosts:
     tags: [ubuntu]
     host_vars:
       role: secondary
-      service_domains: xworkmate-bridge-ubuntu-26.svc.plus
+      service_domains: xworkmate-bridge-ubuntu-26.{{ env.get('TARGET_DOMAIN_BASE', 'svc.plus') }}
