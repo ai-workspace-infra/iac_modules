@@ -19,5 +19,5 @@ hosts:
     host_vars:
       role: primary
       service_domains: 
-        - infra-platform.{{ env.get('TARGET_DOMAIN_BASE', 'onwalk.net') }}
-        - postgresql-platform.{{ env.get('TARGET_DOMAIN_BASE', 'onwalk.net') }}
+        - infra-platform.{{ env['TARGET_DOMAIN_BASE'] }}
+        - postgresql-platform.{{ env['TARGET_DOMAIN_BASE'] }}
