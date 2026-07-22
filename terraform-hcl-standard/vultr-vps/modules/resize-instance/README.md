@@ -12,3 +12,7 @@ workflow.
 
 The replacement resource has `prevent_destroy = true`; cleanup must be an
 explicit, separately approved operation after the observation window.
+
+Automatic backups default to enabled. The module supplies the required Vultr
+`backups_schedule` block with a daily schedule; callers can override
+`backup_schedule_type` or set `backups = false`.
