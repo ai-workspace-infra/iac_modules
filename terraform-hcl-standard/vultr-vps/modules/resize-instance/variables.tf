@@ -37,6 +37,17 @@ variable "backups" {
   default     = true
 }
 
+variable "backup_schedule_type" {
+  description = "Vultr backup schedule type when automatic backups are enabled."
+  type        = string
+  default     = "daily"
+
+  validation {
+    condition     = contains(["daily", "weekly", "monthly", "daily_alt_even", "daily_alt_odd"], var.backup_schedule_type)
+    error_message = "backup_schedule_type must be a Vultr-supported schedule type."
+  }
+}
+
 variable "tags" {
   description = "Tags applied to the replacement instance."
   type        = list(string)

@@ -11,6 +11,13 @@ resource "vultr_instance" "replacement" {
   ssh_key_ids = var.ssh_key_ids
   user_data   = var.user_data
 
+  dynamic "backups_schedule" {
+    for_each = var.backups ? [1] : []
+    content {
+      type = var.backup_schedule_type
+    }
+  }
+
   lifecycle {
     prevent_destroy = true
   }
