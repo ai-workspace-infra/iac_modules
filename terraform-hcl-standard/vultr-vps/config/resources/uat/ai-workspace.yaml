@@ -19,5 +19,5 @@ hosts:
     host_vars:
       role: primary
       service_domains: 
-        - ai-workspace.{{ env.get('TARGET_DOMAIN_BASE', 'onwalk.net') }}
-        - postgresql-ai-workspace.{{ env.get('TARGET_DOMAIN_BASE', 'onwalk.net') }}
+        - ai-workspace.{{ env['TARGET_DOMAIN_BASE'] }}
+        - postgresql-ai-workspace.{{ env['TARGET_DOMAIN_BASE'] }}
