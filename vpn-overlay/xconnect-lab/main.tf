@@ -57,17 +57,17 @@ variable "ssh_debug_ingress_cidrs" {
   }
 }
 
-variable "desktop_ingress_cidrs" {
+variable "gateway_transport_ingress_cidrs" {
   type     = list(string)
   default  = []
   nullable = true
   validation {
     condition = try(
-      var.desktop_ingress_cidrs != null &&
-      length(var.desktop_ingress_cidrs) <= 2 &&
-      length(distinct(var.desktop_ingress_cidrs)) == length(var.desktop_ingress_cidrs) &&
+      var.gateway_transport_ingress_cidrs != null &&
+      length(var.gateway_transport_ingress_cidrs) <= 2 &&
+      length(distinct(var.gateway_transport_ingress_cidrs)) == length(var.gateway_transport_ingress_cidrs) &&
       alltrue([
-        for cidr in var.desktop_ingress_cidrs : try(
+        for cidr in var.gateway_transport_ingress_cidrs : try(
           can(cidrnetmask(cidr)) &&
           cidr != "" &&
           cidr != "0.0.0.0/0" &&
@@ -78,7 +78,7 @@ variable "desktop_ingress_cidrs" {
       ]),
       false
     )
-    error_message = "desktop_ingress_cidrs must contain at most two unique canonical IPv4 /32 CIDRs."
+    error_message = "gateway_transport_ingress_cidrs must contain at most two unique canonical IPv4 /32 CIDRs."
   }
 }
 
@@ -139,7 +139,7 @@ provider "aws" {
 data "aws_vpc" "uat" { default = true }
 
 locals {
-  desktop_access_enabled = length(var.desktop_ingress_cidrs) > 0
+  gateway_transport_access_enabled = length(var.gateway_transport_ingress_cidrs) > 0
 }
 
 resource "aws_security_group" "client" {
@@ -196,7 +196,7 @@ resource "aws_security_group" "gateway" {
     description     = "Xray TLS from the controlled client only"
   }
   dynamic "ingress" {
-    for_each = var.desktop_ingress_cidrs
+    for_each = var.gateway_transport_ingress_cidrs
     content {
       from_port   = 443
       to_port     = 443
@@ -285,9 +285,9 @@ output "client_private_ip" { value = aws_instance.client.private_ip }
 output "gateway_ip" { value = aws_instance.gateway.public_ip }
 output "gateway_private_ip" { value = aws_instance.gateway.private_ip }
 output "gateway_transport_ip" {
-  value = local.desktop_access_enabled ? aws_instance.gateway.public_ip : aws_instance.gateway.private_ip
+  value = local.gateway_transport_access_enabled ? aws_instance.gateway.public_ip : aws_instance.gateway.private_ip
 }
-output "desktop_access_enabled" { value = local.desktop_access_enabled }
+output "gateway_transport_access_enabled" { value = local.gateway_transport_access_enabled }
 output "ssh_debug_access_enabled" { value = length(var.ssh_debug_ingress_cidrs) > 0 }
 output "gateway_ssh_user" { value = "ubuntu" }
 

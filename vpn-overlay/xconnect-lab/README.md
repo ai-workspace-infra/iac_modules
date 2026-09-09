@@ -27,16 +27,17 @@ Each Spot instance has a five-minute Terraform create timeout. A capacity
 shortage therefore fails fast and reaches exact-run cleanup instead of holding
 the 90-minute workflow without reaching runtime validation.
 
-Desktop access is opt-in through `desktop_ingress_cidrs`, which defaults to an
-empty list. It accepts at most two unique canonical IPv4 `/32` values, for
-example `198.51.100.42/32`. Each value adds one inline Gateway security-group
-rule for TCP 443 only. Empty values, non-canonical values, non-`/32` networks,
-IPv6, `0.0.0.0/0`, and more than two entries are rejected. This does not open
-SSH, TCP 8443, or WireGuard UDP to the desktop CIDRs. The separate
+Public Gateway transport access is opt-in through
+`gateway_transport_ingress_cidrs`, which defaults to an empty list. It accepts
+at most two unique canonical IPv4 `/32` values, for example
+`198.51.100.42/32`. Each value adds one inline Gateway security-group rule for
+TCP 443 only. Empty values, non-canonical values, non-`/32` networks, IPv6,
+`0.0.0.0/0`, and more than two entries are rejected. This does not open
+SSH, TCP 8443, or WireGuard UDP to the supplied CIDRs. The separate
 `ssh_debug_ingress_cidrs` input only adds TCP 22 to both disposable nodes for
 the explicitly supplied operator `/32` values.
 
-When the list is nonempty, `desktop_access_enabled` is `true` and
+When the list is nonempty, `gateway_transport_access_enabled` is `true` and
 `gateway_transport_ip` is the Gateway public IP so an external desktop can
 reach the TLS transport. With the default empty list, desktop access is
 disabled and `gateway_transport_ip` remains the Gateway private IP for the
