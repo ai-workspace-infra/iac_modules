@@ -27,13 +27,17 @@ resource "aws_instance" "this" {
     }
   }
 
-  # UAT Spot nodes are intentionally ephemeral. The shutdown is initiated on
-  # the instance so AWS applies the terminate behavior above without requiring
-  # a long-running CI job or separately privileged scheduler.
-  user_data = var.max_runtime_minutes > 0 ? format(
-    "#!/bin/sh\nset -eu\n(\n  sleep %d\n  /sbin/shutdown -h now\n) >/var/log/instance-runtime-limit.log 2>&1 &\n",
-    var.max_runtime_minutes * 60,
-  ) : null
+  # Ensure cloud images expose SSH even when their regional defaults differ.
+  # The EC2 key pair is injected by cloud-init before user scripts run; this
+  # explicitly enables the service that accepts that key. UAT Spot nodes also
+  # retain their bounded runtime without a long-running CI scheduler.
+  user_data = format(
+    "#!/bin/sh\nset -eu\nsystemctl enable --now ssh || systemctl enable --now sshd || true\n%s",
+    var.max_runtime_minutes > 0 ? format(
+      "(\n  sleep %d\n  /sbin/shutdown -h now\n) >/var/log/instance-runtime-limit.log 2>&1 &\n",
+      var.max_runtime_minutes * 60,
+    ) : "",
+  )
 
   # 明确由 env 层传入，无任何自动推断
   subnet_id = var.subnet_id
