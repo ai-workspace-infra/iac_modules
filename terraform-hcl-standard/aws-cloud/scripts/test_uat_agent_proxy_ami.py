@@ -24,9 +24,10 @@ hk_host = next(
 assert hk_host["aws_provider"] == "hk"
 assert hk_host["aws_region"] == "ap-east-1"
 assert hk_host["ansible_user"] == "admin"
-assert hk_host["ami_id"] == "ami-0a92bca468ca25606"
+assert hk_host["ami_id"] == "ami-01366656af1e13a9f"
 assert "ami_name_patterns" not in hk_host
-assert hk_host["os_name"].startswith("Debian 13 ARM64")
+assert hk_host["os_name"].startswith("Debian 13 amd64")
+assert hk_host["plan"] == "t3.micro"
 assert hk_host["billing_mode"] == "on_demand"
 assert hk_host["spot_instance"] is False
 assert hk_host["max_runtime_minutes"] == 60
@@ -40,7 +41,8 @@ rendered = environment.get_template("hosts.tf.j2").render(
 )
 
 assert 'data "aws_ami" "debian_agent_proxy_node_uat_hk"' not in rendered
-assert 'ami  = "ami-0a92bca468ca25606"' in rendered
-assert 'os_id       = "ami-0a92bca468ca25606"' in rendered
+assert 'type = "t3.micro"' in rendered
+assert 'ami  = "ami-01366656af1e13a9f"' in rendered
+assert 'os_id       = "ami-01366656af1e13a9f"' in rendered
 
 print("test_uat_agent_proxy_ami: PASS")
