@@ -48,11 +48,11 @@ hosts:
   - name: agent-proxy-node-uat-hk
     node_id: ap-uat-hk
     short_hostname: ap-uat-hk
-    display_name: "HK XConnect · Hong Kong Spot"
+    display_name: "HK XConnect · Hong Kong Ephemeral"
     cloud_provider: aws
     cloud_region: ap-east-1
     location: hk
-    node_label: hk-spot
+    node_label: hk-ephemeral
     aws_provider: hk
     aws_region: ap-east-1
     # Pin the official Debian 12 ARM64 image for ap-east-1. The shared
@@ -61,10 +61,12 @@ hosts:
     # Debian publishes this regional image for SSH user `admin`.
     os_name: "Debian 12 ARM64 (bookworm, pinned for ap-east-1 SSH compatibility)"
     ami_id: "ami-03de17a63e9b79ec4"
-    # All UAT XConnect regions are short-lived 2 vCPU / 1 GiB Spot nodes.
+    # ap-east-1 one-time Spot instances repeatedly reached running/TCP-ready
+    # state without ever serving an SSH banner. Keep HK ephemeral through the
+    # one-hour shutdown policy, but use on-demand capacity for reliable boot.
     plan: {{ env.get('AGENT_PROXY_HK_PLAN_API', 't4g.micro') }}
-    billing_mode: spot
-    spot_instance: true
+    billing_mode: on_demand
+    spot_instance: false
     max_runtime_minutes: 60
     elastic_ip: false
     deletion_protection: false
@@ -72,7 +74,7 @@ hosts:
     enable_ipv6: true
     ansible_user: admin
     groups: [agent_proxy, debian]
-    tags: [debian, uat, hk, spot]
+    tags: [debian, uat, hk, ephemeral]
     host_vars:
       role: regional
       service_domains:
