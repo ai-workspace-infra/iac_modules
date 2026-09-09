@@ -8,7 +8,7 @@ symmetrical nodes:
 | XConnect-Gateway | `relay/service` (`role=relay`) | Independent Linux node, external WireGuard + external Xray, forwarding and relay health |
 | XConnect-One | `controlled-client` | Independent Linux node, external WireGuard + external Xray, CLI-driven sync/config/start/join |
 
-The UAT `gateway_provider` is `aws-spot`. Both Gateway and One are AWS EC2
+The UAT `gateway_provider` defaults to `aws-spot`. In that mode both Gateway and One are AWS EC2
 one-time Spot instances attached to the existing UAT default VPC. EC2 selects
 a default subnet and availability zone with capacity instead of pinning both
 nodes to the lexicographically first subnet. The nodes retain
@@ -57,7 +57,11 @@ A Spot instance can still be reclaimed earlier by AWS; the one-time Spot
 request options are not used as the runtime TTL, and rebooting does not extend
 the absolute expiry.
 
-This UAT validation module accepts only `gateway_provider = "aws-spot"`; it
+For a persistent non-IaC Gateway, set `gateway_provider = "external"` and provide
+`external_gateway_ip`. The module then creates only the disposable One Spot and
+returns the external Gateway address in its outputs; it does not create a Gateway
+security group or instance. The external host is expected to be bootstrapped by
+the dedicated deployment path and is never destroyed by this state. This module
 does not initialize or require a Vultr provider.
 
 XConnect Zero is the product control plane: formal Accounts APIs (devices,
@@ -73,7 +77,7 @@ The client is pinned to `t4g.micro` (2 vCPU / 1 GiB) and the Gateway to
 `t4g.small` (2 vCPU / 2 GiB). Both use an ARM64 Ubuntu image and expire at the
 workflow-provided absolute deadline, currently 60 minutes for new apply runs.
 Historical 120-minute leases are cleanup-only compatibility cases. The consuming workflow in
-`platform-ops-toolkit/.github/workflows/xconnect-cloud-lab.yml` downloads
+`platform-ops-toolkit/.github/workflows/xconnect-zero-cloud.yaml` downloads
 version-pinned project Release artifacts for the formal Gateway, One CLI and
 external Xray, then bootstraps both nodes over SSH. Verification checks Gateway
 role/bootstrap, WireGuard and Xray service
