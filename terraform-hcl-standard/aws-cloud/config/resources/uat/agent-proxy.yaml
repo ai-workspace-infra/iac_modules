@@ -55,6 +55,10 @@ hosts:
     node_label: hk-ephemeral
     aws_provider: hk
     aws_region: ap-east-1
+    # The default placement repeatedly assigned the 172.31.0.0/20 subnet and
+    # produced an instance whose public IPv4 completed TCP handshakes without
+    # forwarding application data. Pin this rebuild to a different AZ/subnet.
+    availability_zone: ap-east-1b
     # ap-east-1 ARM64 instances repeatedly reached running/TCP-ready state
     # without serving an SSH banner across Debian 12/13 and Spot/on-demand.
     # Use the current official Debian 13 amd64 image on equivalent t3.micro
