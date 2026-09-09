@@ -38,6 +38,10 @@ resource "aws_instance" "this" {
       var.max_runtime_minutes * 60,
     ) : "",
   )
+  # A one-time Spot instance cannot be stopped to apply changed user data.
+  # Replace ephemeral Spot capacity instead; on-demand production nodes keep
+  # the provider's in-place stop/start behavior.
+  user_data_replace_on_change = var.spot_instance
 
   # 明确由 env 层传入，无任何自动推断
   subnet_id = var.subnet_id
