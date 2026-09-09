@@ -55,7 +55,12 @@ hosts:
     node_label: hk-spot
     aws_provider: hk
     aws_region: ap-east-1
-    os_name: "Debian 13 ARM64 (preferred; Debian 12 fallback)"
+    # Pin the official Debian 12 ARM64 image for ap-east-1. The shared
+    # Debian 13/12 most_recent lookup selected an HK image that opened TCP/22
+    # but never accepted the injected EC2 key pair, blocking bootstrap.
+    # Debian publishes this regional image for SSH user `admin`.
+    os_name: "Debian 12 ARM64 (bookworm, pinned for ap-east-1 SSH compatibility)"
+    ami_id: "ami-03de17a63e9b79ec4"
     # All UAT XConnect regions are short-lived 2 vCPU / 1 GiB Spot nodes.
     plan: {{ env.get('AGENT_PROXY_HK_PLAN_API', 't4g.micro') }}
     billing_mode: spot
