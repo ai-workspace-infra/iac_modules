@@ -27,6 +27,17 @@ variable "keypair_name" {
   description = "KeyPair name"
 }
 
+variable "ssh_port" {
+  type        = number
+  description = "TCP port exposed by sshd"
+  default     = 22
+
+  validation {
+    condition     = var.ssh_port >= 1 && var.ssh_port <= 65535
+    error_message = "ssh_port must be between 1 and 65535."
+  }
+}
+
 variable "tags" {
   type        = map(string)
   description = "Common tags"

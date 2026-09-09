@@ -90,8 +90,8 @@ resource "aws_security_group" "sg_{{ hid }}" {
   vpc_id      = data.aws_vpc.default_{{ hid }}.id
 
   ingress {
-    from_port   = 22
-    to_port     = 22
+    from_port   = {{ host.get('ssh_port', 22) }}
+    to_port     = {{ host.get('ssh_port', 22) }}
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -152,6 +152,7 @@ module "compute_{{ hid }}" {
 {% endif %}
   sg_id               = aws_security_group.sg_{{ hid }}.id
   keypair_name        = aws_key_pair.{{ host_key_id if provider_alias != 'default' else base_key_id }}.key_name
+  ssh_port            = {{ host.get('ssh_port', 22) }}
   elastic_ip          = {{ host.get('elastic_ip', false) | tojson }}
   deletion_protection = {{ host.get('deletion_protection', false) | tojson }}
   spot_instance       = {{ host.get('spot_instance', false) | tojson }}

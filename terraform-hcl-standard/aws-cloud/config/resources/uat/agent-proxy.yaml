@@ -73,6 +73,10 @@ hosts:
     backups: false
     enable_ipv6: true
     ansible_user: admin
+    # Port 22 in ap-east-1 completes TCP setup from GitHub-hosted runners but
+    # never forwards the OpenSSH banner, even though the guest ssh.service is
+    # active. Use a dedicated management port for this ephemeral UAT node.
+    ssh_port: 2222
     groups: [agent_proxy, debian]
     tags: [debian, uat, hk, ephemeral]
     host_vars:

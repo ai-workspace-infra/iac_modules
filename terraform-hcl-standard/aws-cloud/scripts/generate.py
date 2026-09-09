@@ -232,6 +232,7 @@ def cmd_inventory(args):
         host_vars["billing_mode"] = host.get("billing_mode", "on_demand")
         host_vars["spot_instance"] = host.get("spot_instance", False)
         host_vars["max_runtime_minutes"] = host.get("max_runtime_minutes", 0)
+        host_vars["ansible_port"] = host.get("ssh_port", 22)
 
         # inventory_hostname = service_domains 的首个 FQDN（动态取自资源声明 yaml）；
         # 无 service_domains 时回退到 name。CMDB / inventory / 分组均以此为键。
@@ -259,6 +260,7 @@ def cmd_inventory(args):
             "spot_instance": host_vars["spot_instance"],
             "max_runtime_minutes": host_vars["max_runtime_minutes"],
             "ansible_user": host.get("ansible_user", DEFAULT_ANSIBLE_USER),
+            "ansible_port": host.get("ssh_port", 22),
             "groups": host.get("groups", []) or [],
             "tags": host.get("tags", []) or [],
             "host_vars": host_vars,
