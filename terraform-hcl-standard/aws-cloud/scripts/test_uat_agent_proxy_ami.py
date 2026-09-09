@@ -32,6 +32,7 @@ assert hk_host["billing_mode"] == "on_demand"
 assert hk_host["spot_instance"] is False
 assert hk_host["max_runtime_minutes"] == 60
 assert "ssh_port" not in hk_host
+assert hk_host["availability_zone"] == "ap-east-1b"
 
 environment = Environment(loader=FileSystemLoader(template_dir))
 environment.filters["tf_id"] = lambda value: re.sub(
@@ -47,5 +48,7 @@ assert 'ami  = "ami-01366656af1e13a9f"' in rendered
 assert 'os_id       = "ami-01366656af1e13a9f"' in rendered
 assert "from_port   = 22" in rendered
 assert "ssh_port            = 22" in rendered
+assert 'values = ["ap-east-1b"]' in rendered
+assert "subnet_id           = data.aws_subnet.selected_agent_proxy_node_uat_hk.id" in rendered
 
 print("test_uat_agent_proxy_ami: PASS")
