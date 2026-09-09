@@ -27,21 +27,16 @@ resource "aws_instance" "this" {
     }
   }
 
-  # Ensure cloud images expose SSH even when their regional defaults differ.
-  # The EC2 key pair is injected by cloud-init before user scripts run; this
-  # explicitly enables the service that accepts that key. UAT Spot nodes also
-  # retain their bounded runtime without a long-running CI scheduler.
-  user_data = format(
-    "#!/bin/sh\nset -eu\nsystemctl enable --now ssh || systemctl enable --now sshd || true\n%s",
-    var.max_runtime_minutes > 0 ? format(
-      "(\n  sleep %d\n  /sbin/shutdown -h now\n) >/var/log/instance-runtime-limit.log 2>&1 &\n",
-      var.max_runtime_minutes * 60,
-    ) : "",
-  )
-  # A one-time Spot instance cannot be stopped to apply changed user data.
-  # Replace ephemeral Spot capacity instead; on-demand production nodes keep
-  # the provider's in-place stop/start behavior.
-  user_data_replace_on_change = var.spot_instance
+  # Ephemeral nodes explicitly enable SSH and terminate after their bounded
+  # runtime. Including the capacity mode makes Spot/on-demand transitions
+  # observable to Terraform and therefore forces a clean replacement. Stable
+  # production nodes retain their historical null user data.
+  user_data = var.max_runtime_minutes > 0 ? format(
+    "#!/bin/sh\nset -eu\n# capacity-mode: %s\nsystemctl enable --now ssh || systemctl enable --now sshd || true\n(\n  sleep %d\n  /sbin/shutdown -h now\n) >/var/log/instance-runtime-limit.log 2>&1 &\n",
+    var.spot_instance ? "spot" : "on-demand",
+    var.max_runtime_minutes * 60,
+  ) : null
+  user_data_replace_on_change = var.max_runtime_minutes > 0
 
   # 明确由 env 层传入，无任何自动推断
   subnet_id = var.subnet_id
