@@ -20,6 +20,7 @@ from jinja2 import Template
 
 data = yaml.safe_load(Template(config.read_text()).render(env=os.environ))
 assert data["global"]["aws_us_region"] == "us-west-2"
+assert data["global"]["aws_hk_region"] == "ap-southeast-1"
 host = next(item for item in data["hosts"] if item["name"] == "agent-proxy-node-prod")
 assert host["node_id"] == "ap-prod-tky"
 assert host["short_hostname"] == "ap-prod-tky"
@@ -68,5 +69,22 @@ assert "max_runtime_minutes = 60" in rendered
 assert "subnet_id           = null" in rendered
 assert 'values = ["debian-13-arm64-*", "debian-12-arm64-*"]' in rendered
 assert 'name_prefix = var.name_prefix != "" ? "${var.name_prefix}-ap-prod-us"' in rendered
+
+hk_host = next(item for item in data["hosts"] if item["name"] == "agent-proxy-node-prod-hk")
+assert hk_host["node_id"] == "ap-prod-hk"
+assert hk_host["location"] == "hk"
+assert hk_host["aws_provider"] == "hk"
+assert hk_host["cloud_region"] == "ap-southeast-1"
+assert hk_host["aws_region"] == "ap-southeast-1"
+assert "ssh_port" not in hk_host
+assert hk_host["spot_instance"] is True
+assert hk_host["max_runtime_minutes"] == 60
+assert hk_host["elastic_ip"] is False
+assert "agent-proxy-selfhost-prod-hk.svc.plus" in hk_host["host_vars"]["service_domains"]
+assert 'resource "aws_key_pair" "key_agent_proxy_node_prod_hk_ai_workspace_admin"' in rendered
+assert "provider = aws.hk" in rendered
+assert "from_port   = 22" in rendered
+assert "ssh_port            = 22" in rendered
+assert 'name_prefix = var.name_prefix != "" ? "${var.name_prefix}-ap-prod-hk"' in rendered
 
 print("test_prod_agent_proxy_security_group: PASS")
