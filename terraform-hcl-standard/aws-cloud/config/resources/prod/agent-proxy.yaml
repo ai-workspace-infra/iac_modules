@@ -4,9 +4,10 @@ global:
   # US Spot edge: Oregon is preferred for Asia-facing traffic. Keep this
   # configurable so capacity policy can move without changing node identity.
   aws_us_region: us-west-2
-  # HK Spot edge uses its own provider alias so Terraform discovers capacity
-  # in the local default VPC without coupling it to the Tokyo state.
-  aws_hk_region: ap-east-1
+  # Keep the logical HK entry/domain stable while its ephemeral runtime uses
+  # Singapore. UAT proved the full SSH/bootstrap/service/observability path on
+  # port 22 there, while ap-east-1 accepted TCP without returning an SSH banner.
+  aws_hk_region: ap-southeast-1
   name_prefix: agent-proxy-prod
   user_data_file: cloud-init.yaml
 
@@ -101,15 +102,15 @@ hosts:
   - name: agent-proxy-node-prod-hk
     node_id: ap-prod-hk
     short_hostname: ap-prod-hk
-    display_name: "ap-prod-hk (hk-spot)"
+    display_name: "ap-prod-hk (hk-spot · Singapore fallback)"
     cloud_provider: aws
-    cloud_region: ap-east-1
+    cloud_region: ap-southeast-1
     location: hk
     node_label: hk-spot
     aws_provider: hk
-    aws_region: ap-east-1
-    # Dynamic region node: prefer Debian 13 ARM64 and allow the existing
-    # generator fallback to Debian 12 ARM64 when needed.
+    aws_region: ap-southeast-1
+    # Resolve the official Debian ARM64 image in the physical runtime region;
+    # the logical HK identity and public service domain remain unchanged.
     os_name: "Debian 13 ARM64 (preferred; Debian 12 fallback)"
     plan: {{ env.get('AGENT_PROXY_HK_PLAN_API', 't4g.micro') }}
     billing_mode: spot
