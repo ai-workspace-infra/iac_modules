@@ -22,9 +22,9 @@ hk_host = next(
 )
 
 assert hk_host["aws_provider"] == "hk"
-assert data["global"]["aws_hk_region"] == "ap-east-2"
-assert hk_host["cloud_region"] == "ap-east-2"
-assert hk_host["aws_region"] == "ap-east-2"
+assert data["global"]["aws_hk_region"] == "ap-southeast-1"
+assert hk_host["cloud_region"] == "ap-southeast-1"
+assert hk_host["aws_region"] == "ap-southeast-1"
 assert hk_host["ansible_user"] == "admin"
 assert "ami_id" not in hk_host
 assert hk_host["ami_name_patterns"] == ["debian-13-amd64-*"]

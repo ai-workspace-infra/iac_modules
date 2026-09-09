@@ -3,8 +3,9 @@ global:
   aws_region: ap-northeast-1
   aws_us_region: us-west-2
   # Keep the logical HK entry/domain stable while its ephemeral runtime uses
-  # the Taipei region to avoid the ap-east-1 public port-22 data-path failure.
-  aws_hk_region: ap-east-2
+  # Singapore to avoid the ap-east-1 public port-22 data-path failure. Taipei
+  # is not enabled for the deployment account's current OIDC session.
+  aws_hk_region: ap-southeast-1
   name_prefix: agent-proxy-uat
   user_data_file: cloud-init.yaml
 
@@ -50,16 +51,16 @@ hosts:
   - name: agent-proxy-node-uat-hk
     node_id: ap-uat-hk
     short_hostname: ap-uat-hk
-    display_name: "HK XConnect · Taipei Fallback"
+    display_name: "HK XConnect · Singapore Fallback"
     cloud_provider: aws
-    cloud_region: ap-east-2
+    cloud_region: ap-southeast-1
     location: hk
     node_label: hk-ephemeral
     aws_provider: hk
-    aws_region: ap-east-2
+    aws_region: ap-southeast-1
     # AMI IDs are regional. Resolve the newest official Debian 13 amd64 image
-    # after moving this logical edge from Hong Kong to Taipei.
-    os_name: "Debian 13 amd64 (Taipei fallback)"
+    # after moving this logical edge from Hong Kong to Singapore.
+    os_name: "Debian 13 amd64 (Singapore fallback)"
     ami_name_patterns: ["debian-13-amd64-*"]
     # Keep the node ephemeral through the one-hour shutdown policy while using
     # on-demand capacity for a deterministic cross-region validation.
