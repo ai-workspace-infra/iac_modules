@@ -41,7 +41,8 @@ grep -Fq 'cidr == format("%s/32", cidrhost(cidr, 0))' "${main}"
 grep -Fq 'dynamic "ingress"' "${main}"
 grep -Fq 'for_each = var.gateway_transport_ingress_cidrs' "${main}"
 grep -Fq 'cidr_blocks = [ingress.value]' "${main}"
-grep -Fq 'local.gateway_transport_access_enabled ? aws_instance.gateway.public_ip : aws_instance.gateway.private_ip' "${main}"
+grep -Fq 'local.gateway_transport_access_enabled ? aws_instance.gateway[0].public_ip : aws_instance.gateway[0].private_ip' "${main}"
+grep -Fq 'var.gateway_provider == "external" ? var.external_gateway_ip' "${main}"
 grep -Fq 'output "gateway_transport_access_enabled"' "${main}"
 [[ $(grep -Ec 'from_port[[:space:]]+= 443' "${main}") -eq 2 ]]
 # The SSH debug rule is also a dynamic ingress block. Select the transport block

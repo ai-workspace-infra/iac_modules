@@ -105,8 +105,18 @@ variable "gateway_provider" {
   type    = string
   default = "aws-spot"
   validation {
-    condition     = var.gateway_provider == "aws-spot"
-    error_message = "The UAT validation module only accepts aws-spot."
+    condition     = contains(["aws-spot", "external"], var.gateway_provider)
+    error_message = "gateway_provider must be aws-spot or external."
+  }
+}
+
+variable "external_gateway_ip" {
+  type     = string
+  default  = ""
+  nullable = false
+  validation {
+    condition     = var.gateway_provider != "external" || can(cidrhost("${var.external_gateway_ip}/32", 0))
+    error_message = "external_gateway_ip is required for an external Gateway and must be an IPv4 address."
   }
 }
 
@@ -170,6 +180,7 @@ resource "aws_security_group" "client" {
 }
 
 resource "aws_security_group" "gateway" {
+  count  = var.gateway_provider == "aws-spot" ? 1 : 0
   name   = "${var.run_id}-gateway"
   vpc_id = data.aws_vpc.uat.id
   ingress {
@@ -221,9 +232,10 @@ resource "aws_security_group" "gateway" {
 }
 
 resource "aws_instance" "gateway" {
+  count                       = var.gateway_provider == "aws-spot" ? 1 : 0
   ami                         = var.aws_ami
   instance_type               = var.aws_gateway_instance_type
-  vpc_security_group_ids      = [aws_security_group.gateway.id]
+  vpc_security_group_ids      = [aws_security_group.gateway[0].id]
   associate_public_ip_address = true
   user_data = templatefile("${path.module}/bootstrap.sh", {
     role           = "relay"
@@ -282,10 +294,14 @@ output "client_role" { value = "controlled-client" }
 output "client_ip" { value = aws_instance.client.public_ip }
 output "client_private_ip" { value = aws_instance.client.private_ip }
 
-output "gateway_ip" { value = aws_instance.gateway.public_ip }
-output "gateway_private_ip" { value = aws_instance.gateway.private_ip }
+output "gateway_ip" {
+  value = var.gateway_provider == "external" ? var.external_gateway_ip : aws_instance.gateway[0].public_ip
+}
+output "gateway_private_ip" {
+  value = var.gateway_provider == "external" ? var.external_gateway_ip : aws_instance.gateway[0].private_ip
+}
 output "gateway_transport_ip" {
-  value = local.gateway_transport_access_enabled ? aws_instance.gateway.public_ip : aws_instance.gateway.private_ip
+  value = var.gateway_provider == "external" ? var.external_gateway_ip : (local.gateway_transport_access_enabled ? aws_instance.gateway[0].public_ip : aws_instance.gateway[0].private_ip)
 }
 output "gateway_transport_access_enabled" { value = local.gateway_transport_access_enabled }
 output "ssh_debug_access_enabled" { value = length(var.ssh_debug_ingress_cidrs) > 0 }
@@ -296,13 +312,13 @@ output "zero_accounts_api_url" { value = var.zero_accounts_api_url }
 output "zero_portal_url" { value = var.zero_portal_url }
 
 output "lab_controller_url" {
-  value = "https://${aws_instance.gateway.public_ip}:8443"
+  value = var.gateway_provider == "external" ? "" : "https://${aws_instance.gateway[0].public_ip}:8443"
 }
 
 output "resource_ids" {
   value = {
     client         = aws_instance.client.id
-    gateway        = aws_instance.gateway.id
+    gateway        = var.gateway_provider == "external" ? "external" : aws_instance.gateway[0].id
     gateway_role   = "relay"
     client_role    = "controlled-client"
     gateway_source = var.gateway_provider
