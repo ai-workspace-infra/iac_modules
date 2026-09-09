@@ -26,6 +26,9 @@ assert hk_host["aws_region"] == "ap-east-1"
 assert hk_host["ansible_user"] == "admin"
 assert hk_host["ami_id"] == "ami-03de17a63e9b79ec4"
 assert hk_host["os_name"].startswith("Debian 12 ARM64")
+assert hk_host["billing_mode"] == "on_demand"
+assert hk_host["spot_instance"] is False
+assert hk_host["max_runtime_minutes"] == 60
 
 environment = Environment(loader=FileSystemLoader(template_dir))
 environment.filters["tf_id"] = lambda value: re.sub(
