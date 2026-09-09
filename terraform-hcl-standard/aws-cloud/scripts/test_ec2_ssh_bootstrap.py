@@ -7,7 +7,12 @@ import pathlib
 module = pathlib.Path(__file__).resolve().parents[1] / "modules/ec2/main.tf"
 source = module.read_text()
 
-assert "systemctl enable --now ssh || systemctl enable --now sshd || true" in source
+assert "apt-get install -y -qq openssh-server" in source
+assert "install -d -m 0755 /run/sshd" in source
+assert "ssh-keygen -A" in source
+assert "sshd -t" in source
+assert "systemctl restart ssh.service || systemctl restart sshd.service || true" in source
+assert "/usr/sbin/sshd" in source
 assert "var.max_runtime_minutes > 0 ? format(" in source
 assert '# capacity-mode: %s' in source
 assert 'var.spot_instance ? "spot" : "on-demand"' in source
