@@ -22,17 +22,19 @@ hk_host = next(
 )
 
 assert hk_host["aws_provider"] == "hk"
-assert hk_host["aws_region"] == "ap-east-1"
+assert data["global"]["aws_hk_region"] == "ap-east-2"
+assert hk_host["cloud_region"] == "ap-east-2"
+assert hk_host["aws_region"] == "ap-east-2"
 assert hk_host["ansible_user"] == "admin"
-assert hk_host["ami_id"] == "ami-01366656af1e13a9f"
-assert "ami_name_patterns" not in hk_host
+assert "ami_id" not in hk_host
+assert hk_host["ami_name_patterns"] == ["debian-13-amd64-*"]
 assert hk_host["os_name"].startswith("Debian 13 amd64")
 assert hk_host["plan"] == "t3.micro"
 assert hk_host["billing_mode"] == "on_demand"
 assert hk_host["spot_instance"] is False
 assert hk_host["max_runtime_minutes"] == 60
 assert "ssh_port" not in hk_host
-assert hk_host["availability_zone"] == "ap-east-1b"
+assert "availability_zone" not in hk_host
 
 environment = Environment(loader=FileSystemLoader(template_dir))
 environment.filters["tf_id"] = lambda value: re.sub(
@@ -42,13 +44,13 @@ rendered = environment.get_template("hosts.tf.j2").render(
     ssh_keys=data["ssh_keys"], hosts=data["hosts"], true=True, false=False
 )
 
-assert 'data "aws_ami" "debian_agent_proxy_node_uat_hk"' not in rendered
+assert 'data "aws_ami" "debian_agent_proxy_node_uat_hk"' in rendered
 assert 'type = "t3.micro"' in rendered
-assert 'ami  = "ami-01366656af1e13a9f"' in rendered
-assert 'os_id       = "ami-01366656af1e13a9f"' in rendered
+assert 'values = ["debian-13-amd64-*"]' in rendered
+assert "ami  = data.aws_ami.debian_agent_proxy_node_uat_hk.id" in rendered
+assert "os_id       = data.aws_ami.debian_agent_proxy_node_uat_hk.id" in rendered
 assert "from_port   = 22" in rendered
 assert "ssh_port            = 22" in rendered
-assert 'values = ["ap-east-1b"]' in rendered
-assert "subnet_id           = data.aws_subnet.selected_agent_proxy_node_uat_hk.id" in rendered
+assert "subnet_id           = null" in rendered
 
 print("test_uat_agent_proxy_ami: PASS")

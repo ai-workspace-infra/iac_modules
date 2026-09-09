@@ -2,7 +2,9 @@ global:
   region: nrt
   aws_region: ap-northeast-1
   aws_us_region: us-west-2
-  aws_hk_region: ap-east-1
+  # Keep the logical HK entry/domain stable while its ephemeral runtime uses
+  # the Taipei region to avoid the ap-east-1 public port-22 data-path failure.
+  aws_hk_region: ap-east-2
   name_prefix: agent-proxy-uat
   user_data_file: cloud-init.yaml
 
@@ -48,26 +50,19 @@ hosts:
   - name: agent-proxy-node-uat-hk
     node_id: ap-uat-hk
     short_hostname: ap-uat-hk
-    display_name: "HK XConnect · Hong Kong Ephemeral"
+    display_name: "HK XConnect · Taipei Fallback"
     cloud_provider: aws
-    cloud_region: ap-east-1
+    cloud_region: ap-east-2
     location: hk
     node_label: hk-ephemeral
     aws_provider: hk
-    aws_region: ap-east-1
-    # The default placement repeatedly assigned the 172.31.0.0/20 subnet and
-    # produced an instance whose public IPv4 completed TCP handshakes without
-    # forwarding application data. Pin this rebuild to a different AZ/subnet.
-    availability_zone: ap-east-1b
-    # ap-east-1 ARM64 instances repeatedly reached running/TCP-ready state
-    # without serving an SSH banner across Debian 12/13 and Spot/on-demand.
-    # Use the current official Debian 13 amd64 image on equivalent t3.micro
-    # capacity to avoid the region-specific Graviton boot path.
-    os_name: "Debian 13 amd64 (trixie, pinned for ap-east-1)"
-    ami_id: "ami-01366656af1e13a9f"
-    # ap-east-1 one-time Spot instances repeatedly reached running/TCP-ready
-    # state without ever serving an SSH banner. Keep HK ephemeral through the
-    # one-hour shutdown policy, but use on-demand capacity for reliable boot.
+    aws_region: ap-east-2
+    # AMI IDs are regional. Resolve the newest official Debian 13 amd64 image
+    # after moving this logical edge from Hong Kong to Taipei.
+    os_name: "Debian 13 amd64 (Taipei fallback)"
+    ami_name_patterns: ["debian-13-amd64-*"]
+    # Keep the node ephemeral through the one-hour shutdown policy while using
+    # on-demand capacity for a deterministic cross-region validation.
     plan: {{ env.get('AGENT_PROXY_HK_PLAN_API', 't3.micro') }}
     billing_mode: on_demand
     spot_instance: false
