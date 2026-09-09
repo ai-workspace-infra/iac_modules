@@ -55,11 +55,11 @@ hosts:
     node_label: hk-ephemeral
     aws_provider: hk
     aws_region: ap-east-1
-    # Keep HK on Debian 12, but resolve the newest regional Bookworm build.
-    # The older pinned ap-east-1 copy booted without ever exposing an SSH
-    # banner, while current JP/US Bookworm builds boot normally.
-    os_name: "Debian 12 ARM64 (latest regional bookworm)"
-    ami_name_patterns: ["debian-12-arm64-*"]
+    # Pin the current official Debian 13 ARM64 image for ap-east-1. The mixed
+    # Debian 13/12 lookup selected a newer-dated Bookworm build instead, and
+    # both tested Bookworm images booted without exposing an SSH banner.
+    os_name: "Debian 13 ARM64 (trixie, pinned for ap-east-1)"
+    ami_id: "ami-0a92bca468ca25606"
     # ap-east-1 one-time Spot instances repeatedly reached running/TCP-ready
     # state without ever serving an SSH banner. Keep HK ephemeral through the
     # one-hour shutdown policy, but use on-demand capacity for reliable boot.
