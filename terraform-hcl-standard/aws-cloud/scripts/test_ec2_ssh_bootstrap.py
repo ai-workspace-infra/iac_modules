@@ -11,6 +11,8 @@ assert "apt-get install -y -qq openssh-server" in source
 assert "install -d -m 0755 /run/sshd" in source
 assert "90-ai-workspace-port.conf" in source
 assert "var.ssh_port" in source
+assert "MaxStartups 100:30:200" in source
+assert "AI_WORKSPACE_SSH_SELF_CHECK" in source
 assert "ssh-keygen -A" in source
 assert "sshd -t" in source
 assert "systemctl restart ssh.service || systemctl restart sshd.service || true" in source

@@ -32,8 +32,10 @@ resource "aws_instance" "this" {
   # observable to Terraform and therefore forces a clean replacement. Stable
   # production nodes retain their historical null user data.
   user_data = var.max_runtime_minutes > 0 ? format(
-    "#!/bin/sh\nset -eu\n# capacity-mode: %s\nexport DEBIAN_FRONTEND=noninteractive\nif ! command -v sshd >/dev/null 2>&1; then\n  apt-get update -qq\n  apt-get install -y -qq openssh-server\nfi\ninstall -d -m 0755 /run/sshd /etc/ssh/sshd_config.d\nprintf 'Port %d\\n' > /etc/ssh/sshd_config.d/90-ai-workspace-port.conf\nssh-keygen -A\nsshd -t\nif command -v systemctl >/dev/null 2>&1; then\n  systemctl enable ssh.service || systemctl enable sshd.service || true\n  systemctl restart ssh.service || systemctl restart sshd.service || true\nfi\nif ! (systemctl is-active --quiet ssh.service || systemctl is-active --quiet sshd.service); then\n  /usr/sbin/sshd\nfi\n(\n  sleep %d\n  /sbin/shutdown -h now\n) >/var/log/instance-runtime-limit.log 2>&1 &\n",
+    "#!/bin/sh\nset -eu\n# capacity-mode: %s\nexport DEBIAN_FRONTEND=noninteractive\nif ! command -v sshd >/dev/null 2>&1; then\n  apt-get update -qq\n  apt-get install -y -qq openssh-server\nfi\ninstall -d -m 0755 /run/sshd /etc/ssh/sshd_config.d\nprintf 'Port %d\\nMaxStartups 100:30:200\\nLoginGraceTime 20\\nMaxAuthTries 3\\nUseDNS no\\n' > /etc/ssh/sshd_config.d/90-ai-workspace-port.conf\nssh-keygen -A\nsshd -t\nif command -v systemctl >/dev/null 2>&1; then\n  systemctl enable ssh.service || systemctl enable sshd.service || true\n  systemctl restart ssh.service || systemctl restart sshd.service || true\nfi\nif ! (systemctl is-active --quiet ssh.service || systemctl is-active --quiet sshd.service); then\n  /usr/sbin/sshd\nfi\n{ printf 'AI_WORKSPACE_SSH_SELF_CHECK port=%d\\n'; ss -lntp 2>&1 | grep -E ':%d([[:space:]]|$)' || true; } >/dev/ttyS0 2>&1\n(\n  sleep %d\n  /sbin/shutdown -h now\n) >/var/log/instance-runtime-limit.log 2>&1 &\n",
     var.spot_instance ? "spot" : "on-demand",
+    var.ssh_port,
+    var.ssh_port,
     var.ssh_port,
     var.max_runtime_minutes * 60,
   ) : null
