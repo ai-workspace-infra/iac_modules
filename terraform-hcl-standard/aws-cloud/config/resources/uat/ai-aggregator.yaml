@@ -1,0 +1,68 @@
+global:
+  region: ap-northeast-1
+  name_prefix: ai-aggregator-uat
+  user_data_file: cloud-init.yaml
+  management_cidrs:
+    - {{ env['AI_AGGREGATOR_SSH_CIDR'] }}
+  public_cidrs:
+    - {{ env['AI_AGGREGATOR_SOURCE_CIDR'] }}
+
+ssh_keys:
+  - name: ai-aggregator-admin
+    public: "{{ env['AI_AGGREGATOR_SSH_PUBLIC_KEY'] }}"
+
+hosts:
+  - name: gateway-01
+    role: gateway
+    plan: t4g.medium
+    os_name: Debian 12 ARM64
+    lifecycle: ephemeral
+    spot_instance: true
+    max_runtime_minutes: 60
+    ansible_user: admin
+    groups: [ai_aggregator_gateway]
+    tags: [ai-aggregator, gateway, uat, ephemeral]
+  - name: cpa-codex-01
+    role: cpa
+    service_port: 8317
+    plan: t4g.small
+    os_name: Debian 12 ARM64
+    lifecycle: ephemeral
+    spot_instance: true
+    max_runtime_minutes: 60
+    ansible_user: admin
+    groups: [ai_aggregator_cpa, cpa_codex]
+    tags: [ai-aggregator, cpa, codex, uat, ephemeral]
+  - name: cpa-codex-02
+    role: cpa
+    service_port: 8320
+    plan: t4g.small
+    os_name: Debian 12 ARM64
+    lifecycle: ephemeral
+    spot_instance: true
+    max_runtime_minutes: 60
+    ansible_user: admin
+    groups: [ai_aggregator_cpa, cpa_codex]
+    tags: [ai-aggregator, cpa, codex, uat, ephemeral]
+  - name: cpa-claude-01
+    role: cpa
+    service_port: 8318
+    plan: t4g.small
+    os_name: Debian 12 ARM64
+    lifecycle: ephemeral
+    spot_instance: true
+    max_runtime_minutes: 60
+    ansible_user: admin
+    groups: [ai_aggregator_cpa, cpa_claude]
+    tags: [ai-aggregator, cpa, claude, uat, ephemeral]
+  - name: cpa-grok-01
+    role: cpa
+    service_port: 8319
+    plan: t4g.small
+    os_name: Debian 12 ARM64
+    lifecycle: ephemeral
+    spot_instance: true
+    max_runtime_minutes: 60
+    ansible_user: admin
+    groups: [ai_aggregator_cpa, cpa_grok]
+    tags: [ai-aggregator, cpa, grok, uat, ephemeral]

@@ -1,0 +1,19 @@
+# Provider contract only for v1. GCP is not automatically selected for UAT.
+global:
+  provider: gcp
+  environment: uat
+  lifecycle: ephemeral
+  region: asia-east1
+  network: projects/example/global/networks/private
+  subnet: regions/asia-east1/subnetworks/private
+  hosts:
+    - id: gateway-01
+      role: gateway
+      zone: asia-east1-a
+      machine_type: e2-medium
+      network_tags: [ai-aggregator-gateway]
+    - id: cpa-codex-01
+      role: cpa
+      zone: asia-east1-a
+      machine_type: e2-small
+      network_tags: [ai-aggregator-cpa]
