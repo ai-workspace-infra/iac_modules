@@ -1,4 +1,4 @@
-# XConnect Overlay 项目模板
+# XConnect-One Overlay 项目模板
 
 这些模板配套 `../PRODUCTIZATION_DEVELOPMENT_PLAN.md` 使用。
 

@@ -10,9 +10,15 @@ ssh_keys:
 hosts:
   - name: agent-proxy-node-prod
     os_name: "Debian 13 x64 (trixie)"
-    # Keep the lightweight Agent Proxy default at 1C1G (t4g.micro). Callers
-    # may override it with AGENT_PROXY_PLAN_API when a larger node is needed.
-    plan: {{ env.get('AGENT_PROXY_PLAN_API', 't4g.micro') }}
+    # 2 vCPU / 2 GiB, AWS Graviton (T4g), on-demand.
+    plan: {{ env.get('AGENT_PROXY_PLAN_API', 't4g.small') }}
+    billing_mode: on_demand
+    elastic_ip: true
+    # Reserved Instances are an account-level billing discount; when enabled
+    # externally, AWS applies it automatically to this matching instance.
+    reserved_instance: false
+    # Stop is allowed; termination requires an explicit protection override.
+    deletion_protection: true
     backups: false
     enable_ipv6: true
     ansible_user: root

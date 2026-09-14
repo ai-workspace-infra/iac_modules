@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""共享渲染器：资源声明 (config/resources) -> Terraform 资源 / Ansible inventory。
+"""共享渲染器：GitOps 资源声明 -> Terraform 资源 / Ansible inventory。
 
 分层（本脚本不依赖某个具体 env，可被多套资源声明复用）：
-  - 声明:     ../config/resources/<name>-hosts.yaml        （--resources 覆盖）
+  - 声明:     ../../gitops/resources/<project>/<env>/<provider>/<name>.yaml        （--resources 覆盖）
   - 共享模板: ../templates/{provider.tf, variables.tf, cloud-init.yaml,
                             hosts.tf.j2, inventory.ini.j2}
   - 运行目录: ../envs/<name>/  （--workdir 覆盖；渲染产物 + tfstate 落此，均 gitignore）
@@ -35,9 +35,12 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # scripts/ -> aws-cloud 根
 AWS_CLOUD_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 TEMPLATE_DIR = os.path.join(AWS_CLOUD_ROOT, "templates")
+GITOPS_ROOT = os.environ.get(
+    "GITOPS_ROOT", os.path.abspath(os.path.join(AWS_CLOUD_ROOT, "..", "..", "gitops"))
+)
 
 DEFAULT_RESOURCES = os.path.join(
-    AWS_CLOUD_ROOT, "config", "resources", "ai-workspace-hosts.yaml"
+    GITOPS_ROOT, "resources", "svc.plus", "uat", "aws", "ai-workspace.yaml"
 )
 DEFAULT_WORKDIR = os.path.join(AWS_CLOUD_ROOT, "envs", "ai-workspace")
 
@@ -68,7 +71,11 @@ def _jinja():
 # 资源声明里的主机名与服务域名都由 TARGET_DOMAIN_BASE 拼接。Jinja 默认的
 # Undefined 会把缺失变量渲染成空串, 于是 console-nat.{{...}} 变成 "console-nat."
 # —— 一个看起来像成功、实际错误的主机名。这里显式要求它必须存在。
-REQUIRED_TEMPLATE_ENV = ("TARGET_DOMAIN_BASE",)
+REQUIRED_TEMPLATE_ENV = (
+    "TARGET_DOMAIN_BASE",
+    "AI_AGGREGATOR_SSH_CIDR",
+    "AI_AGGREGATOR_SOURCE_CIDR",
+)
 
 
 def _assert_required_env(content, path):
@@ -112,7 +119,14 @@ def cmd_render(args):
     rendered = (
         _jinja()
         .get_template("hosts.tf.j2")
-        .render(ssh_keys=ssh_keys, hosts=hosts, true=True, false=False)
+        .render(
+            ssh_keys=ssh_keys,
+            hosts=hosts,
+            management_cidrs=glob.get("management_cidrs", []),
+            public_cidrs=glob.get("public_cidrs", []),
+            true=True,
+            false=False,
+        )
     )
     with open(os.path.join(workdir, "generated_hosts.tf"), "w", encoding="utf-8") as fh:
         fh.write(rendered)
@@ -175,6 +189,7 @@ def cmd_inventory(args):
         host_vars.setdefault("os_name", host.get("os_name", ""))
         host_vars.setdefault("plan", host.get("plan", DEFAULT_PLAN))
         host_vars.setdefault("region", host.get("region") or default_region)
+        host_vars.setdefault("private_ip", rt.get("private_ip") or "")
 
         # inventory_hostname = service_domains 的首个 FQDN（动态取自资源声明 yaml）；
         # 无 service_domains 时回退到 name。CMDB / inventory / 分组均以此为键。
@@ -186,6 +201,8 @@ def cmd_inventory(args):
             "name": name,
             "fqdn": fqdn,
             "ip": rt.get("ip"),
+            "public_ip": rt.get("ip"),
+            "private_ip": rt.get("private_ip"),
             "instance_id": rt.get("instance_id"),
             "os_id": rt.get("os_id"),
             "os_name": host.get("os_name", ""),
