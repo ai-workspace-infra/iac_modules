@@ -26,6 +26,7 @@ resource "aws_key_pair" "{{ key.name | tf_id }}" {
 {% endfor -%}
 {% for host in hosts -%}
 {%- set hid = host.name | tf_id -%}
+{%- set ephemeral = host.get('lifecycle', 'persistent') == 'ephemeral' or host.get('spot_instance', false) -%}
 # ami filter for Debian 12 ARM64
 data "aws_ami" "debian_{{ hid }}" {
   most_recent = true
@@ -46,26 +47,34 @@ resource "aws_security_group" "sg_{{ hid }}" {
   name_prefix = "{{ host.name }}-sg"
   vpc_id      = data.aws_vpc.default.id
 
+{% for cidr in management_cidrs %}
   ingress {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = ["{{ cidr }}"]
   }
+{% endfor %}
 
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
+{% if host.get('role') == 'gateway' %}
+{% for cidr in public_cidrs %}
   ingress {
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = ["{{ cidr }}"]
   }
+{% endfor %}
+{% endif %}
+
+{% if host.get('role') == 'cpa' and host.get('service_port') %}
+  ingress {
+    from_port       = {{ host.service_port }}
+    to_port         = {{ host.service_port }}
+    protocol        = "tcp"
+    security_groups = [aws_security_group.sg_{{ (hosts | selectattr('role', 'equalto', 'gateway') | map(attribute='name') | first) | tf_id }}.id]
+  }
+{% endif %}
 
   egress {
     from_port   = 0
@@ -76,7 +85,11 @@ resource "aws_security_group" "sg_{{ hid }}" {
 }
 
 module "compute_{{ hid }}" {
+{% if ephemeral %}
+  source = "../../modules/spot_ec2"
+{% else %}
   source = "../../modules/ec2"
+{% endif %}
 
   name_prefix = var.name_prefix != "" ? "${var.name_prefix}-{{ host.name }}" : "{{ host.name }}"
   
@@ -88,8 +101,18 @@ module "compute_{{ hid }}" {
   subnet_id = data.aws_subnets.default.ids[0]
   sg_id     = aws_security_group.sg_{{ hid }}.id
   keypair_name = aws_key_pair.{{ ssh_keys[0].name | tf_id }}.key_name
+{% if not ephemeral %}
   elastic_ip = {{ host.get('elastic_ip', false) | tojson }}
   deletion_protection = {{ host.get('deletion_protection', false) | tojson }}
+{% endif %}
+{% if ephemeral %}
+  user_data = <<-EOT
+#cloud-config
+package_update: false
+runcmd:
+  - [ bash, -lc, "systemd-run --unit=ai-aggregator-ttl --on-active={{ host.get('max_runtime_minutes', 60) }}m --property=NoNewPrivileges=true /sbin/shutdown -h now" ]
+EOT
+{% endif %}
   
   tags = merge(
     { for t in concat([var.name_prefix], {{ host.get('tags', []) | tojson }}) : "Tag_${t}" => "true" if t != "" },
@@ -106,6 +129,7 @@ output "cmdb_runtime" {
 {%- set hid = host.name | tf_id %}
     "{{ host.name }}" = {
       ip          = module.compute_{{ hid }}.public_ip
+      private_ip  = module.compute_{{ hid }}.private_ip
       instance_id = module.compute_{{ hid }}.instance_id
       os_id       = data.aws_ami.debian_{{ hid }}.id
     }
