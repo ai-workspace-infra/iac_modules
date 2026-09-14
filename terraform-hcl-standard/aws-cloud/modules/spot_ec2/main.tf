@@ -6,7 +6,6 @@ resource "aws_instance" "this" {
   vpc_security_group_ids = [var.sg_id]
   key_name                = var.keypair_name
   user_data               = var.user_data
-  instance_initiated_shutdown_behavior = "terminate"
 
   instance_market_options {
     market_type = "spot"
