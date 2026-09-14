@@ -1,0 +1,18 @@
+# Provider contract only for v1. Existing Prod nodes remain unmanaged.
+global:
+  provider: vultr
+  environment: prod
+  lifecycle: persistent
+  region: nrt
+  os_id: Debian 12 x64
+  nodes:
+    - id: gateway-01
+      role: gateway
+      plan: vc2-4c-8gb
+      private_network: true
+      tags: [ai-aggregator, gateway, prod]
+    - id: cpa-codex-01
+      role: cpa
+      plan: vc2-2c-4gb
+      private_network: true
+      tags: [ai-aggregator, cpa, prod]
