@@ -1,11 +1,20 @@
-# Provider contract only for v1. GCP is not automatically selected for UAT.
 global:
   provider: gcp
   environment: uat
   lifecycle: ephemeral
+  spot_instance: true
+  max_runtime_minutes: 60
+  project_id_env: GCP_PROJECT_ID
   region: asia-east1
-  network: projects/example/global/networks/private
-  subnet: regions/asia-east1/subnetworks/private
+  subnet_cidr: 10.86.0.0/24
+  image: projects/debian-cloud/global/images/family/debian-12
+  ssh_user: ubuntu
+  ssh_public_key_env: AI_AGGREGATOR_SSH_PUBLIC_KEY
+  ssh_cidr_env: AI_AGGREGATOR_SSH_CIDR
+  source_cidr_env: AI_AGGREGATOR_SOURCE_CIDR
+  # Values are injected by the UAT runner; do not commit operator addresses.
+  ssh_cidrs: []
+  source_cidrs: []
   hosts:
     - id: gateway-01
       role: gateway
@@ -15,5 +24,24 @@ global:
     - id: cpa-codex-01
       role: cpa
       zone: asia-east1-a
-      machine_type: e2-small
-      network_tags: [ai-aggregator-cpa]
+      cpa_port: 8317
+      machine_type: e2-medium
+      network_tags: [ai-aggregator-cpa, ai-aggregator-ssh]
+    - id: cpa-codex-02
+      role: cpa
+      zone: asia-east1-b
+      cpa_port: 8320
+      machine_type: e2-medium
+      network_tags: [ai-aggregator-cpa, ai-aggregator-ssh]
+    - id: cpa-claude-01
+      role: cpa
+      zone: asia-east1-a
+      cpa_port: 8318
+      machine_type: e2-medium
+      network_tags: [ai-aggregator-cpa, ai-aggregator-ssh]
+    - id: cpa-grok-01
+      role: cpa
+      zone: asia-east1-b
+      cpa_port: 8319
+      machine_type: e2-medium
+      network_tags: [ai-aggregator-cpa, ai-aggregator-ssh]
