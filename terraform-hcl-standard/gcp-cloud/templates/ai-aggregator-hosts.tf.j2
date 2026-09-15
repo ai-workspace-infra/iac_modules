@@ -1,0 +1,108 @@
+terraform {
+  required_version = ">= 1.5.0"
+  required_providers {
+    google = {
+      source  = "hashicorp/google"
+      version = ">= 5.0"
+    }
+  }
+}
+
+variable "project_id" {
+  type        = string
+  description = "Target GCP project; injected by the runner"
+}
+
+provider "google" {
+  project = var.project_id
+  region  = "{{ global.region }}"
+}
+
+resource "google_compute_network" "ai_aggregator" {
+  name                    = "ai-aggregator-uat"
+  project                 = var.project_id
+  auto_create_subnetworks = false
+}
+
+resource "google_compute_subnetwork" "ai_aggregator" {
+  name                     = "ai-aggregator-uat"
+  project                  = var.project_id
+  region                   = "{{ global.region }}"
+  ip_cidr_range            = "{{ global.subnet_cidr }}"
+  network                  = google_compute_network.ai_aggregator.id
+  private_ip_google_access = true
+}
+
+resource "google_compute_firewall" "ssh" {
+  name    = "ai-aggregator-uat-ssh"
+  project = var.project_id
+  network = google_compute_network.ai_aggregator.name
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+  source_ranges = {{ global.ssh_cidrs | tojson }}
+  target_tags   = ["ai-aggregator-ssh"]
+}
+
+resource "google_compute_firewall" "gateway_https" {
+  name    = "ai-aggregator-uat-https"
+  project = var.project_id
+  network = google_compute_network.ai_aggregator.name
+
+  allow {
+    protocol = "tcp"
+    ports    = ["443"]
+  }
+  source_ranges = {{ global.source_cidrs | tojson }}
+  target_tags   = ["ai-aggregator-gateway"]
+}
+
+resource "google_compute_firewall" "cpa_private" {
+  name    = "ai-aggregator-uat-cpa-private"
+  project = var.project_id
+  network = google_compute_network.ai_aggregator.name
+
+  allow {
+    protocol = "tcp"
+    ports    = {{ cpa_ports | tojson }}
+  }
+  source_tags = ["ai-aggregator-gateway"]
+  target_tags = ["ai-aggregator-cpa"]
+}
+
+{% for host in hosts %}
+module "{{ host.id | tf_id }}" {
+  source = "../../modules/spot_instance"
+
+  project_id    = var.project_id
+  name          = "{{ host.id }}"
+  zone          = "{{ host.zone }}"
+  machine_type  = "{{ host.machine_type }}"
+  network       = google_compute_network.ai_aggregator.id
+  subnet        = google_compute_subnetwork.ai_aggregator.id
+  image         = "{{ global.image }}"
+  ssh_keys      = {{ global.ssh_keys | tojson }}
+  network_tags  = {{ host.network_tags | tojson }}
+  startup_script = <<-EOT
+#!/bin/bash
+set -eu
+nohup sh -c 'sleep {{ global.max_runtime_minutes * 60 }}; /sbin/shutdown -h now' >/var/log/ai-aggregator-ttl.log 2>&1 &
+EOT
+}
+{% endfor %}
+
+output "cmdb_runtime" {
+  description = "host id -> runtime addresses and instance id"
+  value = {
+{% for host in hosts %}
+    "{{ host.id }}" = {
+      ip          = module.{{ host.id | tf_id }}.public_ip
+      private_ip  = module.{{ host.id | tf_id }}.private_ip
+      instance_id = module.{{ host.id | tf_id }}.instance_id
+      os_id       = "{{ global.image }}"
+    }
+{% endfor %}
+  }
+}

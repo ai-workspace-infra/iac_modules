@@ -29,3 +29,18 @@
    ```
 
 本目录仅新增 GCP 代码，不改动现有 AWS 模板。
+
+## AI Aggregator UAT Spot
+
+`config/resources/ai-aggregator-vps-uat.yaml` is an optional provider
+contract for the personal AI Aggregator UAT. The renderer expands one
+Gateway and four CPA nodes into explicit GCP Spot instance modules, then
+emits `inventory.ini` and `cmdb.json` from Terraform outputs. The runner must
+inject `GCP_PROJECT_ID`, `AI_AGGREGATOR_SSH_PUBLIC_KEY`,
+`AI_AGGREGATOR_SSH_CIDR`, and `AI_AGGREGATOR_SOURCE_CIDR`; none of these
+runtime values are stored in Git.
+
+The five hosts use `e2-medium` (2 vCPU / 4 GiB) by default so the CPA desktop
+and browser can run reliably. The contract is ephemeral and every VM has a
+60-minute shutdown guard. OAuth material and service credentials are outside
+Terraform and are read from Vault by Ansible.
