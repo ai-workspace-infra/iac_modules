@@ -6,7 +6,10 @@ terraform {
     }
   }
 
-  backend "gcs" {}
+  # Terraform state uses the organization-wide S3-compatible object store.
+  # Endpoint, bucket, key, credentials, and region are supplied by the
+  # workflow from Vault's CICD state contract.
+  backend "s3" {}
 }
 
 variable "access_token" {
