@@ -3,9 +3,8 @@ SHELL := /bin/bash
 TF=terraform
 
 CONFIG_FILES ?=
-CONFIG_ROOT ?= ../../../../../gitops
-CONFIG_DIR ?= $(CONFIG_ROOT)/config
-export TF_VAR_config_root ?= $(CONFIG_ROOT)
+GITOPS_ROOT ?= ../../../../gitops
+CONFIG_DIR ?= $(GITOPS_ROOT)/resources/svc.plus/uat/aws
 
 CONFIG_FILES_JSON := $(shell python - <<'PY'
 import json

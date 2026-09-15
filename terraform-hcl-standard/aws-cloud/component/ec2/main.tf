@@ -1,8 +1,6 @@
 locals {
-  config_root = coalesce(var.config_root, abspath("${path.root}/../../../../../gitops"))
-
-  account  = yamldecode(file("${local.config_root}/config/accounts/dev.yaml"))
-  ec2_conf = yamldecode(file("${local.config_root}/config/resources/ec2/dev.yaml"))
+  account  = yamldecode(file(var.account_config_path))
+  ec2_conf = yamldecode(file(var.ec2_config_path))
 }
 
 module "ami_lookup" {
@@ -22,7 +20,7 @@ module "sg" {
   source = "../../modules/sg"
 
   name               = local.ec2_conf.security_group.name
-  vpc_id             = local.ec2_conf.vpc_id         # <<<<<< 来自 YAML
+  vpc_id             = local.ec2_conf.vpc_id # <<<<<< 来自 YAML
   ssh_cidr           = local.ec2_conf.security_group.ssh_cidr
   additional_ingress = local.ec2_conf.security_group.additional_ingress
   tags               = local.account.tags
@@ -31,13 +29,13 @@ module "sg" {
 module "ec2" {
   source = "../../modules/ec2"
 
-  name_prefix   = local.ec2_conf.name_prefix
+  name_prefix = local.ec2_conf.name_prefix
   instance = {
     type = local.ec2_conf.instance.type
-    ami  = module.ami_lookup.id     # <<<<<< 自动解析 AMI
+    ami  = module.ami_lookup.id # <<<<<< 自动解析 AMI
   }
-  subnet_id     = local.ec2_conf.subnet_id          # <<<<<< 来自 YAML
-  sg_id         = module.sg.sg_id
-  keypair_name  = module.keypair.keypair_name
-  tags          = local.account.tags
+  subnet_id    = local.ec2_conf.subnet_id # <<<<<< 来自 YAML
+  sg_id        = module.sg.sg_id
+  keypair_name = module.keypair.keypair_name
+  tags         = local.account.tags
 }

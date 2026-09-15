@@ -1,0 +1,73 @@
+module "project" {
+  source             = "../../modules/project"
+  project_id         = var.project_id
+  name               = var.project_name
+  organization_id    = var.organization_id
+  billing_account_id = var.billing_account_id
+}
+
+module "identity" {
+  source            = "../../modules/identity"
+  depends_on        = [module.project]
+  project_id        = module.project.project_id
+  environment       = "{{ environment }}"
+  github_owner      = var.github_owner
+  github_repository = var.github_repository
+}
+
+module "network" {
+  source       = "../../modules/network"
+  depends_on   = [module.project]
+  project_id   = module.project.project_id
+  region       = var.region
+  network_name = var.network_name
+  subnet_cidr  = var.subnet_cidr
+}
+
+module "artifact_registry" {
+  source        = "../../modules/artifact_registry"
+  depends_on    = [module.project]
+  project_id    = module.project.project_id
+  location      = var.artifact_registry_location
+  repository_id = var.artifact_registry_id
+}
+
+{% for node in vault_nodes %}
+module "{{ node.name | tf_id }}" {
+  source       = "../../modules/vault_vm"
+  depends_on   = [module.project]
+  project_id   = module.project.project_id
+  name         = "{{ node.name }}"
+  zone         = "{{ node.zone }}"
+  machine_type = "{{ node.machine_type | default(vault_machine_type) }}"
+  image        = "{{ node.image | default(vault_image) }}"
+  network      = module.network.network
+  subnetwork   = module.network.subnet
+}
+
+{% endfor %}
+module "cloud_run" {
+  source          = "../../modules/cloud_run"
+  depends_on      = [module.project]
+  project_id      = module.project.project_id
+  region          = var.region
+  service_name    = var.cloud_run_service_name
+  image           = var.cloud_run_image
+  service_account = module.identity.service_account_email
+}
+
+output "platform_runtime" {
+  description = "Runtime facts consumed by the CMDB renderer."
+  value = {
+    project_id        = module.project.project_id
+    project_number    = module.project.project_number
+    cloud_run_uri     = module.cloud_run.uri
+    oidc_provider     = module.identity.workload_identity_provider
+    deploy_account    = module.identity.service_account_email
+    vault_private_ips = {
+{% for node in vault_nodes %}
+      "{{ node.name }}" = module.{{ node.name | tf_id }}.private_ip
+{% endfor %}
+    }
+  }
+}

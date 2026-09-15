@@ -43,7 +43,7 @@ CMDB (cmdb.json) + Ansible inventory (inventory.ini / 动态 inventory)
 
 ## 2. 资源描述与变量传递（MUST）
 
-- 资源信息**必须**由 `config/resources/<name>-hosts.yaml`（或等价 `*.yaml`）声明，作为唯一人工入口；
+- 资源信息**必须**由 `../../gitops/resources/<project>/<env>/<provider>/<name>.yaml`（或等价 `*.yaml`）声明，作为唯一人工入口；
   **不**放在 env 目录里。
 - YAML 的全局段经渲染写入 `terraform.auto.tfvars.json`，**传给 `variables.tf`**；
   逐实例字段由 Jinja2 展开进生成的 `.tf`。
@@ -55,7 +55,7 @@ CMDB (cmdb.json) + Ansible inventory (inventory.ini / 动态 inventory)
 组合逻辑**必须**收敛到共享 `scripts/generate.py`（`--resources`/`--workdir` 参数化，
 不在每个 env 各放一份），至少含两个子命令：
 
-- `render`：`config/resources/*.yaml` → workdir 下 `generated_hosts.tf` +
+- `render`：`../../gitops/resources/<project>/<env>/<provider>/*.yaml` → workdir 下 `generated_hosts.tf` +
   `provider.tf`/`variables.tf`/`cloud-init.yaml`（拷自 `templates/`）+ `terraform.auto.tfvars.json`
 - `inventory`：`terraform output`（运行时事实）+ YAML（静态字段）
   → `cmdb.json` + `inventory.ini`

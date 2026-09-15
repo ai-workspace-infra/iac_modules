@@ -1,8 +1,6 @@
 locals {
-  config_root = coalesce(var.config_root, abspath("${path.root}/../../../../../gitops"))
-
-  account = yamldecode(file("${local.config_root}/config/accounts/dev.yaml"))
-  redis   = yamldecode(file("${local.config_root}/config/resources/dev-redis/redis.yaml"))
+  account = yamldecode(file(var.account_config_path))
+  redis   = yamldecode(file(var.redis_config_path))
 }
 
 module "redis" {

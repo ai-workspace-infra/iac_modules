@@ -35,7 +35,7 @@ hosts.yaml (唯一人工入口：资源描述 / CMDB 源)
 - 不用 `templatefile()` + `%{ for }` / `%{ if }` 等 HCL 模板控制结构做渲染。
 
 ### MUST
-- 资源信息由 env 内 `hosts.yaml` 描述；多份资源由 Jinja2 展开为**多个命名唯一的显式块**。
+- 资源信息由 GitOps 内 `resources/<project>/<env>/<provider>/*.yaml` 描述；多份资源由 Jinja2 展开为**多个命名唯一的显式块**。
 - YAML 全局段经 `terraform.auto.tfvars.json` 传给 `variables.tf`；逐实例字段由 Jinja2 进 `.tf`。
 - 机密走环境变量（如 `TF_VAR_vultr_api_key`），**禁止**写入 YAML/tfvars；公钥可入 YAML。
 - 共享 `scripts/generate.py`（`--resources`/`--workdir` 参数化）提供 `render` 与
@@ -57,7 +57,7 @@ hosts.yaml (唯一人工入口：资源描述 / CMDB 源)
 
 ```
 <provider>-vps/
-  config/resources/<name>-hosts.yaml   # 声明：唯一人工入口 global / ssh_keys / hosts
+  ../gitops/resources/<project>/<env>/<provider>/<name>.yaml # 声明：唯一人工入口
   templates/                           # 共享：可复用 .tf 与 Jinja2 模板
     provider.tf  variables.tf  cloud-init.yaml   # 共享 .tf/配置（render 时拷入 workdir）
     hosts.tf.j2  inventory.ini.j2                # 渲染模板
@@ -71,10 +71,10 @@ hosts.yaml (唯一人工入口：资源描述 / CMDB 源)
   #   generated_hosts.tf / terraform.auto.tfvars.json / cmdb.json / inventory.ini
 ```
 
-> 三层共享：**声明**归 `config/resources/`、**可复用 .tf 与模板**归 `templates/`、
+> 三层共享：**声明**归外部 GitOps `resources/`、**可复用 .tf 与模板**归 `templates/`、
 > **组合逻辑**归 `scripts/`；env 退化为运行目录。`scripts/generate.py render` 把
 > `templates/` 下的 provider/variables/cloud-init 拷入 workdir、渲染出 `generated_hosts.tf`，
-> 使 workdir 成为可独立 terraform 的根模块。新增一套主机只加一个 `config/resources/*.yaml`
+> 使 workdir 成为可独立 terraform 的根模块。新增一套主机只加一个 GitOps 声明
 > + 一个 workdir，复用同一 scripts/templates。
 
 ## Operator Checklist（提交前自检）

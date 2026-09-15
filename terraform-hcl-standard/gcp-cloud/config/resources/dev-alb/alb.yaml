@@ -1,7 +1,0 @@
-project_id: "modern-app-dev"
-name: "dev-alb"
-bucket_name: "dev-alb-static-site"
-
-backend:
-  cache_enabled: true
-  bucket_location: "US"

@@ -1,9 +1,5 @@
 locals {
-  config_root = coalesce(var.config_root, abspath("${path.root}/../../../../../gitops"))
-
-  config_files = length(var.config_files) > 0 ? var.config_files : [
-    "${local.config_root}/config/xzerolab/sit/aws-cloud/account/accounts.yaml",
-  ]
+  config_files = var.config_files
 
   account = yamldecode(
     file(local.config_files[0])
