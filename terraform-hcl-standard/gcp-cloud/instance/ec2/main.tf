@@ -1,13 +1,22 @@
 terraform {
   required_version = ">= 1.5.0"
   required_providers {
-    google = { source = "hashicorp/google" version = ">= 5.0" }
+    google = {
+      source  = "hashicorp/google"
+      version = ">= 5.0"
+    }
   }
 }
 
 variable "project_id" { type = string }
-variable "region" { type = string default = "us-central1" }
-variable "zone" { type = string default = "us-central1-a" }
+variable "region" {
+  type    = string
+  default = "us-central1"
+}
+variable "zone" {
+  type    = string
+  default = "us-central1-a"
+}
 
 provider "google" {
   project = var.project_id
@@ -32,15 +41,15 @@ module "ami" {
 }
 
 module "vm" {
-  source     = "../../modules/ec2"
-  project_id = var.project_id
-  name       = "dev-compute"
-  zone       = var.zone
+  source       = "../../modules/ec2"
+  project_id   = var.project_id
+  name         = "dev-compute"
+  zone         = var.zone
   machine_type = "e2-medium"
-  network    = module.vpc.network_self_link
-  subnet     = module.vpc.subnet_self_links[0]
-  image      = module.ami.image
-  ssh_keys   = ["terraform:${data.google_client_config.current.access_token}"]
+  network      = module.vpc.network_self_link
+  subnet       = module.vpc.subnet_self_links[0]
+  image        = module.ami.image
+  ssh_keys     = ["terraform:${data.google_client_config.current.access_token}"]
 }
 
 output "instance" {

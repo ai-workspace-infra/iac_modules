@@ -34,7 +34,7 @@ resource "google_compute_firewall" "rules" {
     ports    = [for port in ports : tostring(port)]
   }]
 
-  source_ranges = each.value.direction == "ingress" ? each.value.ranges : null
+  source_ranges      = each.value.direction == "ingress" ? each.value.ranges : null
   destination_ranges = each.value.direction == "egress" ? each.value.ranges : null
   target_tags        = each.value.target_tags
 }

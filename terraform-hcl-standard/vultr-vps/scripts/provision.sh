@@ -5,7 +5,7 @@
 #
 # 环境变量:
 #   TF_VAR_vultr_api_key   必填
-#   RESOURCES              资源声明 YAML（默认 config/resources/ai-workspace-hosts.yaml）
+#   RESOURCES              资源声明 YAML（默认 ${GITOPS_ROOT}/resources/svc.plus/uat/vultr/ai-workspace.yaml）
 #   WORKDIR                terraform 运行目录（默认 envs/ai-workspace）
 #
 # 用法:
@@ -17,12 +17,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VULTR_VPS_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+GITOPS_ROOT="${GITOPS_ROOT:-$(cd "${VULTR_VPS_ROOT}/../.." && pwd)/gitops}"
 # vultr-vps -> terraform-hcl-standard -> iac_modules -> ai-workspace-infra
 REPO_ROOT="$(cd "${VULTR_VPS_ROOT}/../../.." && pwd)"
 PLAYBOOKS_DIR="${REPO_ROOT}/playbooks"
 DYN_INV="${PLAYBOOKS_DIR}/inventory/terraform_cmdb.py"
 
-RESOURCES="${RESOURCES:-${VULTR_VPS_ROOT}/config/resources/ai-workspace-hosts.yaml}"
+RESOURCES="${RESOURCES:-${GITOPS_ROOT}/resources/svc.plus/uat/vultr/ai-workspace.yaml}"
 WORKDIR="${WORKDIR:-${VULTR_VPS_ROOT}/envs/ai-workspace}"
 GEN=("python3" "${SCRIPT_DIR}/generate.py")
 

@@ -2,15 +2,15 @@
 
 # AI Workspace 基础设施模块仓库 (`iac_modules`)
 
-`iac_modules` 是 AI Workspace 平台的基础设施即代码（IaC）仓库。资源以 YAML 声明，由 Python + Jinja2
-渲染成显式的 Terraform HCL，按环境 apply，并产出供 Ansible 消费的 CMDB（`cmdb.json`）。
+`iac_modules` 是 AI Workspace 平台的基础设施即代码（IaC）仓库。它从同级 GitOps 仓库读取 YAML 声明，
+由 Python + Jinja2 渲染成显式的 Terraform HCL，按环境 apply，并产出供 Ansible 消费的 CMDB（`cmdb.json`）。
 本仓库中的 Terraform 只负责计算 / 网络 / 存储 / 身份等云资源，软件层配置属于 CMDB 契约另一侧的
 playbooks 仓库。
 
 ## 核心范式
 
 ```
-config/resources/<env>/<group>.yaml          声明层 —— 唯一的人工维护入口
+../gitops/resources/<project>/<env>/<provider>/<group>.yaml          声明层 —— 唯一的人工维护入口
         │   scripts/generate.py render       循环在 Python + Jinja2 侧完成，绝不进 HCL
         ▼
 generated_hosts.tf                           每台主机一个命名唯一的显式 module/resource 块
@@ -43,8 +43,8 @@ env 目录退化为纯粹的 Terraform 运行目录。
 
 | 分层 | 路径 | 职责 | 是否入库 |
 |------|------|------|----------|
-| 声明 | `<provider>/config/resources/<env>/*.yaml` | 按环境、按资源分类描述拓扑 | ✅ |
-| 声明 | `<provider>/config/accounts/` | 账号 / bootstrap 事实（state 桶、锁表、角色）的占位目录；实际 YAML 由外部 GitOps 仓库经 `BOOTSTRAP_CONFIG_PATH` / `TF_VAR_config_root` 提供 | 仅 `.gitkeep` |
+| 声明 | `gitops/resources/<project>/<env>/<provider>/*.yaml` | 按环境、按资源分类描述拓扑 | ✅ |
+| 声明 | 同级 `gitops/resources/<project>/<env>/<provider>/` | 资源拓扑及账号/bootstrap 事实 | 外部 GitOps 仓库 |
 | 模板 | `<provider>/templates/` | 共享的 `provider.tf`、`variables.tf`、`backend.tf`、`cloud-init.yaml` 及对应 `.j2` | ✅ |
 | 组合 | `<provider>/scripts/generate.py`、`provision.sh` | `render` + `inventory` 子命令与一键编排 | ✅ |
 | 模块 | `<provider>/modules/<resource>/` | 被渲染块复用的资源模块 | ✅ |
@@ -58,8 +58,8 @@ env 目录退化为纯粹的 Terraform 运行目录。
 |----------|------|------|--------|------|
 | AWS | `terraform-hcl-standard/aws-cloud/` | 生产可用 | 14 | Terragrunt bootstrap（`state` / `lock` / `identity`）、`component/` 根模块、`sit` + `uat` + `prod` 资源声明、render + inventory 脚本 |
 | Vultr | `terraform-hcl-standard/vultr-vps/` | 生产可用 —— 渲染范式的基准实现 | 7 | 四个运行目录（`ai-workspace`、`dev`、`platform-ops-toolkit`、`site-migration-toolkit`）、`sit` + `uat` + `prod` 声明、`provision.sh` |
-| 阿里云 | `terraform-hcl-standard/ali-cloud/` | 部分完成 | 9 | 模块 + bootstrap + `envs/dev`；`config/resources` 仍为空 |
-| GCP | `terraform-hcl-standard/gcp-cloud/` | 骨架 | 14 | 每个模块仅一个 `main.tf`，另有 `instance/` 根模块；无资源声明 |
+| 阿里云 | `terraform-hcl-standard/ali-cloud/` | 部分完成 | 9 | 模块 + bootstrap + `envs/dev`；声明位于外部 GitOps |
+| GCP | `terraform-hcl-standard/gcp-cloud/` | 核心基线 | 14 | 项目/API、VPC、IAM/WIF、Vault VM、Artifact Registry 与 Cloud Run 模块 |
 | Azure | `terraform-hcl-standard/azure-cloud/` | 骨架 | 14 | 每个模块仅一个 `main.tf`；无运行目录、无资源声明 |
 
 `terraform-hcl-standard/utils/` 存放共享的 Python 渲染器（`renderer.py`、`config_loader.py`、
@@ -126,9 +126,9 @@ env 目录退化为纯粹的 Terraform 运行目录。
 账号事实（桶名、锁表、角色名）来自外部 GitOps 仓库，而非本仓库：
 
 ```bash
-git clone https://github.com/cloud-neutral-workshop/gitops.git ../gitops
+git clone https://github.com/ai-workspace-infra/gitops.git ../gitops
 cd terraform-hcl-standard/aws-cloud/bootstrap
-BOOTSTRAP_CONFIG_PATH=../../../../gitops/config/accounts/bootstrap.yaml make bootstrap-init bootstrap-apply
+BOOTSTRAP_CONFIG_PATH=../../../../gitops/resources/<project>/<env>/<provider>/bootstrap.yaml make bootstrap-init bootstrap-apply
 ```
 
 创建 S3 状态桶（开启版本控制与加密）、DynamoDB 锁表与部署角色/用户。凭证模式与拆除流程见
@@ -140,7 +140,7 @@ BOOTSTRAP_CONFIG_PATH=../../../../gitops/config/accounts/bootstrap.yaml make boo
 export TF_VAR_vultr_api_key=...
 cd terraform-hcl-standard/vultr-vps/scripts
 
-RESOURCES=../config/resources/uat/web-saas.yaml \
+RESOURCES=../../../../gitops/resources/<project>/uat/<provider>/web-saas.yaml \
 WORKDIR=../envs/ai-workspace \
 ./provision.sh
 ```
@@ -149,9 +149,9 @@ WORKDIR=../envs/ai-workspace \
 `generate.py inventory` →（可选）Ansible。也可以逐步执行：
 
 ```bash
-python3 generate.py render    --resources ../config/resources/uat/web-saas.yaml --workdir ../envs/ai-workspace
+python3 generate.py render    --resources ../../../../gitops/resources/<project>/uat/<provider>/web-saas.yaml --workdir ../envs/ai-workspace
 terraform -chdir=../envs/ai-workspace init && terraform -chdir=../envs/ai-workspace apply
-python3 generate.py inventory --resources ../config/resources/uat/web-saas.yaml --workdir ../envs/ai-workspace
+python3 generate.py inventory --resources ../../../../gitops/resources/<project>/uat/<provider>/web-saas.yaml --workdir ../envs/ai-workspace
 ```
 
 ### 3. 交接给 Ansible
@@ -175,10 +175,9 @@ ansible web_saas -i ../../../../playbooks/inventory/terraform_cmdb.py -m ping
 
 ## 已知缺口
 
-- GCP 与 Azure 目前是单文件骨架，且模块命名沿用 AWS，尚不可直接部署。
-- `ali-cloud/config/resources/` 为空，仅有 `envs/dev`。
-- `generate.py` 里 `--resources` 的默认值仍指向拆分前的 `config/resources/ai-workspace-hosts.yaml`，
-  请始终显式传入 `--resources` / `RESOURCES`。
+- Azure 仍是骨架；GCP 核心基线已可通过 GitOps 声明渲染和校验。
+- 阿里云保留模块与 `envs/dev` 工作目录，后续声明统一放入 GitOps。
+- 各渲染器默认读取同级 GitOps；切换项目、环境或云厂商时显式传入 `--resources` / `RESOURCES`。
 - 文档归并进度记录在 [`docs/DOC_COVERAGE.md`](docs/DOC_COVERAGE.md)。
 
 ## 文档 / 链接

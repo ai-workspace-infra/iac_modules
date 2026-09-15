@@ -1,11 +1,9 @@
 variable "config_files" {
-  description = "Ordered list of config files: [account_config, vpc_config]."
+  description = "Absolute GitOps paths in order: [account_config, vpc_config]."
   type        = list(string)
-  default     = []
-}
-
-variable "config_root" {
-  description = "Local path to the gitops repository root."
-  type        = string
-  default     = null
+  nullable    = false
+  validation {
+    condition     = length(var.config_files) == 2
+    error_message = "Pass exactly two GitOps declaration paths: account_config and vpc_config."
+  }
 }

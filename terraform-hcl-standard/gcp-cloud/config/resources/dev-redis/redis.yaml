@@ -1,9 +1,0 @@
-project_id: "modern-app-dev"
-name: "dev-cache"
-region: "us-central1"
-tier: "STANDARD_HA"
-memory_size_gb: 2
-
-persistence_config:
-  mode: "RDB"
-  rdb_snapshot_period: "SIX_HOURS"

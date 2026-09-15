@@ -11,7 +11,8 @@ description: |
 
 ## 1. 声明式 YAML 驱动与渲染隔离
 **原则**: 基础设施的拓扑变量、机器规格与具体参数，绝对禁止硬编码于 HCL (Terraform) 文件中。
-- **配置分离**: 强调多环境（`sit` / `uat` / `prod`）的具体拓扑必须在对应的 `config/resources/[env]/*.yaml` 中清晰定义。
+- **配置分离**: 多环境（`sit` / `uat` / `prod`）的具体拓扑必须在 GitOps 的
+  `resources/<project>/<env>/<provider>/*.yaml` 中清晰定义，IaC 仓库不保存这些声明。
 - **状态隔离**: Backend State 的 key 或者 namespace，强制要求按照环境级目录存放（例如：`uat/databases.tfstate`），绝不可跨环境复用状态空间。
 - **构建机制 (IaC + Python Jinja2)**: 目前架构使用 Python 脚本 (`scripts/generate.py render`) 结合 Jinja2 模板解析 YAML 并自动输出 `.tf.json` 形式的配置文件。所有针对具体环境的逻辑修改，应优先考量在 YAML 拓扑或渲染逻辑中完成，而非直接修改基础模块。
 

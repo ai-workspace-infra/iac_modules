@@ -17,7 +17,8 @@ connection string returned by Supabase.
 
 ## Configuration contract
 
-Declare non-secret values in `config/resources/<env>/supabase.yaml`:
+Declare non-secret values in the GitOps repository at
+`resources/<project>/<env>/supabase/supabase.yaml`:
 
 ```yaml
 global:

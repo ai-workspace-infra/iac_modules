@@ -1,13 +1,6 @@
 locals {
-  config_root = coalesce(var.config_root, abspath("${path.root}/../../../../../gitops"))
-
-  account = yamldecode(
-    file("${local.config_root}/config/accounts/dev.yaml")
-  )
-
-  s3_conf = yamldecode(
-    file("${local.config_root}/config/resources/dev-object/bucket.yaml")
-  )
+  account = yamldecode(file(var.account_config_path))
+  s3_conf = yamldecode(file(var.s3_config_path))
 }
 
 module "s3" {

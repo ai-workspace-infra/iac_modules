@@ -2,16 +2,16 @@
 
 # AI Workspace Infrastructure Modules (`iac_modules`)
 
-`iac_modules` is the Infrastructure-as-Code repository of the AI Workspace platform. It declares
-cloud resources as YAML, renders explicit Terraform HCL from that YAML with Python + Jinja2, applies
-it per environment, and emits a CMDB (`cmdb.json`) that the Ansible layer consumes. Terraform here
+`iac_modules` is the Infrastructure-as-Code repository of the AI Workspace platform. It consumes
+cloud declarations from the sibling GitOps repository, renders explicit Terraform HCL from that YAML
+with Python + Jinja2, applies it per environment, and emits a CMDB (`cmdb.json`) that the Ansible layer consumes. Terraform here
 owns compute / network / storage / identity only — software configuration belongs to the playbooks
 repo on the other side of the CMDB contract.
 
 ## Core paradigm
 
 ```
-config/resources/<env>/<group>.yaml          declaration — the only hand-edited entry point
+../gitops/resources/<project>/<env>/<provider>/<group>.yaml          declaration — the only hand-edited entry point
         │   scripts/generate.py render       loops run in Python + Jinja2, never inside HCL
         ▼
 generated_hosts.tf                           one explicit module/resource block per host
@@ -46,8 +46,8 @@ reusable templates, composition logic — leaving run directories as pure Terraf
 
 | Layer | Path | Role | Tracked |
 |-------|------|------|---------|
-| Declaration | `<provider>/config/resources/<env>/*.yaml` | Resource topology per environment and per resource group | ✅ |
-| Declaration | `<provider>/config/accounts/` | Placeholder for account / bootstrap facts (state bucket, lock table, roles) — the actual YAML is sourced from the external GitOps repo via `BOOTSTRAP_CONFIG_PATH` / `TF_VAR_config_root` | `.gitkeep` only |
+| Declaration | sibling `gitops/resources/<project>/<env>/<provider>/*.yaml` | Resource topology per environment and per resource group | external GitOps repo |
+| Declaration | sibling `gitops/resources/<project>/<env>/<provider>/` | Resource topology and account/bootstrap facts | external GitOps repo |
 | Templates | `<provider>/templates/` | Shared `provider.tf`, `variables.tf`, `backend.tf`, `cloud-init.yaml` and their `.j2` renderers | ✅ |
 | Composition | `<provider>/scripts/generate.py`, `provision.sh` | `render` + `inventory` subcommands, one-shot provisioning | ✅ |
 | Modules | `<provider>/modules/<resource>/` | Reusable resource modules consumed by the rendered blocks | ✅ |
@@ -61,8 +61,8 @@ reusable templates, composition logic — leaving run directories as pure Terraf
 |----------|------|--------|---------|-------------------|
 | AWS | `terraform-hcl-standard/aws-cloud/` | Production | 14 | Terragrunt bootstrap (`state` / `lock` / `identity`), `component/` roots, `sit` + `uat` + `prod` resource declarations, render + inventory scripts |
 | Vultr | `terraform-hcl-standard/vultr-vps/` | Production — reference implementation of the render pattern | 7 | Four run directories (`ai-workspace`, `dev`, `platform-ops-toolkit`, `site-migration-toolkit`), `sit` + `uat` + `prod` declarations, `provision.sh` |
-| Alibaba Cloud | `terraform-hcl-standard/ali-cloud/` | Partial | 9 | Modules + bootstrap + `envs/dev`; `config/resources` is still empty |
-| GCP | `terraform-hcl-standard/gcp-cloud/` | Skeleton | 14 | One `main.tf` per module plus `instance/` roots; no resource declarations |
+| Alibaba Cloud | `terraform-hcl-standard/ali-cloud/` | Partial | 9 | Modules + bootstrap + `envs/dev`; declarations are external |
+| GCP | `terraform-hcl-standard/gcp-cloud/` | Core baseline | 14 | Project/API, VPC, IAM/WIF, Vault VM, Artifact Registry and Cloud Run modules |
 | Azure | `terraform-hcl-standard/azure-cloud/` | Skeleton | 14 | One `main.tf` per module; no run directories, no resource declarations |
 
 `utils/` at the `terraform-hcl-standard/` root holds the shared Python renderer
@@ -131,9 +131,9 @@ environment's host variables.
 Account facts (bucket, lock table, role names) come from the external GitOps repo, not from this one:
 
 ```bash
-git clone https://github.com/cloud-neutral-workshop/gitops.git ../gitops
+git clone https://github.com/ai-workspace-infra/gitops.git ../gitops
 cd terraform-hcl-standard/aws-cloud/bootstrap
-BOOTSTRAP_CONFIG_PATH=../../../../gitops/config/accounts/bootstrap.yaml make bootstrap-init bootstrap-apply
+BOOTSTRAP_CONFIG_PATH=../../../../gitops/resources/<project>/<env>/<provider>/bootstrap.yaml make bootstrap-init bootstrap-apply
 ```
 
 Creates the S3 state bucket (versioned + encrypted), the DynamoDB lock table and the deploy
@@ -146,7 +146,7 @@ modes and teardown.
 export TF_VAR_vultr_api_key=...
 cd terraform-hcl-standard/vultr-vps/scripts
 
-RESOURCES=../config/resources/uat/web-saas.yaml \
+RESOURCES=../../../../gitops/resources/<project>/uat/<provider>/web-saas.yaml \
 WORKDIR=../envs/ai-workspace \
 ./provision.sh
 ```
@@ -155,9 +155,9 @@ WORKDIR=../envs/ai-workspace \
 `generate.py inventory` → optional Ansible. To drive the steps individually:
 
 ```bash
-python3 generate.py render    --resources ../config/resources/uat/web-saas.yaml --workdir ../envs/ai-workspace
+python3 generate.py render    --resources ../../../../gitops/resources/<project>/uat/<provider>/web-saas.yaml --workdir ../envs/ai-workspace
 terraform -chdir=../envs/ai-workspace init && terraform -chdir=../envs/ai-workspace apply
-python3 generate.py inventory --resources ../config/resources/uat/web-saas.yaml --workdir ../envs/ai-workspace
+python3 generate.py inventory --resources ../../../../gitops/resources/<project>/uat/<provider>/web-saas.yaml --workdir ../envs/ai-workspace
 ```
 
 ### 3. Hand over to Ansible
@@ -183,10 +183,10 @@ artifacts or secrets staged.
 
 ## Known gaps
 
-- GCP and Azure are single-file skeletons with AWS-inherited module names — not deployable as-is.
-- `ali-cloud/config/resources/` is empty; only `envs/dev` exists.
-- The default `--resources` paths in `generate.py` still point at the pre-split
-  `config/resources/ai-workspace-hosts.yaml`; always pass `--resources` / `RESOURCES` explicitly.
+- Azure remains a skeleton; GCP core baseline modules are deployable through the GitOps declarations.
+- Alibaba Cloud has modules and a development workspace; declarations are kept in GitOps when added.
+- Every renderer defaults to a declaration in the sibling GitOps checkout; pass `--resources` /
+  `RESOURCES` explicitly when selecting another project, environment or provider.
 - Documentation consolidation is tracked in [`docs/DOC_COVERAGE.md`](docs/DOC_COVERAGE.md).
 
 ## Docs / Links
