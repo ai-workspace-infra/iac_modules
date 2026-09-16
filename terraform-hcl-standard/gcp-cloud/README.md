@@ -11,7 +11,7 @@ GitOps 仓库 `resources/xworktech.com/<env>/gcp/open-platform-*.yaml` 声明，
 显式 Terraform 块；Vault KV v2 路径契约见
 [`docs/vault-kv-paths.md`](docs/vault-kv-paths.md)。
 
-该目录提供与 `aws-cloud` 模板一一对应的 GCP 版本，用于在 GCP 上快速引导基础设施。结构与 AWS 目录保持一致，包括引导阶段 (bootstrap)、实例示例 (instance) 与模块库 (modules)。
+该目录提供与 `aws-cloud` 模板一一对应的 GCP 版本，用于在 GCP 上快速引导基础设施。结构与 AWS 目录保持一致，包括引导阶段 (bootstrap)、实例示例 (instance) 与模块库 (modules)。运行 root 使用组织统一的 S3-compatible state backend，而不是 GCS backend；key 与 Vault 契约见 [`../../docs/howto/unified-iac-state-contract.md`](../../docs/howto/unified-iac-state-contract.md)。
 
 ## 模板映射
 - **bootstrap/identity → IAM**：创建基础服务账号与自定义角色，替代 AWS IAM 角色与策略。

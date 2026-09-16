@@ -22,7 +22,7 @@
   - `msk`：事件中心命名空间与 Hub（Event Hubs）。
 
 ## 使用方式
-1. 在 `templates/backend.tf` 中配置 Azure 存储作为 Terraform 远端状态（资源组、存储账户、容器）。
+1. 运行时从 Vault `CICD/<env>/iac_state` 注入组织统一 S3-compatible backend；不要在 `templates/backend.tf` 配置 Azure 存储账户或 state 凭据。key 规则见 [`../../docs/howto/unified-iac-state-contract.md`](../../docs/howto/unified-iac-state-contract.md)。
 2. 在 `templates/provider.tf` 中设置 `subscription_id`、`tenant_id`、`location` 等参数。
 3. 参考 `envs/dev/main.tf`，按需修改变量后执行：
    ```bash

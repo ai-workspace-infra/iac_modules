@@ -1,5 +1,7 @@
 terraform {
-  # The organization-wide S3-compatible state store is injected by CI.
-  # Endpoint, bucket, key, credentials and region never live in Git.
-  backend "s3" {}
+  # Connection parameters and the canonical key are injected by the CI
+  # backend config file. They must never be rendered into GitOps or tfvars.
+  backend "s3" {
+    use_lockfile = true
+  }
 }
