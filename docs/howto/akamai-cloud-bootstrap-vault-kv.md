@@ -145,16 +145,20 @@ terraform apply \
 
 ### 3.1 Akamai Cloud 账号凭据
 
+`<account>` 必须是 Akamai Cloud/Linode 的具体账户名或账户 ID。它不是
+`primary`、`default` 等别名，并且必须在 Vault 路径、JWT Role 名称、workflow
+输入和 Terraform state key 中保持一致。
+
 CLI 语义路径：
 
 ```text
-kv/CICD/<env>/akamai-cloud/<account_alias>
+kv/CICD/<env>/akamai-cloud/<account>
 ```
 
 HTTP API 读取路径：
 
 ```text
-kv/data/CICD/<env>/akamai-cloud/<account_alias>
+kv/data/CICD/<env>/akamai-cloud/<account>
 ```
 
 字段：
@@ -166,7 +170,7 @@ kv/data/CICD/<env>/akamai-cloud/<account_alias>
 示例：
 
 ```bash
-vault kv put kv/CICD/uat/akamai-cloud/primary \
+vault kv put kv/CICD/uat/akamai-cloud/<account> \
   LINODE_TOKEN='...'
 ```
 
@@ -203,10 +207,10 @@ state 之外的派生文件。
 
 ## 4. Vault policy
 
-以 UAT、`primary` 账号为例，CI role 至少需要读取：
+以 UAT、`<account>` 账号为例，CI role 至少需要读取：
 
 ```hcl
-path "kv/data/CICD/uat/akamai-cloud/primary" {
+path "kv/data/CICD/uat/akamai-cloud/<account>" {
   capabilities = ["read"]
 }
 
@@ -223,7 +227,37 @@ PROD role 只替换为 `prod` 路径。UAT role 不得读取 `prod`，PROD role 
 `uat`。写入、轮换和删除由 Vault 管理员或受保护的 rotation workflow 完成，
 日常 Terraform workflow 只读。
 
-## 5. Backend 和 state key
+## 5. 初始化脚本
+
+`platform-ops-toolkit` 提供两个不在 Git 中保存密钥的脚本：第一个发布按真实账户名
+渲染的 GitHub OIDC Role/Policy，第二个写入 `LINODE_TOKEN`。先准备具体账户名或 ID，
+不能使用 `primary`、`default` 或 `main`：
+
+```bash
+export VAULT_ADDR='https://vault.svc.plus'
+export VAULT_TOKEN='hvs.***'
+export AKAMAI_ACCOUNT_UAT='<concrete-uat-account>'
+export AKAMAI_ACCOUNT_PROD='<concrete-prod-account>'
+
+bash platform-ops-toolkit/scripts/vault/bootstrap_akamai_oidc_roles.sh \
+  --apply --env all
+
+export LINODE_TOKEN='...'
+bash platform-ops-toolkit/scripts/vault/bootstrap_akamai_cloud_kv.sh \
+  --apply --env all
+```
+
+脚本执行顺序为先创建只读 Role/Policy，再写入账号 Token。`--check` 只检查线上对象，
+不会修改 Vault。`LINODE_TOKEN` 只写入：
+
+```text
+kv/CICD/uat/akamai-cloud/<account>
+kv/CICD/prod/akamai-cloud/<account>
+```
+
+Terraform state 的 `TF_STATE_*` 仍需单独写入 `kv/CICD/<env>/iac_state`。
+
+## 6. Backend 和 state key
 
 state key 是非机密事实，可以放在 GitOps bootstrap/account declaration 或由
 workflow 根据输入拼接；不要把 state key 当作 secret。
@@ -231,25 +265,25 @@ workflow 根据输入拼接；不要把 state key 当作 secret。
 推荐格式：
 
 ```text
-terraform/<env>/<project>/akamai-cloud/<account_alias>/<resource_group>/terraform.tfstate
+terraform/<env>/<project>/akamai-cloud/<account>/<resource_group>/terraform.tfstate
 ```
 
 例如：
 
 ```text
-terraform/uat/svc.plus/akamai-cloud/primary/ai-workspace/terraform.tfstate
+terraform/uat/svc.plus/akamai-cloud/<account>/ai-workspace/terraform.tfstate
 ```
 
 当前 `akamai-cloud/templates/backend.tf.j2` 负责渲染 S3-compatible backend 的
 endpoint/region/workspace prefix；bucket、key 和 backend credentials 应由
 `platform-ops-toolkit` 在 `terraform init` 时从 Vault/输入注入，不进入 Git。
 
-## 6. 日常部署
+## 7. 日常部署
 
 Vault 字段到 Terraform 环境的映射：
 
 ```text
-kv/data/CICD/uat/akamai-cloud/primary LINODE_TOKEN
+kv/data/CICD/uat/akamai-cloud/<account> LINODE_TOKEN
   -> TF_VAR_linode_token
 
 kv/data/CICD/uat/iac_state TF_STATE_*
@@ -276,9 +310,9 @@ python3 terraform-hcl-standard/akamai-cloud/scripts/generate.py inventory \
 授权任何云端 `apply`；真实账号、bucket、token、state key 和审批由对应环境的
 受保护 workflow 提供。
 
-## 7. 检查清单
+## 8. 检查清单
 
-- [ ] `LINODE_TOKEN` 已写入正确环境和账号路径；没有写入 Git
+- [ ] `LINODE_TOKEN` 已写入正确环境和具体账号路径；没有写入 Git
 - [ ] Object Storage bucket 已启用 versioning 和删除保护
 - [ ] `TF_STATE_*` 已写入 `kv/data/CICD/<env>/iac_state`
 - [ ] state key 包含 provider、project、env、account 和 resource group
