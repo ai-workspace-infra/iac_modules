@@ -1,0 +1,18 @@
+# generate.py 派生产物
+generated_hosts.tf
+provider.tf
+variables.tf
+cloud-init.yaml
+backend.tf
+terraform.auto.tfvars.json
+cmdb.json
+hosts_manifest.json
+inventory.ini
+
+# Terraform 运行时
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+__pycache__/

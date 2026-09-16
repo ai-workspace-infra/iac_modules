@@ -61,6 +61,7 @@ reusable templates, composition logic — leaving run directories as pure Terraf
 |----------|------|--------|---------|-------------------|
 | AWS | `terraform-hcl-standard/aws-cloud/` | Production | 14 | Terragrunt bootstrap (`state` / `lock` / `identity`), `component/` roots, `sit` + `uat` + `prod` resource declarations, render + inventory scripts |
 | Vultr | `terraform-hcl-standard/vultr-vps/` | Production — reference implementation of the render pattern | 7 | Four run directories (`ai-workspace`, `dev`, `platform-ops-toolkit`, `site-migration-toolkit`), `sit` + `uat` + `prod` declarations, `provision.sh` |
+| Akamai Cloud / Linode | `terraform-hcl-standard/akamai-cloud/` | MVP — VPS provider tree | 3 | Linode compute, firewall, VPC and block storage modules; explicit renderer, CMDB/inventory and fixture validation |
 | Alibaba Cloud | `terraform-hcl-standard/ali-cloud/` | Partial | 9 | Modules + bootstrap + `envs/dev`; declarations are external |
 | GCP | `terraform-hcl-standard/gcp-cloud/` | Core baseline | 14 | Project/API, VPC, IAM/WIF, Vault VM, Artifact Registry and Cloud Run modules |
 | Azure | `terraform-hcl-standard/azure-cloud/` | Skeleton | 14 | One `main.tf` per module; no run directories, no resource declarations |
@@ -70,13 +71,13 @@ reusable templates, composition logic — leaving run directories as pure Terraf
 
 ## Module catalog by domain
 
-| Domain | AWS | Alibaba Cloud | Vultr | GCP / Azure (skeleton) |
-|--------|-----|---------------|-------|------------------------|
-| Identity & governance | `iam`, `landingzone` | `ram` | `iam` | `iam`, `landingzone` |
-| Compute | `ec2`, `keypair`, `ami_lookup` | `ecs` | `compute`, `resize-instance` | `ec2`, `keypair`, `ami_lookup` |
-| Network | `vpc`, `sg`, `alb`, `nlb` | `vpc`, `alb`, `nlb` | `vpc` | `vpc`, `sg`, `alb`, `nlb` |
-| Data & storage | `rds`, `redis`, `msk`, `s3` | `rds`, `redis`, `oss` | `data_store`, `storage` | `rds`, `redis`, `msk`, `s3` |
-| Teardown | `bootstrap-destroy` | `bootstrap-destroy` | `bootstrap-destroy` | `bootstrap-destroy` |
+| Domain | AWS | Alibaba Cloud | Vultr | Akamai Cloud / Linode | GCP / Azure (skeleton) |
+|--------|-----|---------------|-------|----------------------|------------------------|
+| Identity & governance | `iam`, `landingzone` | `ram` | `iam` | Vault/CI token contract | `iam`, `landingzone` |
+| Compute | `ec2`, `keypair`, `ami_lookup` | `ecs` | `compute`, `resize-instance` | `compute` | `ec2`, `keypair`, `ami_lookup` |
+| Network | `vpc`, `sg`, `alb`, `nlb` | `vpc`, `alb`, `nlb` | `vpc` | `vpc`, per-host firewall | `vpc`, `sg`, `alb`, `nlb` |
+| Data & storage | `rds`, `redis`, `msk`, `s3` | `rds`, `redis`, `oss` | `data_store`, `storage` | `storage` | `rds`, `redis`, `msk`, `s3` |
+| Teardown | `bootstrap-destroy` | `bootstrap-destroy` | `bootstrap-destroy` | — | `bootstrap-destroy` |
 
 > The GCP and Azure trees declare genuine `google_*` / `azurerm_*` resources but inherited the AWS
 > directory names (`ec2`, `s3`, `msk`, `ami_lookup`). Naming is not normalized yet.
@@ -124,7 +125,7 @@ environment's host variables.
 - Terraform >= 1.5.0
 - Terragrunt >= 0.67.14 (AWS bootstrap only)
 - Python 3 with `PyYAML` and `Jinja2` (`requirements.txt` installs these plus the Pulumi example deps)
-- Provider credentials — AWS via the standard credential chain / OIDC, Vultr via `TF_VAR_vultr_api_key`
+- Provider credentials — AWS via the standard credential chain / OIDC, Vultr via `TF_VAR_vultr_api_key`, Akamai Cloud/Linode via `TF_VAR_linode_token` / `LINODE_TOKEN`
 
 ### 1. Bootstrap an account (once)
 

@@ -58,6 +58,7 @@ env 目录退化为纯粹的 Terraform 运行目录。
 |----------|------|------|--------|------|
 | AWS | `terraform-hcl-standard/aws-cloud/` | 生产可用 | 14 | Terragrunt bootstrap（`state` / `lock` / `identity`）、`component/` 根模块、`sit` + `uat` + `prod` 资源声明、render + inventory 脚本 |
 | Vultr | `terraform-hcl-standard/vultr-vps/` | 生产可用 —— 渲染范式的基准实现 | 7 | 四个运行目录（`ai-workspace`、`dev`、`platform-ops-toolkit`、`site-migration-toolkit`）、`sit` + `uat` + `prod` 声明、`provision.sh` |
+| Akamai Cloud / Linode | `terraform-hcl-standard/akamai-cloud/` | MVP —— VPS provider tree | 3 | Linode compute、防火墙、VPC、块存储模块；显式 renderer、CMDB/inventory 与 fixture 校验 |
 | 阿里云 | `terraform-hcl-standard/ali-cloud/` | 部分完成 | 9 | 模块 + bootstrap + `envs/dev`；声明位于外部 GitOps |
 | GCP | `terraform-hcl-standard/gcp-cloud/` | 核心基线 | 14 | 项目/API、VPC、IAM/WIF、Vault VM、Artifact Registry 与 Cloud Run 模块 |
 | Azure | `terraform-hcl-standard/azure-cloud/` | 骨架 | 14 | 每个模块仅一个 `main.tf`；无运行目录、无资源声明 |
@@ -67,13 +68,13 @@ env 目录退化为纯粹的 Terraform 运行目录。
 
 ## 模块目录（按能力域分类）
 
-| 能力域 | AWS | 阿里云 | Vultr | GCP / Azure（骨架） |
-|--------|-----|--------|-------|---------------------|
-| 身份与治理 | `iam`、`landingzone` | `ram` | `iam` | `iam`、`landingzone` |
-| 计算 | `ec2`、`keypair`、`ami_lookup` | `ecs` | `compute`、`resize-instance` | `ec2`、`keypair`、`ami_lookup` |
-| 网络 | `vpc`、`sg`、`alb`、`nlb` | `vpc`、`alb`、`nlb` | `vpc` | `vpc`、`sg`、`alb`、`nlb` |
-| 数据与存储 | `rds`、`redis`、`msk`、`s3` | `rds`、`redis`、`oss` | `data_store`、`storage` | `rds`、`redis`、`msk`、`s3` |
-| 拆除 | `bootstrap-destroy` | `bootstrap-destroy` | `bootstrap-destroy` | `bootstrap-destroy` |
+| 能力域 | AWS | 阿里云 | Vultr | Akamai Cloud / Linode | GCP / Azure（骨架） |
+|--------|-----|--------|-------|----------------------|---------------------|
+| 身份与治理 | `iam`、`landingzone` | `ram` | `iam` | Vault/CI token 契约 | `iam`、`landingzone` |
+| 计算 | `ec2`、`keypair`、`ami_lookup` | `ecs` | `compute`、`resize-instance` | `compute` | `ec2`、`keypair`、`ami_lookup` |
+| 网络 | `vpc`、`sg`、`alb`、`nlb` | `vpc`、`alb`、`nlb` | `vpc` | `vpc`、按主机防火墙 | `vpc`、`sg`、`alb`、`nlb` |
+| 数据与存储 | `rds`、`redis`、`msk`、`s3` | `rds`、`redis`、`oss` | `data_store`、`storage` | `storage` | `rds`、`redis`、`msk`、`s3` |
+| 拆除 | `bootstrap-destroy` | `bootstrap-destroy` | `bootstrap-destroy` | — | `bootstrap-destroy` |
 
 > GCP 与 Azure 目录里声明的确实是 `google_*` / `azurerm_*` 资源，但目录名沿用了 AWS 的叫法
 > （`ec2`、`s3`、`msk`、`ami_lookup`），命名尚未归一化。
@@ -119,7 +120,7 @@ env 目录退化为纯粹的 Terraform 运行目录。
 - Terraform >= 1.5.0
 - Terragrunt >= 0.67.14（仅 AWS bootstrap 需要）
 - Python 3，安装 `PyYAML` 与 `Jinja2`（`requirements.txt` 除此之外还包含 Pulumi 示例的依赖）
-- Provider 凭证 —— AWS 走标准凭证链 / OIDC，Vultr 走 `TF_VAR_vultr_api_key`
+- Provider 凭证 —— AWS 走标准凭证链 / OIDC，Vultr 走 `TF_VAR_vultr_api_key`，Akamai Cloud/Linode 走 `TF_VAR_linode_token` / `LINODE_TOKEN`
 
 ### 1. 账号 Bootstrap（一次性）
 

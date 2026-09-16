@@ -1,0 +1,110 @@
+# =============================================================================
+# 由 generate.py 从 GitOps YAML 渲染生成 —— 请勿手工编辑
+# 约束：循环在 Python/Jinja2 侧完成，生成 HCL 保持扁平、显式、可审计。
+# =============================================================================
+
+{% for key in ssh_keys %}
+resource "linode_sshkey" "{{ key.name | tf_id }}" {
+  label   = "{{ key.name }}"
+  ssh_key = "{{ key.public }}"
+}
+{% endfor %}
+
+{% for host in hosts %}
+{% set hid = host.name | tf_id %}
+{% set firewall = host.get('firewall', {}) or {} %}
+{% set ssh_cidrs = firewall.get('ssh_cidrs', ['0.0.0.0/0']) %}
+{% set ipv6_cidrs = firewall.get('ssh_ipv6_cidrs', ['::/0']) %}
+resource "linode_firewall" "fw_{{ hid }}" {
+  label            = "{{ host.label }}-firewall"
+  inbound_policy   = "DROP"
+  outbound_policy  = "ACCEPT"
+
+{% for cidr in ssh_cidrs %}
+  inbound {
+    label    = "ssh-{{ loop.index }}"
+    action   = "ACCEPT"
+    protocol = "TCP"
+    ports    = "{{ host.get('ssh_port', 22) }}"
+    ipv4     = ["{{ cidr }}"]
+  }
+{% endfor %}
+{% for cidr in ipv6_cidrs %}
+  inbound {
+    label    = "ssh-ipv6-{{ loop.index }}"
+    action   = "ACCEPT"
+    protocol = "TCP"
+    ports    = "{{ host.get('ssh_port', 22) }}"
+    ipv6     = ["{{ cidr }}"]
+  }
+{% endfor %}
+{% if firewall.get('allow_http', false) %}
+  inbound {
+    label    = "http"
+    action   = "ACCEPT"
+    protocol = "TCP"
+    ports    = "80"
+    ipv4     = ["0.0.0.0/0"]
+    ipv6     = ["::/0"]
+  }
+{% endif %}
+{% if firewall.get('allow_https', false) %}
+  inbound {
+    label    = "https"
+    action   = "ACCEPT"
+    protocol = "TCP"
+    ports    = "443"
+    ipv4     = ["0.0.0.0/0"]
+    ipv6     = ["::/0"]
+  }
+{% endif %}
+}
+
+module "compute_{{ hid }}" {
+  source = "../../modules/compute"
+
+  label           = "{{ host.label }}"
+  region          = {% if host.get('region') %}"{{ host.region }}"{% else %}var.region{% endif %}
+  type            = {% if host.get('type') or host.get('plan') %}"{{ host.get('type', host.get('plan')) }}"{% else %}var.type{% endif %}
+  image           = {% if host.get('image') %}"{{ host.image }}"{% else %}var.image{% endif %}
+  private_ip      = {{ host.get('private_ip', true) | tojson }}
+  firewall_id     = linode_firewall.fw_{{ hid }}.id
+  authorized_keys = [{% for key in ssh_keys %}linode_sshkey.{{ key.name | tf_id }}.ssh_key{{ ", " if not loop.last }}{% endfor %}]
+  user_data       = file(var.user_data_file)
+  tags            = {{ host.get('tags', []) | tojson }}
+}
+
+{% if host.get('volume') %}
+module "volume_{{ hid }}" {
+  source     = "../../modules/storage"
+  label      = "{{ host.volume.get('label', host.label ~ '-data') }}"
+  region     = {% if host.get('region') %}"{{ host.region }}"{% else %}var.region{% endif %}
+  size       = {{ host.volume.get('size', 10) }}
+  filesystem = "{{ host.volume.get('filesystem', 'ext4') }}"
+  linode_id  = module.compute_{{ hid }}.instance_id
+}
+{% endif %}
+{% endfor %}
+
+output "cmdb_runtime" {
+  description = "name -> runtime facts"
+  value = {
+{% for host in hosts %}
+    "{{ host.name }}" = {
+      ip          = module.compute_{{ host.name | tf_id }}.main_ip
+      private_ip  = module.compute_{{ host.name | tf_id }}.private_ip
+      instance_id = module.compute_{{ host.name | tf_id }}.instance_id
+      ipv6        = module.compute_{{ host.name | tf_id }}.ipv6
+    }
+{% endfor %}
+  }
+}
+
+output "hosts_summary" {
+  description = "name -> public IP"
+  value = {
+{% for host in hosts %}
+    "{{ host.name }}" = module.compute_{{ host.name | tf_id }}.main_ip
+{% endfor %}
+  }
+}
