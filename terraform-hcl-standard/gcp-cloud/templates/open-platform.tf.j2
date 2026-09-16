@@ -1,18 +1,10 @@
 module "project" {
   source             = "../../modules/project"
+  create_project     = var.create_project
   project_id         = var.project_id
   name               = var.project_name
   organization_id    = var.organization_id
   billing_account_id = var.billing_account_id
-}
-
-module "identity" {
-  source            = "../../modules/identity"
-  depends_on        = [module.project]
-  project_id        = module.project.project_id
-  environment       = "{{ environment }}"
-  github_owner      = var.github_owner
-  github_repository = var.github_repository
 }
 
 module "network" {
@@ -53,7 +45,7 @@ module "cloud_run" {
   region          = var.region
   service_name    = var.cloud_run_service_name
   image           = var.cloud_run_image
-  service_account = module.identity.service_account_email
+  service_account = var.deploy_service_account
 }
 
 output "platform_runtime" {
@@ -62,8 +54,8 @@ output "platform_runtime" {
     project_id        = module.project.project_id
     project_number    = module.project.project_number
     cloud_run_uri     = module.cloud_run.uri
-    oidc_provider     = module.identity.workload_identity_provider
-    deploy_account    = module.identity.service_account_email
+    oidc_provider     = var.workload_identity_provider
+    deploy_account    = var.deploy_service_account
     vault_private_ips = {
 {% for node in vault_nodes %}
       "{{ node.name }}" = module.{{ node.name | tf_id }}.private_ip
