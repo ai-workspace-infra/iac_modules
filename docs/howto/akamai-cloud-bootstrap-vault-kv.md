@@ -231,13 +231,13 @@ workflow 根据输入拼接；不要把 state key 当作 secret。
 推荐格式：
 
 ```text
-akamai-cloud/<project>/<env>/<account_alias>/<resource_group>.tfstate
+terraform/<env>/<project>/akamai-cloud/<account_alias>/<resource_group>/terraform.tfstate
 ```
 
 例如：
 
 ```text
-akamai-cloud/svc.plus/uat/primary/ai-workspace.tfstate
+terraform/uat/svc.plus/akamai-cloud/primary/ai-workspace/terraform.tfstate
 ```
 
 当前 `akamai-cloud/templates/backend.tf.j2` 负责渲染 S3-compatible backend 的

@@ -33,6 +33,8 @@ Binding rules that follow from it — full text in
 - **No topology in HCL.** Regions, plans, instance counts, domains and host vars live in YAML.
 - **No embedded scripts in HCL.** No `local-exec` provisioners, no `null_resource` shell/python.
 - **One state namespace per environment.** `sit` / `uat` / `prod` never share a backend key.
+  The canonical key is `terraform/<env>/<project>/<cloud>/<account>/<workspace>/terraform.tfstate`;
+  its S3-compatible parameters come only from Vault `CICD/<env>/iac_state`.
 - **Secrets never travel through files.** API keys arrive as `TF_VAR_*` env vars; generated
   credentials are pushed to Vault for Ansible to read back — never written to YAML, tfvars or
   handed forward on disk.
@@ -68,6 +70,9 @@ reusable templates, composition logic — leaving run directories as pure Terraf
 
 `utils/` at the `terraform-hcl-standard/` root holds the shared Python renderer
 (`renderer.py`, `config_loader.py`, `render_provider_backend.py`).
+
+The provider-neutral backend, Vault fields, key hierarchy and external-inventory
+contract are documented in [`docs/howto/unified-iac-state-contract.md`](docs/howto/unified-iac-state-contract.md).
 
 ## Module catalog by domain
 
