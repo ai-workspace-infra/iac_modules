@@ -1,0 +1,12 @@
+# =============================================================================
+# 由 generate.py 从 cmdb.json 渲染生成 —— 请勿手工编辑
+# =============================================================================
+{% for group, members in groups.items() %}
+[{{ group }}]
+{% for name in members %}
+{{ lines[name] }}
+{% endfor %}
+
+{% endfor %}
+[all:vars]
+ansible_ssh_common_args='-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
