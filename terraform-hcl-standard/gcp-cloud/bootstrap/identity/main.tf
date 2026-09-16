@@ -75,6 +75,16 @@ variable "deploy_service_account_id" {
   type = string
 }
 
+variable "allowed_subjects" {
+  description = "GitHub OIDC subject patterns allowed to federate into the deploy Service Account. A trailing * is treated as a prefix wildcard."
+  type        = set(string)
+
+  validation {
+    condition     = length(var.allowed_subjects) > 0
+    error_message = "At least one GitHub OIDC subject must be configured."
+  }
+}
+
 variable "deploy_service_account_roles" {
   type = set(string)
   default = [
@@ -87,6 +97,14 @@ variable "deploy_service_account_roles" {
 provider "google" {
   project      = var.project_id
   access_token = var.access_token
+}
+
+locals {
+  allowed_subject_conditions = [
+    for subject in var.allowed_subjects : endswith(subject, "*") ?
+    "assertion.sub.startsWith('${trimsuffix(subject, "*")}')" :
+    "assertion.sub == '${subject}'"
+  ]
 }
 
 resource "google_project_service" "iam" {
@@ -139,7 +157,7 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   workload_identity_pool_id          = google_iam_workload_identity_pool.github.workload_identity_pool_id
   workload_identity_pool_provider_id = var.provider_id
   display_name                       = "GitHub Actions OIDC ${upper(var.environment)}"
-  attribute_condition                = "assertion.repository == '${var.github_owner}/${var.github_repository}' && assertion.environment == '${var.environment}'"
+  attribute_condition                = "assertion.repository == '${var.github_owner}/${var.github_repository}' && (${join(" || ", local.allowed_subject_conditions)})"
   attribute_mapping = {
     "google.subject"        = "assertion.sub"
     "attribute.repository"  = "assertion.repository"

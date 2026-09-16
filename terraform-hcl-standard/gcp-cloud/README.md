@@ -42,5 +42,15 @@ GitOps 仓库 `resources/xworktech.com/<env>/gcp/open-platform-*.yaml` 声明，
    ```
 3. UAT 通过验证并获得发布审批后，再对 `open-platform-prod.yaml` 重复渲染和计划。
 
+`bootstrap/identity` 已先创建 WIF Pool、Provider 和环境 deploy Service Account；
+平台运行目录默认 `create_project = false`，读取已存在的目标项目，并通过运行时
+Vault JWT -> Google STS/WIF 注入 `deploy_service_account` 和
+`workload_identity_provider`。这样平台 apply 不会再次创建身份资源，也不会要求
+使用 Service Account JSON key。
+
+渲染器同时写入 `templates/backend.tf`，统一使用组织 S3-compatible state backend；
+endpoint、bucket、key、access key、secret key 和 region 只由 workflow 从 Vault
+`CICD` 记录注入。
+
 Terraform 只负责 GCP 基础资源；Vault secret value、Vault policy 和 Ansible 服务配置
 由对应运维链路管理。本目录保留既有 AWS/GCP 示例模块，不在新环境中使用 HCL 循环。
