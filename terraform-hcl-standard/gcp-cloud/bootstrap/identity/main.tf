@@ -34,6 +34,8 @@ variable "service_account_roles" {
   description = "List of roles to attach to the bootstrap service account"
   type        = list(string)
   default = [
+    "roles/iam.workloadIdentityPoolAdmin",
+    "roles/iam.serviceAccountAdmin",
     "roles/resourcemanager.projectIamAdmin",
     "roles/storage.admin",
     "roles/compute.admin",
