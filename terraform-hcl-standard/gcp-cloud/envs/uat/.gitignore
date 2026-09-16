@@ -1,4 +1,5 @@
 generated_platform.tf
+backend.tf
 platform-provider.tf
 provider.tf
 variables.tf

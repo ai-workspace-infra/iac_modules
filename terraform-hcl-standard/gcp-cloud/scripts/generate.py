@@ -61,7 +61,7 @@ def render(args):
     generated = workdir / "generated_platform.tf"
     generated.write_text(content, encoding="utf-8")
     subprocess.run(["terraform", "fmt", str(generated)], check=True, stdout=subprocess.DEVNULL)
-    for name in ("platform-provider.tf", "variables.tf"):
+    for name in ("backend.tf", "platform-provider.tf", "variables.tf"):
         (workdir / name).write_text((TEMPLATES / name).read_text(encoding="utf-8"), encoding="utf-8")
 
     # Billing is intentionally absent from YAML and generated tfvars.
