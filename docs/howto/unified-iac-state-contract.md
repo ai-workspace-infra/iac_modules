@@ -43,12 +43,14 @@ terraform/<environment>/<project>/<cloud>/<account>/<workspace>/terraform.tfstat
 例如：
 
 ```text
-terraform/uat/svc.plus/akamai-cloud/primary/ai-workspace/terraform.tfstate
+terraform/uat/svc.plus/akamai-cloud/<akamai-account>/ai-workspace/terraform.tfstate
 terraform/prod/xworktech/gcp-cloud/xworktech/platform/terraform.tfstate
 ```
 
 `environment`、`project`、`cloud`、`account` 与 `workspace` 都是 state
 边界的一部分；不得以共享 workspace 合并不同账号、环境或资源组。
+其中 `account` 必须使用云平台的具体账户名或账户 ID，不得使用
+`primary`、`default`、`main` 等别名。
 
 ## Backend and migration
 
