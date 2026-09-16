@@ -28,3 +28,7 @@
 - `cilium-egress-vxlan-crosscluster.md`
 - `landingzone/alicloud-landingzone-mvp-single-account.md`
 - `virtual-cloud-README.md`
+
+## Provider 操作指南
+
+- [Akamai Cloud / Linode VPS Bootstrap 与 Vault KV](../howto/akamai-cloud-bootstrap-vault-kv.md)

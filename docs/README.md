@@ -19,6 +19,10 @@ This `docs/` directory now has a bilingual canonical layer for the current repos
 - `docs/en/developer-guide.md` / `docs/zh/developer-guide.md`
 - `docs/en/vibe-coding-reference.md` / `docs/zh/vibe-coding-reference.md`
 
+## Provider How-to / Provider 操作指南
+
+- [Akamai Cloud / Linode VPS bootstrap and Vault KV](howto/akamai-cloud-bootstrap-vault-kv.md)
+
 ## Current Repo Context / 当前仓库背景
 
 - Root README: `🌐 CloudNativeSuite`
