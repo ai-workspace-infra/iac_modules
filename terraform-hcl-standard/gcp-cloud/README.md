@@ -52,5 +52,9 @@ Vault JWT -> Google STS/WIF 注入 `deploy_service_account` 和
 endpoint、bucket、key、access key、secret key 和 region 只由 workflow 从 Vault
 `CICD` 记录注入。
 
+UAT OIDC 验证可以在 GitOps manifest 的 `spot_vms` 列表声明最小 Compute Engine
+Spot VM。该模块复用已创建的 deploy Service Account，不创建新的长期密钥；资源
+完成验证后必须执行 Terraform destroy。
+
 Terraform 只负责 GCP 基础资源；Vault secret value、Vault policy 和 Ansible 服务配置
 由对应运维链路管理。本目录保留既有 AWS/GCP 示例模块，不在新环境中使用 HCL 循环。

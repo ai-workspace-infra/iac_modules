@@ -36,6 +36,7 @@ def render(args):
         item.setdefault("machine_type", global_config["vault_machine_type"])
         item.setdefault("image", global_config["vault_image"])
         nodes.append(item)
+    spot_vms = resources.get("spot_vms", [])
 
     workdir = Path(args.workdir)
     workdir.mkdir(parents=True, exist_ok=True)
@@ -55,6 +56,7 @@ def render(args):
     content = env.get_template("open-platform.tf.j2").render(
         environment=global_config["environment"],
         vault_nodes=nodes,
+        spot_vms=spot_vms,
         vault_machine_type=global_config["vault_machine_type"],
         vault_image=global_config["vault_image"],
     )

@@ -38,6 +38,21 @@ module "{{ node.name | tf_id }}" {
 }
 
 {% endfor %}
+{% for vm in spot_vms %}
+module "spot_{{ vm.name | tf_id }}" {
+  source          = "../../modules/spot_vm"
+  depends_on      = [module.project, module.network]
+  project_id      = module.project.project_id
+  name            = "{{ vm.name }}"
+  zone            = "{{ vm.zone }}"
+  machine_type    = "{{ vm.machine_type }}"
+  image           = "{{ vm.image | default('projects/debian-cloud/global/images/family/debian-12') }}"
+  network         = module.network.network
+  subnetwork      = module.network.subnet
+  labels          = {{ vm.labels | default({}) | tojson }}
+}
+
+{% endfor %}
 module "cloud_run" {
   source          = "../../modules/cloud_run"
   depends_on      = [module.project]
@@ -59,6 +74,17 @@ output "platform_runtime" {
     vault_private_ips = {
 {% for node in vault_nodes %}
       "{{ node.name }}" = module.{{ node.name | tf_id }}.private_ip
+{% endfor %}
+    }
+    spot_instances = {
+{% for vm in spot_vms %}
+      "{{ vm.name }}" = {
+        name              = module.spot_{{ vm.name | tf_id }}.name
+        self_link         = module.spot_{{ vm.name | tf_id }}.self_link
+        zone              = module.spot_{{ vm.name | tf_id }}.zone
+        project_id        = module.spot_{{ vm.name | tf_id }}.project_id
+        provisioning_model = module.spot_{{ vm.name | tf_id }}.provisioning_model
+      }
 {% endfor %}
     }
   }
