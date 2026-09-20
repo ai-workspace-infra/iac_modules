@@ -22,6 +22,7 @@ class GenerateTest(unittest.TestCase):
             self.assertIn('resource "linode_sshkey" "test_admin"', content)
             self.assertIn('resource "linode_firewall" "fw_web_node"', content)
             self.assertIn('module "compute_web_node"', content)
+            self.assertIn('ip          = module.compute_web_node.main_ip', content)
             self.assertNotRegex(content, r"\b(for_each|count|dynamic)\b")
 
             tfvars = json.loads((workdir / "terraform.auto.tfvars.json").read_text())

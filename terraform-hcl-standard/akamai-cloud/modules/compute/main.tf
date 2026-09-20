@@ -69,7 +69,7 @@ output "instance_id" {
 
 output "main_ip" {
   description = "Public IPv4 address"
-  value       = tolist(linode_instance.this.ipv4)[0]
+  value       = linode_instance.this.ip_address
 }
 
 output "private_ip" {
