@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,6 +41,29 @@ class GenerateTest(unittest.TestCase):
             manifest = json.loads((workdir / "hosts_manifest.json").read_text())
             self.assertEqual(manifest["provider"], "akamai-cloud")
             self.assertEqual(manifest["hosts"][0]["label"], "test-web-node")
+
+    def test_inventory_preserves_groups_and_ssh_user_in_cmdb(self):
+        fixture = ROOT / "tests" / "fixtures" / "linode.yaml"
+        with tempfile.TemporaryDirectory() as tempdir:
+            workdir = Path(tempdir)
+            generate.render(SimpleNamespace(resources=fixture, workdir=workdir))
+            with mock.patch.object(
+                generate,
+                "terraform_output",
+                return_value={
+                    "web-node": {
+                        "ip": "198.51.100.10",
+                        "private_ip": "10.0.0.10",
+                        "ipv6": "2001:db8::10/128",
+                        "instance_id": 123,
+                    }
+                },
+            ):
+                generate.inventory(SimpleNamespace(resources=fixture, workdir=workdir))
+
+            cmdb = json.loads((workdir / "cmdb.json").read_text())
+            self.assertEqual(cmdb["web.example.test"]["groups"], ["web", "debian"])
+            self.assertEqual(cmdb["web.example.test"]["ansible_user"], "root")
 
 
 if __name__ == "__main__":
