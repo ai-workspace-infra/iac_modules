@@ -16,7 +16,7 @@ resource "linode_sshkey" "{{ key.name | tf_id }}" {
 {% set ssh_cidrs = firewall.get('ssh_cidrs', ['0.0.0.0/0']) %}
 {% set ipv6_cidrs = firewall.get('ssh_ipv6_cidrs', ['::/0']) %}
 resource "linode_firewall" "fw_{{ hid }}" {
-  label            = "{{ host.label }}-firewall"
+  label            = "{{ host.firewall_label }}"
   inbound_policy   = "DROP"
   outbound_policy  = "ACCEPT"
 

@@ -12,6 +12,14 @@ import generate  # noqa: E402
 
 
 class GenerateTest(unittest.TestCase):
+    def test_firewall_label_is_stable_and_within_linode_limit(self):
+        label = "open-platform-uat-ak-open-platform"
+        rendered = generate.firewall_label(label)
+
+        self.assertLessEqual(len(rendered), generate.LINODE_FIREWALL_LABEL_MAX)
+        self.assertEqual(rendered, generate.firewall_label(label))
+        self.assertNotEqual(rendered, label + "-firewall")
+
     def test_render_expands_explicit_linode_blocks(self):
         fixture = ROOT / "tests" / "fixtures" / "linode.yaml"
         with tempfile.TemporaryDirectory() as tempdir:
