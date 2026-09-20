@@ -37,8 +37,6 @@ variable "service_account_roles" {
     "roles/iam.workloadIdentityPoolAdmin",
     "roles/iam.serviceAccountAdmin",
     "roles/resourcemanager.projectIamAdmin",
-    "roles/storage.admin",
-    "roles/compute.admin",
     "roles/serviceusage.serviceUsageAdmin"
   ]
 }
