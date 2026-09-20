@@ -89,6 +89,7 @@ variable "deploy_service_account_roles" {
   type = set(string)
   default = [
     "roles/artifactregistry.writer",
+    "roles/compute.instanceAdmin.v1",
     "roles/run.admin",
     "roles/serviceusage.serviceUsageConsumer",
   ]
