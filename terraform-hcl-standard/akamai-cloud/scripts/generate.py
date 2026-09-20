@@ -172,6 +172,7 @@ def inventory(args):
         host_vars.setdefault("image", host.get("image", global_config.get("image")))
         service_domains = host_vars.get("service_domains", []) or []
         fqdn = str(service_domains[0]).strip() if isinstance(service_domains, list) and service_domains else name
+        ssh_user = host.get("ansible_user", "root")
         cmdb[fqdn] = {
             "name": name,
             "fqdn": fqdn,
@@ -183,9 +184,13 @@ def inventory(args):
             "region": host_vars["cloud_region"],
             "type": host_vars["plan"],
             "image": host_vars["image"],
+            # Keep deployment metadata at the top level as well as in
+            # host_vars. The platform-ops bootstrap router reads groups and
+            # the SSH user directly from cmdb.json.
+            "groups": list(host.get("groups", []) or []),
+            "ansible_user": ssh_user,
             "host_vars": host_vars,
         }
-        ssh_user = host.get("ansible_user", "root")
         lines[fqdn] = f"{fqdn} ansible_host={facts.get('ip', '')} ansible_user={ssh_user}"
         for group in host.get("groups", []) or []:
             groups.setdefault(str(group), []).append(fqdn)
