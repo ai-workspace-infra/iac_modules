@@ -2,6 +2,7 @@
 """Render Akamai Cloud/Linode GitOps YAML into explicit Terraform and CMDB."""
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -19,10 +20,22 @@ GITOPS_ROOT = Path(os.environ.get("GITOPS_ROOT", ROOT.parents[2] / "gitops"))
 DEFAULT_RESOURCES = GITOPS_ROOT / "resources" / "svc.plus" / "uat" / "akamai" / "ai-workspace.yaml"
 DEFAULT_WORKDIR = ROOT / "envs" / "uat"
 COPY_INTO_WORKDIR = ("provider.tf", "variables.tf", "cloud-init.yaml")
+LINODE_FIREWALL_LABEL_MAX = 32
 
 
 def tf_id(value):
     return re.sub(r"[^0-9A-Za-z_]", "_", str(value))
+
+
+def firewall_label(instance_label):
+    """Return a stable Linode firewall label within the provider's 32-char limit."""
+    candidate = f"{instance_label}-firewall"
+    if len(candidate) <= LINODE_FIREWALL_LABEL_MAX:
+        return candidate
+
+    digest = hashlib.sha256(str(instance_label).encode("utf-8")).hexdigest()[:8]
+    prefix_length = LINODE_FIREWALL_LABEL_MAX - len(digest) - 1
+    return f"{str(instance_label)[:prefix_length]}-{digest}"
 
 
 def _load_yaml(path: Path):
@@ -48,6 +61,7 @@ def load_sources(resources):
             prefix = str(source_global.get("name_prefix", "") or "").strip()
             name = str(host["name"])
             host["label"] = f"{prefix}-{name}" if prefix else name
+            host["firewall_label"] = firewall_label(host["label"])
             host["_source"] = str(path)
             hosts.append(host)
     if not hosts:
