@@ -95,12 +95,20 @@ def write_manifest(workdir: Path, hosts):
 def render(args):
     resources, workdir = Path(args.resources), Path(args.workdir)
     global_config, ssh_keys, hosts = load_sources(resources)
+    environment = str(global_config.get("environment", "")).strip().lower()
+    if environment not in {"uat", "prod"}:
+        match = re.search(r"/resources/[^/]+/(uat|prod)/akamai/", str(resources))
+        environment = match.group(1) if match else environment
+    # Production VPS must not be destroyed accidentally by Terraform. An
+    # explicit global flag can also protect non-production test resources, but
+    # it can never disable the PROD guard.
+    prevent_destroy = environment == "prod" or bool(global_config.get("prevent_destroy", False))
     workdir.mkdir(parents=True, exist_ok=True)
     environment = jinja()
     generated = workdir / "generated_hosts.tf"
     generated.write_text(
         environment.get_template("hosts.tf.j2").render(
-            ssh_keys=ssh_keys, hosts=hosts
+            ssh_keys=ssh_keys, hosts=hosts, prevent_destroy=prevent_destroy
         ),
         encoding="utf-8",
     )

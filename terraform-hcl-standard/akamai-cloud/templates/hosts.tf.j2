@@ -61,7 +61,7 @@ resource "linode_firewall" "fw_{{ hid }}" {
 }
 
 module "compute_{{ hid }}" {
-  source = "../../modules/compute"
+  source = "../../modules/{% if prevent_destroy %}compute_protected{% else %}compute{% endif %}"
 
   label           = "{{ host.label }}"
   region          = {% if host.get('region') %}"{{ host.region }}"{% else %}var.region{% endif %}

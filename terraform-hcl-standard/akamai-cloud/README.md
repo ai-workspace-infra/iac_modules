@@ -11,6 +11,8 @@
 - **GitOps 声明目录**：`resources/<project>/<env>/akamai/*.yaml`
 - **凭据**：`LINODE_TOKEN`，通过 Vault/CI 注入，不进入 YAML、tfvars 或 Git
 - **CMDB**：Terraform 只输出运行时事实，Python 将其与 GitOps 静态字段合并
+- **删除保护**：`prod` 环境自动选择 protected compute module，渲染
+  `lifecycle.prevent_destroy = true`；UAT/test 使用普通 compute module
 - **Edge/CDN**：未来使用 `edge_provider: akamai`，与 Cloudflare 并列，不复用
   `cloud_provider`
 
@@ -75,6 +77,13 @@ hosts:
 `ssh_keys` 只允许公钥；API token、state credentials 和私钥必须由运行环境
 提供。真实部署接入 GitOps 与 `platform-ops-toolkit` 后，先在 UAT 验证，再按
 现有审批链路晋升 PROD。
+
+PROD VPS 的删除保护是 Terraform 侧保护，不是 Linode Cloud Manager 的账号级锁：
+`terraform destroy` 会因为 `prevent_destroy` 失败；如需下线，必须由维护者先在受控
+变更中切换回普通 compute module 并重新评审。protected module 保持与普通 module
+相同的资源地址 `linode_instance.this`，切换 module source 不会主动替换已有 VPS。
+该保护不会影响 `terraform plan`、配置更新或 Ansible 部署，也不会为不在该 Terraform
+state 中的 existing 主机创建保护。
 
 ## 本地校验
 
