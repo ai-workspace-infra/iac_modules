@@ -7,6 +7,7 @@ module "project" {
   billing_account_id = var.billing_account_id
 }
 
+{% if enable_network %}
 module "network" {
   source       = "../../modules/network"
   depends_on   = [module.project]
@@ -15,7 +16,9 @@ module "network" {
   network_name = var.network_name
   subnet_cidr  = var.subnet_cidr
 }
+{% endif %}
 
+{% if enable_artifact_registry %}
 module "artifact_registry" {
   source        = "../../modules/artifact_registry"
   depends_on    = [module.project]
@@ -23,6 +26,7 @@ module "artifact_registry" {
   location      = var.artifact_registry_location
   repository_id = var.artifact_registry_id
 }
+{% endif %}
 
 {% for node in vault_nodes %}
 module "{{ node.name | tf_id }}" {
@@ -53,6 +57,7 @@ module "spot_{{ vm.name | tf_id }}" {
 }
 
 {% endfor %}
+{% if enable_cloud_run %}
 module "cloud_run" {
   source          = "../../modules/cloud_run"
   depends_on      = [module.project]
@@ -62,13 +67,14 @@ module "cloud_run" {
   image           = var.cloud_run_image
   service_account = var.deploy_service_account
 }
+{% endif %}
 
 output "platform_runtime" {
   description = "Runtime facts consumed by the CMDB renderer."
   value = {
     project_id        = module.project.project_id
     project_number    = module.project.project_number
-    cloud_run_uri     = module.cloud_run.uri
+    cloud_run_uri     = {{ "module.cloud_run.uri" if enable_cloud_run else "null" }}
     oidc_provider     = var.workload_identity_provider
     deploy_account    = var.deploy_service_account
     vault_private_ips = {

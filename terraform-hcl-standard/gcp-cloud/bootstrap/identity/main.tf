@@ -88,6 +88,7 @@ variable "deploy_service_account_roles" {
   default = [
     "roles/artifactregistry.writer",
     "roles/compute.instanceAdmin.v1",
+    "roles/compute.networkAdmin",
     "roles/run.admin",
     "roles/serviceusage.serviceUsageConsumer",
   ]
@@ -139,6 +140,27 @@ resource "google_project_service" "iam_credentials" {
 resource "google_project_service" "sts" {
   project            = var.project_id
   service            = "sts.googleapis.com"
+  disable_on_destroy = false
+  depends_on         = [google_project_service.iam]
+}
+
+variable "platform_services" {
+  description = "APIs the runtime platform stack uses. Enabled here by the bootstrap principal so the runtime deploy identity never needs serviceusage.services.enable."
+  type        = set(string)
+  default = [
+    "artifactregistry.googleapis.com",
+    "compute.googleapis.com",
+    "logging.googleapis.com",
+    "monitoring.googleapis.com",
+    "run.googleapis.com",
+    "secretmanager.googleapis.com",
+  ]
+}
+
+resource "google_project_service" "platform" {
+  for_each           = var.platform_services
+  project            = var.project_id
+  service            = each.value
   disable_on_destroy = false
   depends_on         = [google_project_service.iam]
 }

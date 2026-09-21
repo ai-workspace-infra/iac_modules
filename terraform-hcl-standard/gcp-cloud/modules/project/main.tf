@@ -54,53 +54,8 @@ locals {
   project_number = var.create_project ? google_project.this[0].number : data.google_project.existing[0].number
 }
 
-resource "google_project_service" "compute" {
-  project            = local.project_id
-  service            = "compute.googleapis.com"
-  disable_on_destroy = false
-}
-
-resource "google_project_service" "run" {
-  project            = local.project_id
-  service            = "run.googleapis.com"
-  disable_on_destroy = false
-}
-
-resource "google_project_service" "artifact_registry" {
-  project            = local.project_id
-  service            = "artifactregistry.googleapis.com"
-  disable_on_destroy = false
-}
-
-resource "google_project_service" "iam_credentials" {
-  project            = local.project_id
-  service            = "iamcredentials.googleapis.com"
-  disable_on_destroy = false
-}
-
-resource "google_project_service" "sts" {
-  project            = local.project_id
-  service            = "sts.googleapis.com"
-  disable_on_destroy = false
-}
-
-resource "google_project_service" "logging" {
-  project            = local.project_id
-  service            = "logging.googleapis.com"
-  disable_on_destroy = false
-}
-
-resource "google_project_service" "monitoring" {
-  project            = local.project_id
-  service            = "monitoring.googleapis.com"
-  disable_on_destroy = false
-}
-
-resource "google_project_service" "secret_manager" {
-  project            = local.project_id
-  service            = "secretmanager.googleapis.com"
-  disable_on_destroy = false
-}
+# Project APIs are enabled by bootstrap/identity (platform_services) so the
+# runtime deploy identity only needs serviceusage.serviceUsageConsumer.
 
 output "project_id" {
   value = local.project_id

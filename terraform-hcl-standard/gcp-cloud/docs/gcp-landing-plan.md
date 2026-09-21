@@ -9,8 +9,8 @@
 
 | 环境 | 项目 ID | 边界 |
 | --- | --- | --- |
-| UAT | `xworktech-open-platform-uat` | 监控、日志、Vault UAT、共享网关和 CI 基础设施 |
-| PROD | `xworktech-open-platform-prod` | 监控、日志、Vault PROD、共享网关和 CI 基础设施 |
+| UAT | `xwork-open-platform-uat` | 监控、日志、Vault UAT、共享网关和 CI 基础设施 |
+| PROD | `xwork-open-platform-prod` | 监控、日志、Vault PROD、共享网关和 CI 基础设施 |
 | UAT | `xworktech-ai-workspace-uat` | AI Workspace 测试运行时 |
 | PROD | `xworktech-ai-workspace-prod` | AI Workspace 生产运行时 |
 | UAT | `xworktech-xconnect-uat` | XConnect 测试运行时 |

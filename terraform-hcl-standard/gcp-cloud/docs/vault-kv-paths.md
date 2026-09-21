@@ -26,8 +26,8 @@ Open Platform 的环境映射固定为：
 
 | 环境 | GCP 项目 | Vault 集群 |
 | --- | --- | --- |
-| UAT | `xworktech-open-platform-uat` | UAT 单节点或小型 Raft 集群 |
-| PROD | `xworktech-open-platform-prod` | 3 节点 Raft 集群（`asia-east1-a/b/c`） |
+| UAT | `xwork-open-platform-uat` | UAT 单节点或小型 Raft 集群 |
+| PROD | `xwork-open-platform-prod` | 3 节点 Raft 集群（`asia-east1-a/b/c`） |
 
 ## 字段契约
 
