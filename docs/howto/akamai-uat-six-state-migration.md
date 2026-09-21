@@ -15,7 +15,7 @@ Terraform state：
 state key 固定为：
 
 ```text
-terraform/uat/platform-ops-toolkit/akamai-cloud/<真实账户名>/<namespace>/terraform.tfstate
+terraform/uat/svc.plus/akamai-cloud/<真实账户名>/<namespace>/terraform.tfstate
 ```
 
 可以在不读取任何凭据的情况下检查 key：

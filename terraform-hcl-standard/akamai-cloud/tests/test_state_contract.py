@@ -20,7 +20,7 @@ class StateContractTest(unittest.TestCase):
         keys = {
             canonical_state_key(
                 environment="uat",
-                project="platform-ops-toolkit",
+                project="svc.plus",
                 account="manbuzhe2026",
                 namespace=namespace,
             )
@@ -48,7 +48,7 @@ class StateContractTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             canonical_state_key(
                 environment="uat",
-                project="platform-ops-toolkit",
+                project="svc.plus",
                 account="primary",
                 namespace="web-saas",
             )

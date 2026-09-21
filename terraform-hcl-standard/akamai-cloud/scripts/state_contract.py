@@ -65,7 +65,7 @@ def may_destroy(namespace: str) -> bool:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--environment", default="uat")
-    parser.add_argument("--project", default="platform-ops-toolkit")
+    parser.add_argument("--project", default="svc.plus")
     parser.add_argument("--account", required=True)
     parser.add_argument("--namespace", required=True)
     args = parser.parse_args()
