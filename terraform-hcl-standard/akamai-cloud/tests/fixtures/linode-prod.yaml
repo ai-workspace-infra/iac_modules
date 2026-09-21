@@ -1,0 +1,22 @@
+global:
+  provider: akamai-cloud
+  environment: prod
+  region: jp-tyo-3
+  image: linode/debian12
+  type: g6-standard-1
+  name_prefix: xconn-prod-ak
+  user_data_file: cloud-init.yaml
+
+ssh_keys:
+  - name: prod-admin
+    public: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIProd prod-admin"
+
+hosts:
+  - name: jpn-tky
+    region: jp-tyo-3
+    type: g6-standard-1
+    groups: [agent_proxy]
+  - name: us-ca
+    region: us-lax
+    type: g6-standard-1
+    groups: [agent_proxy]

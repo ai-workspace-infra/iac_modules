@@ -63,7 +63,7 @@ resource "linode_firewall" "fw_{{ hid }}" {
 }
 
 module "compute_{{ hid }}" {
-  source = "{{ module_root }}/compute"
+  source = "{{ module_root }}/{{ compute_module }}"
 
   label           = "{{ host.label }}"
   region          = {% if host.get('region') %}"{{ host.region }}"{% else %}var.region{% endif %}

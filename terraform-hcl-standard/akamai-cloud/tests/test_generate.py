@@ -34,6 +34,7 @@ class GenerateTest(unittest.TestCase):
             self.assertIn('authorized_keys = ["ssh-ed25519', content)
             self.assertIn('resource "linode_firewall" "fw_web_node"', content)
             self.assertIn('module "compute_web_node"', content)
+            self.assertIn('/compute"', content)
             self.assertIn('ip          = module.compute_web_node.main_ip', content)
             self.assertNotRegex(content, r"\b(for_each|count|dynamic)\b")
 
@@ -86,7 +87,7 @@ class GenerateTest(unittest.TestCase):
     def test_render_rejects_multiple_hosts_in_one_namespace(self):
         fixture = ROOT / "tests" / "fixtures" / "linode.yaml"
         source = fixture.read_text(encoding="utf-8")
-        duplicated_host = source.replace(
+        duplicated_host = source.replace("environment: test", "environment: uat").replace(
             "  - name: web-node", "  - name: web-node-copy\n    region: us-east\n    type: g6-nanode-1\n    image: linode/debian12\n  - name: web-node", 1
         )
         with tempfile.TemporaryDirectory() as tempdir:
@@ -101,6 +102,23 @@ class GenerateTest(unittest.TestCase):
                     )
                 )
         self.assertIn("exactly one host", str(raised.exception))
+
+    def test_prod_render_allows_multiple_hosts_and_prevents_destroy(self):
+        fixture = ROOT / "tests" / "fixtures" / "linode-prod.yaml"
+        with tempfile.TemporaryDirectory() as tempdir:
+            workdir = Path(tempdir)
+            generate.render(
+                SimpleNamespace(
+                    resources=fixture,
+                    workdir=workdir,
+                    namespace="agent-proxy",
+                )
+            )
+
+            content = (workdir / "generated_hosts.tf").read_text(encoding="utf-8")
+            self.assertEqual(content.count('module "compute_'), 2)
+            self.assertIn('/compute_protected"', content)
+            self.assertNotIn('/compute"', content)
 
 
 if __name__ == "__main__":

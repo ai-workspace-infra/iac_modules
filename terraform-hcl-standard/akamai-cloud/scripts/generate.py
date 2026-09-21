@@ -111,20 +111,33 @@ def write_manifest(workdir: Path, hosts, namespace):
 
 def render(args):
     resources, workdir = Path(args.resources), Path(args.workdir)
-    namespace = getattr(args, "namespace", None) or os.environ.get("TF_STATE_WORKSPACE")
-    namespace = namespace or resources.stem
-    namespace = validate_namespace(namespace, environment="uat")
+    global_config, ssh_keys, hosts = load_sources(resources)
+    declared_environment = str(global_config.get("environment", "")).strip().lower()
+    environment = declared_environment
+    path_match = re.search(r"/resources/[^/]+/(uat|prod)/akamai/", str(resources))
+    if path_match:
+        environment = path_match.group(1)
     envs_root = (ROOT / "envs").resolve()
     resolved_workdir = workdir.resolve()
+    if resolved_workdir.is_relative_to(envs_root):
+        relative_parts = resolved_workdir.relative_to(envs_root).parts
+        if relative_parts and relative_parts[0] in {"uat", "prod"}:
+            environment = relative_parts[0]
+
+    namespace = getattr(args, "namespace", None) or os.environ.get("TF_STATE_WORKSPACE")
+    namespace = namespace or resources.stem
+    namespace = validate_namespace(namespace, environment=environment)
     if resolved_workdir.is_relative_to(envs_root) and workdir.name != namespace:
         raise SystemExit(
-            f"Akamai UAT workdir must end with /{namespace}; shared {workdir} is forbidden"
+            f"Akamai workdir must end with /{namespace}; shared {workdir} is forbidden"
         )
-    global_config, ssh_keys, hosts = load_sources(resources)
-    if len(hosts) != 1:
+    if environment == "uat" and len(hosts) != 1:
         raise SystemExit(
             f"Akamai namespace {namespace} must contain exactly one host; got {len(hosts)}"
         )
+    prevent_destroy = environment == "prod" or bool(
+        global_config.get("prevent_destroy", False)
+    )
     workdir.mkdir(parents=True, exist_ok=True)
     environment = jinja()
     generated = workdir / "generated_hosts.tf"
@@ -133,6 +146,7 @@ def render(args):
             ssh_keys=ssh_keys,
             hosts=hosts,
             module_root=os.path.relpath(ROOT / "modules", workdir),
+            compute_module="compute_protected" if prevent_destroy else "compute",
             # Account-level linode_sshkey objects cannot be owned by six states.
             # Each isolated namespace therefore passes the public keys directly
             # to its instance unless a legacy declaration explicitly opts in.
@@ -235,8 +249,10 @@ def main():
         sub.add_argument("--workdir", type=Path, default=DEFAULT_WORKDIR)
         sub.add_argument(
             "--namespace",
-            choices=UAT_NAMESPACES,
-            help="isolated Terraform state namespace; defaults to the resource filename stem",
+            help=(
+                "isolated Terraform state namespace; UAT is restricted to: "
+                + ", ".join(UAT_NAMESPACES)
+            ),
         )
         sub.set_defaults(handler=handler)
     args = parser.parse_args()
