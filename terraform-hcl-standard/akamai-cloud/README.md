@@ -8,6 +8,10 @@
 
 - **Terraform provider**：`linode/linode`
 - **自动化 provider 路由**：`akamai-cloud`
+- **UAT state 隔离**：`web-saas`、`open-platform`、`ai-workspace`、
+  `agent-proxy-jp`、`agent-proxy-us`、`agent-proxy-sg` 六个 namespace；禁止共享
+  `selfhost` state。详见
+  [`../../docs/howto/akamai-uat-six-state-migration.md`](../../docs/howto/akamai-uat-six-state-migration.md)。
 - **GitOps 声明目录**：`resources/<project>/<env>/akamai/*.yaml`
 - **凭据**：`LINODE_TOKEN`，通过 Vault/CI 注入，不进入 YAML、tfvars 或 Git
 - **CMDB**：Terraform 只输出运行时事实，Python 将其与 GitOps 静态字段合并

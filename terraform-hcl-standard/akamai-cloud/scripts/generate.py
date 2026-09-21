@@ -14,11 +14,13 @@ from pathlib import Path
 import yaml
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, Template
 
+from state_contract import UAT_NAMESPACES, validate_namespace
+
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = ROOT / "templates"
 GITOPS_ROOT = Path(os.environ.get("GITOPS_ROOT", ROOT.parents[2] / "gitops"))
 DEFAULT_RESOURCES = GITOPS_ROOT / "resources" / "svc.plus" / "uat" / "akamai" / "ai-workspace.yaml"
-DEFAULT_WORKDIR = ROOT / "envs" / "uat"
+DEFAULT_WORKDIR = ROOT / "envs" / "uat" / "ai-workspace"
 COPY_INTO_WORKDIR = ("provider.tf", "variables.tf", "cloud-init.yaml")
 LINODE_FIREWALL_LABEL_MAX = 32
 
@@ -85,9 +87,10 @@ def jinja():
     return env
 
 
-def write_manifest(workdir: Path, hosts):
+def write_manifest(workdir: Path, hosts, namespace):
     manifest = {
         "provider": "akamai-cloud",
+        "state_namespace": namespace,
         "hosts": [
             {
                 "name": host["name"],
@@ -108,13 +111,32 @@ def write_manifest(workdir: Path, hosts):
 
 def render(args):
     resources, workdir = Path(args.resources), Path(args.workdir)
+    namespace = getattr(args, "namespace", None) or os.environ.get("TF_STATE_WORKSPACE")
+    namespace = namespace or resources.stem
+    namespace = validate_namespace(namespace, environment="uat")
+    envs_root = (ROOT / "envs").resolve()
+    resolved_workdir = workdir.resolve()
+    if resolved_workdir.is_relative_to(envs_root) and workdir.name != namespace:
+        raise SystemExit(
+            f"Akamai UAT workdir must end with /{namespace}; shared {workdir} is forbidden"
+        )
     global_config, ssh_keys, hosts = load_sources(resources)
+    if len(hosts) != 1:
+        raise SystemExit(
+            f"Akamai namespace {namespace} must contain exactly one host; got {len(hosts)}"
+        )
     workdir.mkdir(parents=True, exist_ok=True)
     environment = jinja()
     generated = workdir / "generated_hosts.tf"
     generated.write_text(
         environment.get_template("hosts.tf.j2").render(
-            ssh_keys=ssh_keys, hosts=hosts
+            ssh_keys=ssh_keys,
+            hosts=hosts,
+            module_root=os.path.relpath(ROOT / "modules", workdir),
+            # Account-level linode_sshkey objects cannot be owned by six states.
+            # Each isolated namespace therefore passes the public keys directly
+            # to its instance unless a legacy declaration explicitly opts in.
+            manage_account_ssh_keys=bool(global_config.get("manage_account_ssh_keys", False)),
         ),
         encoding="utf-8",
     )
@@ -135,7 +157,7 @@ def render(args):
     (workdir / "terraform.auto.tfvars.json").write_text(
         json.dumps(tfvars, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
-    write_manifest(workdir, hosts)
+    write_manifest(workdir, hosts, namespace)
     print(f"rendered {resources} -> {workdir}")
 
 
@@ -211,6 +233,11 @@ def main():
         sub = subparsers.add_parser(command)
         sub.add_argument("--resources", type=Path, default=DEFAULT_RESOURCES)
         sub.add_argument("--workdir", type=Path, default=DEFAULT_WORKDIR)
+        sub.add_argument(
+            "--namespace",
+            choices=UAT_NAMESPACES,
+            help="isolated Terraform state namespace; defaults to the resource filename stem",
+        )
         sub.set_defaults(handler=handler)
     args = parser.parse_args()
     args.handler(args)
