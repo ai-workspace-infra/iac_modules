@@ -12,6 +12,10 @@
   `agent-proxy-jp`、`agent-proxy-us`、`agent-proxy-sg` 六个 namespace；禁止共享
   `selfhost` state。详见
   [`../../docs/howto/akamai-uat-six-state-migration.md`](../../docs/howto/akamai-uat-six-state-migration.md)。
+- **PROD 删除保护**：PROD 声明自动使用 `compute_protected` module，并在
+  `linode_instance` 上设置 `lifecycle.prevent_destroy = true`。这是 Terraform
+  state 侧的保护；下线必须先通过独立代码变更和审批移除保护。UAT 的五个临时
+  namespace 不使用此 module，`open-platform` 则由 Platform workflow 拒绝 destroy。
 - **GitOps 声明目录**：`resources/<project>/<env>/akamai/*.yaml`
 - **凭据**：`LINODE_TOKEN`，通过 Vault/CI 注入，不进入 YAML、tfvars 或 Git
 - **CMDB**：Terraform 只输出运行时事实，Python 将其与 GitOps 静态字段合并
