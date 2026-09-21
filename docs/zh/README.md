@@ -32,3 +32,4 @@
 ## Provider 操作指南
 
 - [Akamai Cloud / Linode VPS Bootstrap 与 Vault KV](../howto/akamai-cloud-bootstrap-vault-kv.md)
+- [Akamai UAT 六 namespace state 迁移与清理](../howto/akamai-uat-six-state-migration.md)

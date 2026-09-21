@@ -3,12 +3,14 @@
 # 约束：循环在 Python/Jinja2 侧完成，生成 HCL 保持扁平、显式、可审计。
 # =============================================================================
 
+{% if manage_account_ssh_keys %}
 {% for key in ssh_keys %}
 resource "linode_sshkey" "{{ key.name | tf_id }}" {
   label   = "{{ key.name }}"
   ssh_key = "{{ key.public }}"
 }
 {% endfor %}
+{% endif %}
 
 {% for host in hosts %}
 {% set hid = host.name | tf_id %}
@@ -61,7 +63,7 @@ resource "linode_firewall" "fw_{{ hid }}" {
 }
 
 module "compute_{{ hid }}" {
-  source = "../../modules/compute"
+  source = "{{ module_root }}/compute"
 
   label           = "{{ host.label }}"
   region          = {% if host.get('region') %}"{{ host.region }}"{% else %}var.region{% endif %}
@@ -69,14 +71,14 @@ module "compute_{{ hid }}" {
   image           = {% if host.get('image') %}"{{ host.image }}"{% else %}var.image{% endif %}
   private_ip      = {{ host.get('private_ip', true) | tojson }}
   firewall_id     = linode_firewall.fw_{{ hid }}.id
-  authorized_keys = [{% for key in ssh_keys %}linode_sshkey.{{ key.name | tf_id }}.ssh_key{{ ", " if not loop.last }}{% endfor %}]
+  authorized_keys = [{% for key in ssh_keys %}{% if manage_account_ssh_keys %}linode_sshkey.{{ key.name | tf_id }}.ssh_key{% else %}{{ key.public | tojson }}{% endif %}{{ ", " if not loop.last }}{% endfor %}]
   user_data       = file(var.user_data_file)
   tags            = {{ host.get('tags', []) | tojson }}
 }
 
 {% if host.get('volume') %}
 module "volume_{{ hid }}" {
-  source     = "../../modules/storage"
+  source     = "{{ module_root }}/storage"
   label      = "{{ host.volume.get('label', host.label ~ '-data') }}"
   region     = {% if host.get('region') %}"{{ host.region }}"{% else %}var.region{% endif %}
   size       = {{ host.volume.get('size', 10) }}
