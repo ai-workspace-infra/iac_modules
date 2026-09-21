@@ -60,25 +60,31 @@ variable "workload_identity_provider" {
 }
 
 variable "network_name" {
-  type = string
+  type    = string
+  default = null
 }
 
 variable "subnet_cidr" {
-  type = string
+  type    = string
+  default = null
 }
 
 variable "artifact_registry_location" {
-  type = string
+  type    = string
+  default = null
 }
 
 variable "artifact_registry_id" {
-  type = string
+  type    = string
+  default = null
 }
 
 variable "cloud_run_service_name" {
-  type = string
+  type    = string
+  default = null
 }
 
 variable "cloud_run_image" {
-  type = string
+  type    = string
+  default = null
 }

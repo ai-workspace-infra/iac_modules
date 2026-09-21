@@ -38,6 +38,21 @@ def render(args):
         nodes.append(item)
     spot_vms = resources.get("spot_vms", [])
 
+    # Optional platform components are rendered only when the manifest
+    # declares them, so a minimal manifest (for example a Spot VM validation
+    # stack) does not plan the full platform.
+    enable_network = bool(global_config.get("network_name"))
+    enable_artifact_registry = bool(global_config.get("artifact_registry_id"))
+    enable_cloud_run = bool(global_config.get("cloud_run_service_name"))
+    if (nodes or spot_vms) and not enable_network:
+        raise SystemExit("vault_nodes/spot_vms require global.network_name and global.subnet_cidr")
+    if enable_network and not global_config.get("subnet_cidr"):
+        raise SystemExit("global.network_name requires global.subnet_cidr")
+    if enable_artifact_registry and not global_config.get("artifact_registry_location"):
+        raise SystemExit("global.artifact_registry_id requires global.artifact_registry_location")
+    if enable_cloud_run and not global_config.get("cloud_run_image"):
+        raise SystemExit("global.cloud_run_service_name requires global.cloud_run_image")
+
     workdir = Path(args.workdir)
     workdir.mkdir(parents=True, exist_ok=True)
     # Remove the legacy generated provider filename so old renders cannot
@@ -57,8 +72,11 @@ def render(args):
         environment=global_config["environment"],
         vault_nodes=nodes,
         spot_vms=spot_vms,
-        vault_machine_type=global_config["vault_machine_type"],
-        vault_image=global_config["vault_image"],
+        vault_machine_type=global_config.get("vault_machine_type", ""),
+        vault_image=global_config.get("vault_image", ""),
+        enable_network=enable_network,
+        enable_artifact_registry=enable_artifact_registry,
+        enable_cloud_run=enable_cloud_run,
     )
     generated = workdir / "generated_platform.tf"
     generated.write_text(content, encoding="utf-8")
