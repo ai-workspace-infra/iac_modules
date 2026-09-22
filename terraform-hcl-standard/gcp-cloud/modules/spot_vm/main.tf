@@ -41,6 +41,17 @@ variable "labels" {
   default = {}
 }
 
+variable "max_run_duration_seconds" {
+  description = "Maximum lifetime of the disposable Spot instance before Compute Engine deletes it."
+  type        = number
+  default     = 3600
+
+  validation {
+    condition     = var.max_run_duration_seconds >= 60
+    error_message = "max_run_duration_seconds must be at least 60 seconds."
+  }
+}
+
 resource "google_compute_instance" "this" {
   project                   = var.project_id
   name                      = var.name
@@ -65,8 +76,13 @@ resource "google_compute_instance" "this" {
   scheduling {
     automatic_restart           = false
     on_host_maintenance         = "TERMINATE"
+    preemptible                 = true
     provisioning_model          = "SPOT"
-    instance_termination_action = "STOP"
+    instance_termination_action = "DELETE"
+
+    max_run_duration {
+      seconds = var.max_run_duration_seconds
+    }
   }
 }
 
