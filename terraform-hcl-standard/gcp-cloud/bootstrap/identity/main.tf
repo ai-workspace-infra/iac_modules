@@ -149,6 +149,7 @@ variable "platform_services" {
   type        = set(string)
   default = [
     "artifactregistry.googleapis.com",
+    "cloudresourcemanager.googleapis.com",
     "compute.googleapis.com",
     "logging.googleapis.com",
     "monitoring.googleapis.com",
