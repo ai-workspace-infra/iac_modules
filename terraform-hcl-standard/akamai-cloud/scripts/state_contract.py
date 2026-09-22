@@ -15,6 +15,11 @@ UAT_NAMESPACES = (
     "agent-proxy-jp",
     "agent-proxy-us",
     "agent-proxy-sg",
+    "ai-aggregator-gateway",
+    "ai-aggregator-cpa-codex-01",
+    "ai-aggregator-cpa-codex-02",
+    "ai-aggregator-cpa-claude-01",
+    "ai-aggregator-cpa-grok-01",
 )
 PERSISTENT_NAMESPACES = frozenset({"open-platform"})
 CLEANUP_NAMESPACES = tuple(

@@ -16,7 +16,7 @@ from state_contract import (  # noqa: E402
 
 
 class StateContractTest(unittest.TestCase):
-    def test_six_uat_namespaces_have_unique_keys(self):
+    def test_uat_namespaces_have_unique_keys(self):
         keys = {
             canonical_state_key(
                 environment="uat",
@@ -27,12 +27,12 @@ class StateContractTest(unittest.TestCase):
             for namespace in UAT_NAMESPACES
         }
 
-        self.assertEqual(len(UAT_NAMESPACES), 6)
-        self.assertEqual(len(keys), 6)
+        self.assertEqual(len(UAT_NAMESPACES), 11)
+        self.assertEqual(len(keys), 11)
         self.assertTrue(all("/selfhost/" not in key for key in keys))
 
     def test_cleanup_excludes_persistent_open_platform(self):
-        self.assertEqual(len(CLEANUP_NAMESPACES), 5)
+        self.assertEqual(len(CLEANUP_NAMESPACES), 10)
         self.assertFalse(may_destroy("open-platform"))
         self.assertNotIn("open-platform", CLEANUP_NAMESPACES)
         for namespace in CLEANUP_NAMESPACES:
