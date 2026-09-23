@@ -66,6 +66,8 @@ reusable templates, composition logic — leaving run directories as pure Terraf
 | Alibaba Cloud | `terraform-hcl-standard/ali-cloud/` | Partial | 9 | Modules + bootstrap + `envs/dev`; declarations are external |
 | GCP | `terraform-hcl-standard/gcp-cloud/` | Core baseline | 14 | Project/API, VPC, IAM/WIF, Vault VM, Artifact Registry and Cloud Run modules |
 | Azure | `terraform-hcl-standard/azure-cloud/` | Skeleton | 14 | One `main.tf` per module; no run directories, no resource declarations |
+| UCloud UHost | `terraform-hcl-standard/ucloud/` | Terraform standard | 3 | GitOps-driven UHost renderer and reusable network, compute, and EIP modules |
+| ULightHost | external inventory | Existing resources | — | No Terraform provider; inventory and run records only |
 
 `utils/` at the `terraform-hcl-standard/` root holds shared Python rendering and
 provider/backend helpers (`renderer.py`, `render_provider_backend.py`).

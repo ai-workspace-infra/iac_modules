@@ -30,8 +30,41 @@ Store runtime credentials in Vault KV v2 at
 `UCLOUD_REGION`; see the platform-ops-toolkit helper
 [`scripts/ucloud/bootstrap_ucloud_auth_kv.sh`](https://github.com/ai-workspace-infra/platform-ops-toolkit/blob/main/scripts/ucloud/bootstrap_ucloud_auth_kv.sh).
 The helper supports `write` and `check` and does not print credential values.
-There is no Terraform state contract for UCloud's current existing-resource
-inventory route.
+UCloud UHost uses the standard Terraform state contract. ULightHost is a
+separate provider boundary and remains existing-resource inventory only.
+
+## GitOps render
+
+Put non-secret UHost declarations in the GitOps repository under
+`resources/<project>/<env>/ucloud/<workspace>.yaml`. The renderer creates an
+isolated Terraform root under `envs/<env>/<workspace>`:
+
+```yaml
+management_mode: terraform
+provisioner: terraform
+environment: uat
+global:
+  region: cn-bj2
+  availability_zone: cn-bj2-03
+network:
+  name: ai-aggregator-uat
+  cidr_blocks: [10.20.0.0/16]
+  subnet_cidr_block: 10.20.1.0/24
+hosts:
+  - name: ai-aggregator-uhost
+    instance_type: n-basic-2
+    security_group_id: firewall-xxxxx
+    key_pair_id: keypair-xxxxx
+```
+
+The provider credentials and backend credentials are injected by the
+platform-ops workflow from Vault. A local render can be produced with:
+
+```sh
+python3 scripts/generate.py render \
+  --resources "$GITOPS_ROOT/resources/svc.plus/uat/ucloud/ai-aggregator.yaml" \
+  --workdir envs/uat/ai-aggregator
+```
 
 ## Modules
 
