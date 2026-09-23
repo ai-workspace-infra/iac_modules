@@ -81,6 +81,11 @@ XConnect Gateway and TCP 22 on Vault nodes from the declared SSH allowlist; do
 not use `0.0.0.0/0` for SSH. The current operator/proxy egress CIDR must be
 provided in GitOps before a plan can pass validation.
 
+For Vault Raft HA, the renderer also permits TCP 8200 (API/peer traffic) and
+8201 (Raft forwarding) only from the declared VPC subnet to Vault nodes. These
+ports are never exposed to the internet; configure Vault listener and cluster
+addresses to use the nodes' private IPs.
+
 The existing `global.cloud_run_service_name` / `cloud_run_image` form remains
 supported and keeps the original Terraform address (`module.cloud_run`) for
 state compatibility. `spot_vms` at the manifest root also remains supported.
