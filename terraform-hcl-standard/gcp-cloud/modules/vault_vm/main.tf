@@ -36,6 +36,30 @@ variable "image" {
   default = "projects/debian-cloud/global/images/family/debian-12"
 }
 
+variable "xconnect_role" {
+  type        = string
+  description = "Shared Vault XConnect role: gateway or one."
+  validation {
+    condition     = contains(["gateway", "one"], var.xconnect_role)
+    error_message = "xconnect_role must be gateway or one."
+  }
+}
+
+variable "public_ip" {
+  type        = bool
+  description = "Whether this node receives a static external IPv4 address."
+  default     = false
+}
+
+resource "google_compute_address" "public" {
+  count        = var.public_ip ? 1 : 0
+  project      = var.project_id
+  name         = "${var.name}-public-ip"
+  region       = replace(var.zone, "/-[a-z]$/", "")
+  address_type = "EXTERNAL"
+  network_tier = "PREMIUM"
+}
+
 resource "google_service_account" "runtime" {
   project      = var.project_id
   account_id   = "${var.name}-runtime"
@@ -48,7 +72,7 @@ resource "google_compute_instance" "this" {
   zone                      = var.zone
   machine_type              = var.machine_type
   allow_stopping_for_update = true
-  tags                      = ["vault"]
+  tags                      = var.xconnect_role == "gateway" ? ["vault", "vault-gateway"] : ["vault", "vault-one"]
 
   boot_disk {
     initialize_params {
@@ -61,6 +85,14 @@ resource "google_compute_instance" "this" {
   network_interface {
     network    = var.network
     subnetwork = var.subnetwork
+
+    dynamic "access_config" {
+      for_each = var.public_ip ? [1] : []
+      content {
+        nat_ip       = google_compute_address.public[0].address
+        network_tier = "PREMIUM"
+      }
+    }
   }
 
   service_account {
@@ -81,4 +113,8 @@ output "self_link" {
 
 output "private_ip" {
   value = google_compute_instance.this.network_interface[0].network_ip
+}
+
+output "public_ip" {
+  value = var.public_ip ? google_compute_address.public[0].address : null
 }

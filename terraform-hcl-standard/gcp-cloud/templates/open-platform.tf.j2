@@ -38,11 +38,45 @@ module "{{ node.name | tf_id }}" {
   zone         = {{ node.zone | tojson }}
   machine_type = {{ node.machine_type | default(vault_machine_type) | tojson }}
   image        = {{ node.image | default(vault_image) | tojson }}
+  xconnect_role = {{ node.xconnect_role | tojson }}
+  public_ip     = {{ node.public_ip | default(false) | tojson }}
   network      = module.network.network
   subnetwork   = module.network.subnet
 }
 
 {% endfor %}
+{% if vault_nodes | selectattr('xconnect_role', 'equalto', 'gateway') | list | length == 1 %}
+resource "google_compute_firewall" "vault_gateway_https" {
+  project       = module.project.project_id
+  name          = "{{ network_name }}-vault-gateway-https"
+  network       = module.network.network
+  direction     = "INGRESS"
+  source_ranges = ["0.0.0.0/0"]
+  target_tags   = ["vault-gateway"]
+
+  allow {
+    protocol = "tcp"
+    ports    = ["443"]
+  }
+}
+{% endif %}
+
+{% if vault_nodes and ssh_source_ranges %}
+resource "google_compute_firewall" "vault_ssh_allowlist" {
+  project       = module.project.project_id
+  name          = "{{ network_name }}-vault-ssh-allowlist"
+  network       = module.network.network
+  direction     = "INGRESS"
+  source_ranges = {{ ssh_source_ranges | tojson }}
+  target_tags   = ["vault"]
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+}
+{% endif %}
+
 {% for vm in spot_vms %}
 module "spot_{{ vm.name | tf_id }}" {
   source          = "../../modules/spot_vm"
@@ -85,6 +119,11 @@ output "platform_runtime" {
     vault_private_ips = {
 {% for node in vault_nodes %}
       {{ node.name | tojson }} = module.{{ node.name | tf_id }}.private_ip
+{% endfor %}
+    }
+    vault_public_ips = {
+{% for node in vault_nodes %}
+      {{ node.name | tojson }} = module.{{ node.name | tf_id }}.public_ip
 {% endfor %}
     }
     spot_instances = {

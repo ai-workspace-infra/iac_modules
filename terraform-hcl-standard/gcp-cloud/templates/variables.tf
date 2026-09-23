@@ -75,6 +75,12 @@ variable "enable_cloud_nat" {
   description = "Create Cloud NAT for private subnet egress. Disable for short-lived validation workloads that need no outbound internet."
 }
 
+variable "ssh_source_ranges" {
+  type        = list(string)
+  default     = []
+  description = "Explicit SSH ingress allowlist CIDRs for GCP Vault nodes."
+}
+
 variable "artifact_registry_location" {
   type    = string
   default = null

@@ -89,6 +89,8 @@ variable "deploy_service_account_roles" {
     "roles/artifactregistry.writer",
     "roles/compute.instanceAdmin.v1",
     "roles/compute.networkAdmin",
+    "roles/compute.securityAdmin",
+    "roles/iam.serviceAccountAdmin",
     "roles/run.admin",
     "roles/serviceusage.serviceUsageConsumer",
   ]
