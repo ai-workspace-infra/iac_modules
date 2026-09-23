@@ -61,6 +61,8 @@ env 目录退化为纯粹的 Terraform 运行目录。
 | 阿里云 | `terraform-hcl-standard/ali-cloud/` | 部分完成 | 9 | 模块 + bootstrap + `envs/dev`；声明位于外部 GitOps |
 | GCP | `terraform-hcl-standard/gcp-cloud/` | 核心基线 | 14 | 项目/API、VPC、IAM/WIF、Vault VM、Artifact Registry 与 Cloud Run 模块 |
 | Azure | `terraform-hcl-standard/azure-cloud/` | 骨架 | 14 | 每个模块仅一个 `main.tf`；无运行目录、无资源声明 |
+| UCloud UHost | `terraform-hcl-standard/ucloud/` | Terraform 标准 | 3 | GitOps 驱动的 UHost 渲染器，以及 network、compute、EIP 可复用模块 |
+| ULightHost | 外部 inventory | 既有资源 | — | 不支持 Terraform provider，仅写入 inventory 和 run 记录 |
 
 `terraform-hcl-standard/utils/` 存放共享的 Python 渲染与 provider/backend 工具（`renderer.py`、
 `render_provider_backend.py`）。

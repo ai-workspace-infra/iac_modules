@@ -1,6 +1,6 @@
 # 统一多云 IaC State 契约
 
-AWS、GCP、Azure、Vultr VPS 和 Akamai Cloud/Linode 的 Terraform root module
+AWS、GCP、Azure、Vultr VPS、Akamai Cloud/Linode 和 UCloud UHost 的 Terraform root module
 统一使用 S3-compatible backend。云 provider 的认证与 state backend 的认证必须分离：
 provider token/identity 只控制云资源；`TF_STATE_*` 只控制 state bucket。
 
@@ -79,8 +79,8 @@ terraform/prod/xworktech/gcp-cloud/xworktech/platform/terraform.tfstate
 
 ## Non-Terraform platforms
 
-UCloud、Ulighthost 等仅纳管已有资源时不产生 `tfstate`。它们将可公开的资源
-事实写入同一 bucket 的下列前缀：
+ULightHost 不支持 Terraform IaC，仅纳管已有资源，不产生 `tfstate`。它将可公开的
+资源事实写入同一 bucket 的下列前缀：
 
 ```text
 inventory/<environment>/<project>/<cloud>/<account>/<workspace>.json
@@ -95,5 +95,6 @@ provisioner: ansible
 lifecycle: external
 ```
 
-external inventory adapter 只能读取、校验和记录已有资源，不得执行 Terraform
-或自动创建、销毁资源。
+external inventory adapter 只能读取、校验和记录 ULightHost 资源，不得执行 Terraform
+或自动创建、销毁资源。UCloud UHost 不属于此类，使用标准 Terraform state key 和
+`terraform-hcl-standard/ucloud` 模块。
