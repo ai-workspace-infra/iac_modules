@@ -43,8 +43,7 @@ env 目录退化为纯粹的 Terraform 运行目录。
 
 | 分层 | 路径 | 职责 | 是否入库 |
 |------|------|------|----------|
-| 声明 | `gitops/resources/<project>/<env>/<provider>/*.yaml` | 按环境、按资源分类描述拓扑 | ✅ |
-| 声明 | 同级 `gitops/resources/<project>/<env>/<provider>/` | 资源拓扑及账号/bootstrap 事实 | 外部 GitOps 仓库 |
+| 声明 | 同级 `gitops/resources/<project>/<env>/<provider>/*.yaml` | 环境拓扑、账号与 bootstrap 事实 | 外部 GitOps 仓库 |
 | 模板 | `<provider>/templates/` | 共享的 `provider.tf`、`variables.tf`、`backend.tf`、`cloud-init.yaml` 及对应 `.j2` | ✅ |
 | 组合 | `<provider>/scripts/generate.py`、`provision.sh` | `render` + `inventory` 子命令与一键编排 | ✅ |
 | 模块 | `<provider>/modules/<resource>/` | 被渲染块复用的资源模块 | ✅ |
@@ -56,14 +55,14 @@ env 目录退化为纯粹的 Terraform 运行目录。
 
 | Provider | 路径 | 状态 | 模块数 | 现状 |
 |----------|------|------|--------|------|
-| AWS | `terraform-hcl-standard/aws-cloud/` | 生产可用 | 14 | Terragrunt bootstrap（`state` / `lock` / `identity`）、`component/` 根模块、`sit` + `uat` + `prod` 资源声明、render + inventory 脚本 |
-| Vultr | `terraform-hcl-standard/vultr-vps/` | 生产可用 —— 渲染范式的基准实现 | 7 | 四个运行目录（`ai-workspace`、`dev`、`platform-ops-toolkit`、`site-migration-toolkit`）、`sit` + `uat` + `prod` 声明、`provision.sh` |
+| AWS | `terraform-hcl-standard/aws-cloud/` | 生产可用 | 14 | Terragrunt bootstrap（`state` / `lock` / `identity`）、`component/` 根模块、GitOps 管理环境声明、render + inventory 脚本 |
+| Vultr | `terraform-hcl-standard/vultr-vps/` | 生产可用 —— 渲染范式的基准实现 | 7 | 四个运行目录（`ai-workspace`、`dev`、`platform-ops-toolkit`、`site-migration-toolkit`）、GitOps 环境声明、`provision.sh` |
 | Akamai Cloud / Linode | `terraform-hcl-standard/akamai-cloud/` | MVP —— VPS provider tree | 3 | Linode compute、防火墙、VPC、块存储模块；显式 renderer、CMDB/inventory 与 fixture 校验 |
 | 阿里云 | `terraform-hcl-standard/ali-cloud/` | 部分完成 | 9 | 模块 + bootstrap + `envs/dev`；声明位于外部 GitOps |
 | GCP | `terraform-hcl-standard/gcp-cloud/` | 核心基线 | 14 | 项目/API、VPC、IAM/WIF、Vault VM、Artifact Registry 与 Cloud Run 模块 |
 | Azure | `terraform-hcl-standard/azure-cloud/` | 骨架 | 14 | 每个模块仅一个 `main.tf`；无运行目录、无资源声明 |
 
-`terraform-hcl-standard/utils/` 存放共享的 Python 渲染器（`renderer.py`、`config_loader.py`、
+`terraform-hcl-standard/utils/` 存放共享的 Python 渲染与 provider/backend 工具（`renderer.py`、
 `render_provider_backend.py`）。
 
 ## 模块目录（按能力域分类）
@@ -178,7 +177,8 @@ ansible web_saas -i ../../../../playbooks/inventory/terraform_cmdb.py -m ping
 
 - Azure 仍是骨架；GCP 核心基线已可通过 GitOps 声明渲染和校验。
 - 阿里云保留模块与 `envs/dev` 工作目录，后续声明统一放入 GitOps。
-- 各渲染器默认读取同级 GitOps；切换项目、环境或云厂商时显式传入 `--resources` / `RESOURCES`。
+- 各渲染器要求显式传入或默认读取同级 GitOps 声明；切换项目、环境或云厂商时传入对应的
+  `--resources` / `RESOURCES` GitOps 路径。
 - 文档归并进度记录在 [`docs/DOC_COVERAGE.md`](docs/DOC_COVERAGE.md)。
 
 ## 文档 / 链接

@@ -37,12 +37,14 @@ permissions:
 
 ## GitOps 信任策略
 
-在 bootstrap YAML 中声明 GitOps 文件路径（相对路径以 bootstrap YAML 所在目录解析），或在
-执行时设置 `GITHUB_ACTIONS_OIDC_CONFIG_PATH`：
+OIDC 信任策略的唯一声明位于 GitOps 的
+`resources/svc.plus/prod/aws/github-actions-oidc.json`。bootstrap 参数也从同目录的
+`bootstrap-identity.yaml` 读取。先把 `ai-workspace-infra/gitops` checkout 到 iac_modules
+旁边，再显式设置输入路径：
 
 ```yaml
 github_actions_oidc:
-  config_path: ../resources/svc.plus/prod/aws/github-actions-oidc.json
+  config_path: github-actions-oidc.json
 ```
 
 该 JSON 声明必须包含 GitHub OIDC Provider URL、`sts.amazonaws.com` audience、AWS role 名称和
@@ -52,8 +54,9 @@ Terraform plan/apply 失败，避免回退到宽泛或陈旧的信任策略。
 
 ## 生产 state 导入
 
-生产采用 `config/bootstrap/prod.yaml`。该配置将信任策略引用到 sibling GitOps checkout
-中的 `resources/svc.plus/prod/aws/github-actions-oidc.json`，并声明唯一的非敏感 state key：
+生产采用 GitOps 中的
+`resources/svc.plus/prod/aws/bootstrap-identity.yaml`。它引用同目录中的 OIDC JSON，并声明唯一的
+非敏感 state key：
 
 ```text
 platform-ops-toolkit/prod/aws-cloud/bootstrap/identity/terraform.tfstate
