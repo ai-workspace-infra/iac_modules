@@ -36,10 +36,20 @@ def load(path: Path) -> dict:
     names = [str(host.get("name", "")) for host in hosts]
     if any(not name for name in names) or len(set(names)) != len(names):
         raise SystemExit("UCloud host names must be non-empty and unique")
+    bootstrap = data.get("bootstrap") or {}
+    if not bootstrap.get("security_group_id_env") or not bootstrap.get("key_pair_id_env"):
+        raise SystemExit(
+            "UCloud declarations must name bootstrap output env vars with "
+            "bootstrap.security_group_id_env and bootstrap.key_pair_id_env"
+        )
+    for key in ("security_group_id_env", "key_pair_id_env"):
+        env_name = str(bootstrap[key])
+        if not re.fullmatch(r"[A-Z][A-Z0-9_]*", env_name):
+            raise SystemExit(f"bootstrap.{key} must be an uppercase environment variable name")
     for host in hosts:
         for key in ("security_group_id", "key_pair_id"):
-            if not host.get(key):
-                raise SystemExit(f"UCloud host {host['name']} requires {key}")
+            if host.get(key):
+                raise SystemExit(f"UCloud host {host['name']} must receive {key} from the bootstrap Job")
     return data
 
 
@@ -56,6 +66,7 @@ def render(args) -> None:
     )
 
     global_cfg = data.get("global", {}) or {}
+    bootstrap = data["bootstrap"]
     network = data.get("network", global_cfg.get("network"))
     lines = ["# Generated from GitOps; do not edit.", ""]
     if network:
@@ -102,8 +113,8 @@ def render(args) -> None:
             f"  image_id = {hcl(image_id) if image_id else image_ref}",
             f"  instance_type = {hcl(host.get('instance_type', global_cfg.get('instance_type', 'n-basic-2')))}",
             f"  boot_disk_type = {hcl(host.get('boot_disk_type', 'cloud_ssd'))}",
-            f"  security_group_id = {hcl(host['security_group_id'])}",
-            f"  key_pair_id = {hcl(host['key_pair_id'])}",
+            "  security_group_id = var.ucloud_bootstrap_security_group_id",
+            "  key_pair_id = var.ucloud_bootstrap_key_pair_id",
             f"  login_mode = {hcl(host.get('login_mode', 'KeyPair'))}",
             f"  tag = {hcl(host.get('tag', global_cfg.get('tag', 'Default')))}",
             f"  deletion_protection = {str(bool(host.get('deletion_protection', False))).lower()}",
@@ -132,7 +143,18 @@ def render(args) -> None:
     lines += ["  }", "}", ""]
     (workdir / "main.tf").write_text("\n".join(lines), encoding="utf-8")
     (workdir / "ucloud_manifest.json").write_text(
-        json.dumps({"provider": "ucloud", "source": str(source), "hosts": [h["name"] for h in data["hosts"]]}, indent=2) + "\n",
+        json.dumps(
+            {
+                "provider": "ucloud",
+                "source": str(source),
+                "hosts": [h["name"] for h in data["hosts"]],
+                "bootstrap": {
+                    "security_group_id_env": bootstrap["security_group_id_env"],
+                    "key_pair_id_env": bootstrap["key_pair_id_env"],
+                },
+            },
+            indent=2,
+        ) + "\n",
         encoding="utf-8",
     )
     print(f"rendered {source} -> {workdir}")
