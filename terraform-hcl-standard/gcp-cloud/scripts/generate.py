@@ -2,6 +2,7 @@
 """Render GCP GitOps resource declarations into Terraform and CMDB artifacts."""
 
 import argparse
+import ipaddress
 import json
 import os
 import re
@@ -62,8 +63,8 @@ def normalize_resources(document):
     metadata = document.get("metadata", {})
     spec = document.get("spec", {})
     environment = metadata.get("environment")
-    if environment not in {"uat", "prod"}:
-        raise SystemExit("metadata.environment must be uat or prod")
+    if environment not in {"uat", "prod", "shared"}:
+        raise SystemExit("metadata.environment must be uat, prod, or shared")
     if metadata.get("provider") != "gcp":
         raise SystemExit("metadata.provider must be gcp")
 
@@ -78,6 +79,7 @@ def normalize_resources(document):
         "network_name": spec.get("network_name"),
         "subnet_cidr": spec.get("subnet_cidr"),
         "enable_cloud_nat": spec.get("enable_cloud_nat", True),
+        "ssh_source_ranges": spec.get("ssh_source_ranges", []),
         "artifact_registry_location": spec.get("artifact_registry_location"),
         "artifact_registry_id": spec.get("artifact_registry_id"),
     }
@@ -109,8 +111,22 @@ def normalize_resources(document):
         service.setdefault("region", global_config.get("region"))
         service["module_name"] = f"cloud_run_{tf_id(service['name'])}"
     spot_vms = [dict(item) for item in resources.get("spot_vms", [])]
-    if not spot_vms and not cloud_run_services:
-        raise SystemExit("GCPWorkloadNamespace must declare at least one Spot VM or Cloud Run service")
+    vault_nodes = [dict(item) for item in resources.get("vault_nodes", [])]
+    if not spot_vms and not cloud_run_services and not vault_nodes:
+        raise SystemExit("GCPWorkloadNamespace must declare at least one supported resource")
+    if vault_nodes:
+        roles = [item.get("xconnect_role") for item in vault_nodes]
+        if roles.count("gateway") != 1 or any(role not in {"gateway", "one"} for role in roles):
+            raise SystemExit("vault_nodes must include exactly one gateway and otherwise only one roles")
+        if not global_config["ssh_source_ranges"]:
+            raise SystemExit("spec.ssh_source_ranges must contain the current operator proxy CIDR(s)")
+        for cidr in global_config["ssh_source_ranges"]:
+            try:
+                network = ipaddress.ip_network(cidr, strict=False)
+            except ValueError as error:
+                raise SystemExit(f"invalid SSH source CIDR {cidr}: {error}") from error
+            if network.version != 4 or network.prefixlen != 32:
+                raise SystemExit("ssh_source_ranges must contain individual IPv4 addresses as /32 CIDRs")
     for vm in spot_vms:
         required = ("name", "zone", "machine_type")
         missing = [key for key in required if not vm.get(key)]
@@ -124,7 +140,7 @@ def normalize_resources(document):
         vm["max_run_duration_seconds"] = duration
     return (
         global_config,
-        list(resources.get("vault_nodes", [])),
+        vault_nodes,
         spot_vms,
         cloud_run_services,
         False,
@@ -137,6 +153,8 @@ def render(args):
     nodes = []
     for node in declared_nodes:
         item = dict(node)
+        item.setdefault("xconnect_role", "one")
+        item.setdefault("public_ip", False)
         item.setdefault("machine_type", global_config.get("vault_machine_type"))
         item.setdefault("image", global_config.get("vault_image"))
         nodes.append(item)
@@ -151,6 +169,8 @@ def render(args):
         raise SystemExit("vault_nodes/spot_vms require a declared network_name and subnet_cidr")
     if enable_network and not global_config.get("subnet_cidr"):
         raise SystemExit("network_name requires subnet_cidr")
+    if nodes and global_config.get("ssh_source_ranges") and not isinstance(global_config["ssh_source_ranges"], list):
+        raise SystemExit("ssh_source_ranges must be a list of IPv4 CIDRs")
     if enable_artifact_registry and not global_config.get("artifact_registry_location"):
         raise SystemExit("global.artifact_registry_id requires global.artifact_registry_location")
     for service in cloud_run_services:
@@ -192,6 +212,8 @@ def render(args):
         enable_artifact_registry=enable_artifact_registry,
         enable_cloud_run=enable_cloud_run,
         legacy_cloud_run=legacy_cloud_run,
+        network_name=global_config.get("network_name", ""),
+        ssh_source_ranges=global_config.get("ssh_source_ranges", []),
     )
     generated = workdir / "generated_platform.tf"
     generated.write_text(content, encoding="utf-8")
@@ -214,6 +236,7 @@ def render(args):
         "network_name",
         "subnet_cidr",
         "enable_cloud_nat",
+        "ssh_source_ranges",
         "artifact_registry_location",
         "artifact_registry_id",
         "cloud_run_service_name",

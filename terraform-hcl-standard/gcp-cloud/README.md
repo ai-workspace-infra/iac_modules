@@ -62,7 +62,10 @@ Spot VM。该模块复用已创建的 deploy Service Account，不创建新的�
 managed GCP workload states. The manifest declares the project, account,
 region, workspace, state key, network inputs, and resource list; this renderer
 turns the declaration into Terraform modules. Each namespace state may declare
-`resources.spot_vms`, `resources.cloud_run_services`, or both. Spot VMs require
+`resources.spot_vms`, `resources.cloud_run_services`, and/or `resources.vault_nodes`.
+Vault nodes require exactly one `xconnect_role: gateway` and any number of
+`xconnect_role: one` members, plus an SSH `/32` allowlist in
+`spec.ssh_source_ranges`. Spot VMs require
 `name`, `zone`, and `machine_type`; `image` defaults to Debian 12 and
 `max_run_duration_seconds` defaults to 3600. Cloud Run entries require `name`
 and `image`, and may override `region`.
@@ -70,6 +73,13 @@ and `image`, and may override `region`.
 `spec.enable_cloud_nat` defaults to `true`; set it to `false` for short-lived
 validation VMs that do not need outbound internet, avoiding an otherwise
 billable Cloud NAT gateway.
+
+Vault node manifests may set `enable_cloud_nat: false` and declare
+`ssh_source_ranges` as explicit IPv4 CIDRs. Vault VMs receive their own static
+external IPv4 address by default. Ingress is limited to TCP 443 on the single
+XConnect Gateway and TCP 22 on Vault nodes from the declared SSH allowlist; do
+not use `0.0.0.0/0` for SSH. The current operator/proxy egress CIDR must be
+provided in GitOps before a plan can pass validation.
 
 The existing `global.cloud_run_service_name` / `cloud_run_image` form remains
 supported and keeps the original Terraform address (`module.cloud_run`) for

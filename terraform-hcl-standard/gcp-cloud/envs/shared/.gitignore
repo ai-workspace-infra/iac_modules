@@ -1,0 +1,15 @@
+generated_platform.tf
+backend.tf
+platform-provider.tf
+provider.tf
+variables.tf
+terraform.auto.tfvars.json
+resources_manifest.json
+cmdb.json
+inventory.ini
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+__pycache__/

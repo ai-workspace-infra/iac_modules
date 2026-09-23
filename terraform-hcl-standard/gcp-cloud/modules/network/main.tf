@@ -66,13 +66,23 @@ resource "google_compute_router" "this" {
   network = google_compute_network.this.id
 }
 
+resource "google_compute_address" "nat" {
+  count        = var.enable_nat ? 1 : 0
+  project      = var.project_id
+  name         = "${var.network_name}-nat-ip"
+  region       = var.region
+  address_type = "EXTERNAL"
+  network_tier = "PREMIUM"
+}
+
 resource "google_compute_router_nat" "this" {
   count                              = var.enable_nat ? 1 : 0
   project                            = var.project_id
   name                               = "${var.network_name}-nat"
   router                             = google_compute_router.this[0].name
   region                             = var.region
-  nat_ip_allocate_option             = "AUTO_ONLY"
+  nat_ip_allocate_option             = "MANUAL_ONLY"
+  nat_ips                            = [google_compute_address.nat[0].self_link]
   source_subnetwork_ip_ranges_to_nat = "LIST_OF_SUBNETWORKS"
 
   subnetwork {
@@ -87,4 +97,8 @@ output "network" {
 
 output "subnet" {
   value = google_compute_subnetwork.this.self_link
+}
+
+output "nat_ip" {
+  value = var.enable_nat ? google_compute_address.nat[0].address : null
 }
