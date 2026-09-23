@@ -84,12 +84,12 @@ output "platform_runtime" {
     deploy_account    = var.deploy_service_account
     vault_private_ips = {
 {% for node in vault_nodes %}
-      "{{ node.name }}" = module.{{ node.name | tf_id }}.private_ip
+      {{ node.name | tojson }} = module.{{ node.name | tf_id }}.private_ip
 {% endfor %}
     }
     spot_instances = {
 {% for vm in spot_vms %}
-      "{{ vm.name }}" = {
+      {{ vm.name | tojson }} = {
         name              = module.spot_{{ vm.name | tf_id }}.name
         self_link         = module.spot_{{ vm.name | tf_id }}.self_link
         zone              = module.spot_{{ vm.name | tf_id }}.zone
@@ -100,7 +100,7 @@ output "platform_runtime" {
     }
     cloud_run_services = {
 {% for service in cloud_run_services %}
-      "{{ service.name }}" = module.{{ service.module_name }}.uri
+      {{ service.name | tojson }} = module.{{ service.module_name }}.uri
 {% endfor %}
     }
   }

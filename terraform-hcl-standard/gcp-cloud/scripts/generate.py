@@ -43,9 +43,12 @@ def normalize_resources(document):
                     "module_name": "cloud_run",
                 },
             )
-        for service in cloud_run_services:
+        for index, service in enumerate(cloud_run_services):
             service.setdefault("region", global_config.get("region"))
-            service.setdefault("module_name", f"cloud_run_{tf_id(service['name'])}")
+            service["module_name"] = (
+                "cloud_run" if legacy_cloud_run and index == 0
+                else f"cloud_run_{tf_id(service['name'])}"
+            )
         return (
             global_config,
             list(document.get("vault_nodes", [])),
@@ -104,7 +107,7 @@ def normalize_resources(document):
     cloud_run_services = [dict(item) for item in resources.get("cloud_run_services", [])]
     for service in cloud_run_services:
         service.setdefault("region", global_config.get("region"))
-        service.setdefault("module_name", f"cloud_run_{tf_id(service['name'])}")
+        service["module_name"] = f"cloud_run_{tf_id(service['name'])}"
     spot_vms = [dict(item) for item in resources.get("spot_vms", [])]
     if not spot_vms and not cloud_run_services:
         raise SystemExit("GCPWorkloadNamespace must declare at least one Spot VM or Cloud Run service")
@@ -156,6 +159,9 @@ def render(args):
     module_names = [service["module_name"] for service in cloud_run_services]
     if len(module_names) != len(set(module_names)):
         raise SystemExit("Cloud Run service names must render to unique Terraform module names")
+    spot_module_names = [f"spot_{tf_id(vm['name'])}" for vm in spot_vms]
+    if len(spot_module_names) != len(set(spot_module_names)):
+        raise SystemExit("Spot VM names must render to unique Terraform module names")
     project_id = global_config.get("project_id")
     if not project_id:
         raise SystemExit("manifest requires project_id")
