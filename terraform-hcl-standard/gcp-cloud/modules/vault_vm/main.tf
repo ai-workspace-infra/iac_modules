@@ -51,6 +51,22 @@ variable "public_ip" {
   default     = false
 }
 
+variable "enable_oslogin" {
+  type        = bool
+  description = "Enable IAM-based OS Login for IAP SSH access."
+  default     = false
+}
+
+variable "os_login_principal_email" {
+  type        = string
+  description = "The WIF deployment service account that receives OS Login access."
+  default     = ""
+  validation {
+    condition     = !var.enable_oslogin || can(regex("^[^@]+@[^@]+\\.iam\\.gserviceaccount\\.com$", var.os_login_principal_email))
+    error_message = "os_login_principal_email must be a service-account email when OS Login is enabled."
+  }
+}
+
 resource "google_compute_address" "public" {
   count        = var.public_ip ? 1 : 0
   project      = var.project_id
@@ -66,6 +82,13 @@ resource "google_service_account" "runtime" {
   display_name = "${var.name} runtime"
 }
 
+resource "google_service_account_iam_member" "os_login_act_as" {
+  count              = var.enable_oslogin ? 1 : 0
+  service_account_id = google_service_account.runtime.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${var.os_login_principal_email}"
+}
+
 resource "google_compute_instance" "this" {
   project                   = var.project_id
   name                      = var.name
@@ -73,6 +96,7 @@ resource "google_compute_instance" "this" {
   machine_type              = var.machine_type
   allow_stopping_for_update = true
   tags                      = var.xconnect_role == "gateway" ? ["vault", "vault-gateway"] : ["vault", "vault-one"]
+  metadata                  = var.enable_oslogin ? { "enable-oslogin" = "TRUE" } : {}
 
   boot_disk {
     initialize_params {

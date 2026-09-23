@@ -79,6 +79,7 @@ def normalize_resources(document):
         "network_name": spec.get("network_name"),
         "subnet_cidr": spec.get("subnet_cidr"),
         "enable_cloud_nat": spec.get("enable_cloud_nat", True),
+        "enable_iap_ssh": spec.get("enable_iap_ssh", False),
         "ssh_source_ranges": spec.get("ssh_source_ranges", []),
         "artifact_registry_location": spec.get("artifact_registry_location"),
         "artifact_registry_id": spec.get("artifact_registry_id"),
@@ -96,6 +97,8 @@ def normalize_resources(document):
     missing = [key for key in required_spec if not spec.get(key)]
     if missing:
         raise SystemExit(f"GCPWorkloadNamespace spec is missing: {', '.join(missing)}")
+    if not isinstance(global_config["enable_iap_ssh"], bool):
+        raise SystemExit("spec.enable_iap_ssh must be a boolean")
     name = metadata.get("name")
     if spec["workspace"] != name or spec["state_namespace"] != name:
         raise SystemExit("metadata.name, spec.workspace, and spec.state_namespace must match")
@@ -118,8 +121,8 @@ def normalize_resources(document):
         roles = [item.get("xconnect_role") for item in vault_nodes]
         if roles.count("gateway") != 1 or any(role not in {"gateway", "one"} for role in roles):
             raise SystemExit("vault_nodes must include exactly one gateway and otherwise only one roles")
-        if not global_config["ssh_source_ranges"]:
-            raise SystemExit("spec.ssh_source_ranges must contain the current operator proxy CIDR(s)")
+        if not global_config["ssh_source_ranges"] and not global_config["enable_iap_ssh"]:
+            raise SystemExit("vault_nodes require ssh_source_ranges or enable_iap_ssh: true")
         for cidr in global_config["ssh_source_ranges"]:
             try:
                 network = ipaddress.ip_network(cidr, strict=False)
@@ -214,6 +217,7 @@ def render(args):
         legacy_cloud_run=legacy_cloud_run,
         network_name=global_config.get("network_name", ""),
         subnet_cidr=global_config.get("subnet_cidr", ""),
+        enable_iap_ssh=global_config.get("enable_iap_ssh", False),
         ssh_source_ranges=global_config.get("ssh_source_ranges", []),
     )
     generated = workdir / "generated_platform.tf"

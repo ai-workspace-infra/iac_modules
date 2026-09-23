@@ -40,6 +40,8 @@ module "{{ node.name | tf_id }}" {
   image        = {{ node.image | default(vault_image) | tojson }}
   xconnect_role = {{ node.xconnect_role | tojson }}
   public_ip     = {{ node.public_ip | default(false) | tojson }}
+  enable_oslogin = {{ enable_iap_ssh | tojson }}
+  os_login_principal_email = var.deploy_service_account
   network      = module.network.network
   subnetwork   = module.network.subnet
 }
@@ -75,6 +77,48 @@ resource "google_compute_firewall" "vault_ssh_allowlist" {
     ports    = ["22"]
   }
 }
+{% endif %}
+
+{% if vault_nodes and enable_iap_ssh %}
+resource "google_compute_firewall" "vault_ssh_iap" {
+  project       = module.project.project_id
+  name          = "{{ network_name }}-vault-ssh-iap"
+  network       = module.network.network
+  direction     = "INGRESS"
+  source_ranges = ["35.235.240.0/20"]
+  target_tags   = ["vault"]
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+}
+
+resource "google_project_iam_member" "vault_iap_compute_viewer" {
+  project = module.project.project_id
+  role    = "roles/compute.viewer"
+  member  = "serviceAccount:${var.deploy_service_account}"
+}
+
+{% for node in vault_nodes %}
+resource "google_compute_instance_iam_member" "vault_os_admin_login_{{ node.name | tf_id }}" {
+  depends_on    = [module.{{ node.name | tf_id }}]
+  project       = module.project.project_id
+  zone          = {{ node.zone | tojson }}
+  instance_name = {{ node.name | tojson }}
+  role          = "roles/compute.osAdminLogin"
+  member        = "serviceAccount:${var.deploy_service_account}"
+}
+
+resource "google_iap_tunnel_instance_iam_member" "vault_iap_tunnel_{{ node.name | tf_id }}" {
+  depends_on = [module.{{ node.name | tf_id }}]
+  project    = module.project.project_id
+  zone       = {{ node.zone | tojson }}
+  instance   = {{ node.name | tojson }}
+  role       = "roles/iap.tunnelResourceAccessor"
+  member     = "serviceAccount:${var.deploy_service_account}"
+}
+{% endfor %}
 {% endif %}
 
 {% if vault_nodes %}
