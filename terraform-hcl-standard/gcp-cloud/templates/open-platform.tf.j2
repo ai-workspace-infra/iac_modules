@@ -15,6 +15,7 @@ module "network" {
   region       = var.region
   network_name = var.network_name
   subnet_cidr  = var.subnet_cidr
+  enable_nat   = var.enable_cloud_nat
 }
 {% endif %}
 
@@ -33,10 +34,10 @@ module "{{ node.name | tf_id }}" {
   source       = "../../modules/vault_vm"
   depends_on   = [module.project]
   project_id   = module.project.project_id
-  name         = "{{ node.name }}"
-  zone         = "{{ node.zone }}"
-  machine_type = "{{ node.machine_type | default(vault_machine_type) }}"
-  image        = "{{ node.image | default(vault_image) }}"
+  name         = {{ node.name | tojson }}
+  zone         = {{ node.zone | tojson }}
+  machine_type = {{ node.machine_type | default(vault_machine_type) | tojson }}
+  image        = {{ node.image | default(vault_image) | tojson }}
   network      = module.network.network
   subnetwork   = module.network.subnet
 }
@@ -47,26 +48,30 @@ module "spot_{{ vm.name | tf_id }}" {
   source          = "../../modules/spot_vm"
   depends_on      = [module.project, module.network]
   project_id      = module.project.project_id
-  name            = "{{ vm.name }}"
-  zone            = "{{ vm.zone }}"
-  machine_type    = "{{ vm.machine_type }}"
-  image           = "{{ vm.image | default('projects/debian-cloud/global/images/family/debian-12') }}"
+  name            = {{ vm.name | tojson }}
+  zone            = {{ vm.zone | tojson }}
+  machine_type    = {{ vm.machine_type | tojson }}
+  image           = {{ vm.image | default('projects/debian-cloud/global/images/family/debian-12') | tojson }}
   network         = module.network.network
   subnetwork      = module.network.subnet
   labels          = {{ vm.labels | default({}) | tojson }}
+  max_run_duration_seconds = {{ vm.max_run_duration_seconds | default(3600) }}
 }
 
 {% endfor %}
 {% if enable_cloud_run %}
-module "cloud_run" {
+{% for service in cloud_run_services %}
+module "{{ service.module_name }}" {
   source          = "../../modules/cloud_run"
   depends_on      = [module.project]
   project_id      = module.project.project_id
-  region          = var.region
-  service_name    = var.cloud_run_service_name
-  image           = var.cloud_run_image
+  region          = {{ service.region | default('asia-east1') | tojson }}
+  service_name    = {{ service.name | tojson }}
+  image           = {{ service.image | tojson }}
   service_account = var.deploy_service_account
 }
+
+{% endfor %}
 {% endif %}
 
 output "platform_runtime" {
@@ -74,7 +79,7 @@ output "platform_runtime" {
   value = {
     project_id        = module.project.project_id
     project_number    = module.project.project_number
-    cloud_run_uri     = {{ "module.cloud_run.uri" if enable_cloud_run else "null" }}
+    cloud_run_uri     = {{ "module." ~ cloud_run_services[0].module_name ~ ".uri" if enable_cloud_run else "null" }}
     oidc_provider     = var.workload_identity_provider
     deploy_account    = var.deploy_service_account
     vault_private_ips = {
@@ -91,6 +96,11 @@ output "platform_runtime" {
         project_id        = module.spot_{{ vm.name | tf_id }}.project_id
         provisioning_model = module.spot_{{ vm.name | tf_id }}.provisioning_model
       }
+{% endfor %}
+    }
+    cloud_run_services = {
+{% for service in cloud_run_services %}
+      "{{ service.name }}" = module.{{ service.module_name }}.uri
 {% endfor %}
     }
   }
