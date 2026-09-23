@@ -56,5 +56,26 @@ UAT OIDC 验证可以在 GitOps manifest 的 `spot_vms` 列表声明最小 Compu
 Spot VM。该模块复用已创建的 deploy Service Account，不创建新的长期密钥；资源
 完成验证后必须执行 Terraform destroy。
 
+## Workload namespace manifests
+
+`kind: GCPWorkloadNamespace` is the parameter-driven contract for independently
+managed GCP workload states. The manifest declares the project, account,
+region, workspace, state key, network inputs, and resource list; this renderer
+turns the declaration into Terraform modules. Each namespace state may declare
+`resources.spot_vms`, `resources.cloud_run_services`, or both. Spot VMs require
+`name`, `zone`, and `machine_type`; `image` defaults to Debian 12 and
+`max_run_duration_seconds` defaults to 3600. Cloud Run entries require `name`
+and `image`, and may override `region`.
+
+`spec.enable_cloud_nat` defaults to `true`; set it to `false` for short-lived
+validation VMs that do not need outbound internet, avoiding an otherwise
+billable Cloud NAT gateway.
+
+The existing `global.cloud_run_service_name` / `cloud_run_image` form remains
+supported and keeps the original Terraform address (`module.cloud_run`) for
+state compatibility. `spot_vms` at the manifest root also remains supported.
+Namespace `state.key` must equal
+`terraform/<environment>/<project>/gcp-cloud/<account>/<workspace>/terraform.tfstate`.
+
 Terraform 只负责 GCP 基础资源；Vault secret value、Vault policy 和 Ansible 服务配置
 由对应运维链路管理。本目录保留既有 AWS/GCP 示例模块，不在新环境中使用 HCL 循环。

@@ -69,6 +69,12 @@ variable "subnet_cidr" {
   default = null
 }
 
+variable "enable_cloud_nat" {
+  type        = bool
+  default     = true
+  description = "Create Cloud NAT for private subnet egress. Disable for short-lived validation workloads that need no outbound internet."
+}
+
 variable "artifact_registry_location" {
   type    = string
   default = null

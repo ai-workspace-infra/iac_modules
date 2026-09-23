@@ -25,6 +25,24 @@ variable "subnet_cidr" {
   default = "10.60.0.0/20"
 }
 
+variable "enable_nat" {
+  type        = bool
+  default     = true
+  description = "Whether to create Cloud Router and Cloud NAT for subnet egress."
+}
+
+# Preserve states created before Cloud NAT became optional and these resources
+# gained count-based addresses.
+moved {
+  from = google_compute_router.this
+  to   = google_compute_router.this[0]
+}
+
+moved {
+  from = google_compute_router_nat.this
+  to   = google_compute_router_nat.this[0]
+}
+
 resource "google_compute_network" "this" {
   project                 = var.project_id
   name                    = var.network_name
@@ -41,6 +59,7 @@ resource "google_compute_subnetwork" "this" {
 }
 
 resource "google_compute_router" "this" {
+  count   = var.enable_nat ? 1 : 0
   project = var.project_id
   name    = "${var.network_name}-router"
   region  = var.region
@@ -48,9 +67,10 @@ resource "google_compute_router" "this" {
 }
 
 resource "google_compute_router_nat" "this" {
+  count                              = var.enable_nat ? 1 : 0
   project                            = var.project_id
   name                               = "${var.network_name}-nat"
-  router                             = google_compute_router.this.name
+  router                             = google_compute_router.this[0].name
   region                             = var.region
   nat_ip_allocate_option             = "AUTO_ONLY"
   source_subnetwork_ip_ranges_to_nat = "LIST_OF_SUBNETWORKS"
