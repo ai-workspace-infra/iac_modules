@@ -86,6 +86,16 @@ For Vault Raft HA, the renderer also permits TCP 8200 (API/peer traffic) and
 ports are never exposed to the internet; configure Vault listener and cluster
 addresses to use the nodes' private IPs.
 
+`spec.enable_iap_ssh` is an opt-in alternative for GitHub-hosted node
+configuration jobs. It defaults to `false`. When explicitly enabled, the
+renderer allows TCP 22 only from Google's IAP TCP forwarding range
+`35.235.240.0/20`, enables OS Login on the Vault VMs, grants the declared
+WIF deploy service account IAP tunnel and OS Admin Login on only the declared
+VM instances, and grants read-only Compute Viewer plus per-VM service-account
+user access required by the SSH client. This option requires the bootstrap/IaC identity to be
+allowed to manage these narrowly scoped IAM bindings. Leave it disabled until
+the IAP access path has been reviewed and approved.
+
 The existing `global.cloud_run_service_name` / `cloud_run_image` form remains
 supported and keeps the original Terraform address (`module.cloud_run`) for
 state compatibility. `spot_vms` at the manifest root also remains supported.
