@@ -213,6 +213,7 @@ def render(args):
         enable_cloud_run=enable_cloud_run,
         legacy_cloud_run=legacy_cloud_run,
         network_name=global_config.get("network_name", ""),
+        subnet_cidr=global_config.get("subnet_cidr", ""),
         ssh_source_ranges=global_config.get("ssh_source_ranges", []),
     )
     generated = workdir / "generated_platform.tf"
