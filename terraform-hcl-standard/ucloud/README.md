@@ -23,6 +23,16 @@ credential variables are marked sensitive. Terraform state still contains
 provider-managed infrastructure data, so use an appropriately protected state
 backend.
 
+Store runtime credentials in Vault KV v2 at
+`kv/CICD/<env>/ucloud/<project_id>` (API path
+`kv/data/CICD/<env>/ucloud/<project_id>`). The record fields are
+`UCLOUD_PUBLIC_KEY`, `UCLOUD_PRIVATE_KEY`, `UCLOUD_PROJECT_ID`, and
+`UCLOUD_REGION`; see the platform-ops-toolkit helper
+[`scripts/ucloud/bootstrap_ucloud_auth_kv.sh`](https://github.com/ai-workspace-infra/platform-ops-toolkit/blob/main/scripts/ucloud/bootstrap_ucloud_auth_kv.sh).
+The helper supports `write` and `check` and does not print credential values.
+There is no Terraform state contract for UCloud's current existing-resource
+inventory route.
+
 ## Modules
 
 - `modules/network`: creates a VPC and one subnet.
