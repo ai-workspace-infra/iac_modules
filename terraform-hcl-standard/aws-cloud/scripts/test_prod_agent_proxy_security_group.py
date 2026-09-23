@@ -11,7 +11,8 @@ from jinja2 import Environment, FileSystemLoader
 
 
 root = pathlib.Path(__file__).resolve().parents[1]
-config = root / "config/resources/prod/agent-proxy.yaml"
+gitops_root = pathlib.Path(__file__).resolve().parents[4] / "gitops"
+config = gitops_root / "resources/svc.plus/prod/aws/agent-proxy.yaml"
 template_dir = root / "templates"
 
 os.environ.setdefault("TARGET_DOMAIN_BASE", "svc.plus")

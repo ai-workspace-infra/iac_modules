@@ -48,8 +48,7 @@ reusable templates, composition logic — leaving run directories as pure Terraf
 
 | Layer | Path | Role | Tracked |
 |-------|------|------|---------|
-| Declaration | sibling `gitops/resources/<project>/<env>/<provider>/*.yaml` | Resource topology per environment and per resource group | external GitOps repo |
-| Declaration | sibling `gitops/resources/<project>/<env>/<provider>/` | Resource topology and account/bootstrap facts | external GitOps repo |
+| Declaration | sibling `gitops/resources/<project>/<env>/<provider>/*.yaml` | Resource topology, account and bootstrap facts | external GitOps repo |
 | Templates | `<provider>/templates/` | Shared `provider.tf`, `variables.tf`, `backend.tf`, `cloud-init.yaml` and their `.j2` renderers | ✅ |
 | Composition | `<provider>/scripts/generate.py`, `provision.sh` | `render` + `inventory` subcommands, one-shot provisioning | ✅ |
 | Modules | `<provider>/modules/<resource>/` | Reusable resource modules consumed by the rendered blocks | ✅ |
@@ -61,15 +60,15 @@ reusable templates, composition logic — leaving run directories as pure Terraf
 
 | Provider | Path | Status | Modules | What exists today |
 |----------|------|--------|---------|-------------------|
-| AWS | `terraform-hcl-standard/aws-cloud/` | Production | 14 | Terragrunt bootstrap (`state` / `lock` / `identity`), `component/` roots, `sit` + `uat` + `prod` resource declarations, render + inventory scripts |
-| Vultr | `terraform-hcl-standard/vultr-vps/` | Production — reference implementation of the render pattern | 7 | Four run directories (`ai-workspace`, `dev`, `platform-ops-toolkit`, `site-migration-toolkit`), `sit` + `uat` + `prod` declarations, `provision.sh` |
+| AWS | `terraform-hcl-standard/aws-cloud/` | Production | 14 | Terragrunt bootstrap (`state` / `lock` / `identity`), `component/` roots, GitOps-owned `sit` + `uat` + `prod` declarations, render + inventory scripts |
+| Vultr | `terraform-hcl-standard/vultr-vps/` | Production — reference implementation of the render pattern | 7 | Four run directories (`ai-workspace`, `dev`, `platform-ops-toolkit`, `site-migration-toolkit`), GitOps-owned environment declarations, `provision.sh` |
 | Akamai Cloud / Linode | `terraform-hcl-standard/akamai-cloud/` | MVP — VPS provider tree | 3 | Linode compute, firewall, VPC and block storage modules; explicit renderer, CMDB/inventory and fixture validation |
 | Alibaba Cloud | `terraform-hcl-standard/ali-cloud/` | Partial | 9 | Modules + bootstrap + `envs/dev`; declarations are external |
 | GCP | `terraform-hcl-standard/gcp-cloud/` | Core baseline | 14 | Project/API, VPC, IAM/WIF, Vault VM, Artifact Registry and Cloud Run modules |
 | Azure | `terraform-hcl-standard/azure-cloud/` | Skeleton | 14 | One `main.tf` per module; no run directories, no resource declarations |
 
-`utils/` at the `terraform-hcl-standard/` root holds the shared Python renderer
-(`renderer.py`, `config_loader.py`, `render_provider_backend.py`).
+`utils/` at the `terraform-hcl-standard/` root holds shared Python rendering and
+provider/backend helpers (`renderer.py`, `render_provider_backend.py`).
 
 The provider-neutral backend, Vault fields, key hierarchy and external-inventory
 contract are documented in [`docs/howto/unified-iac-state-contract.md`](docs/howto/unified-iac-state-contract.md).
@@ -191,8 +190,9 @@ artifacts or secrets staged.
 
 - Azure remains a skeleton; GCP core baseline modules are deployable through the GitOps declarations.
 - Alibaba Cloud has modules and a development workspace; declarations are kept in GitOps when added.
-- Every renderer defaults to a declaration in the sibling GitOps checkout; pass `--resources` /
-  `RESOURCES` explicitly when selecting another project, environment or provider.
+- Renderers either require an explicit `--resources` / `RESOURCES` path or default to a declaration
+  in the sibling GitOps checkout. Pass the GitOps declaration path when selecting a project,
+  environment or provider.
 - Documentation consolidation is tracked in [`docs/DOC_COVERAGE.md`](docs/DOC_COVERAGE.md).
 
 ## Docs / Links

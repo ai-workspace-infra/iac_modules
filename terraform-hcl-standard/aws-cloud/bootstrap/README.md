@@ -21,7 +21,20 @@ Terragrunt `run-all` handles the ordering; no manual sequencing is required.
 
 - **Data plane**: S3 bucket enforces AES256 SSE, public access block, and versioning. DynamoDB enables server-side encryption and PITR for forensic recovery.
 - **Control plane**: IAM policies are externalized in `identity/policies/*.json` and rendered via `aws_iam_policy_document` to keep Terraform code lean and auditable.
-- **Config source of truth**: Provide the bootstrap YAML path via `TF_CONFIG` (absolute or repo-root relative). When unset, Terragrunt defaults to `gitops/${GITOPS_BOOTSTRAP_CONFIG:-config/bootstrap.yaml}` relative to the repo root inferred from `TG_ROOT` (`terraform-hcl-standard/aws-cloud/bootstrap`).
+- **Config source of truth**: Account/environment bootstrap YAML is read from the sibling GitOps repository. Pass its absolute path with `BOOTSTRAP_CONFIG_PATH`; the bootstrap modules do not fall back to a copy under `iac_modules`.
+
+For the production identity bootstrap, clone GitOps next to this repository and
+set the paths explicitly:
+
+```bash
+export GITOPS_ROOT="$(cd ../../../../gitops && pwd)"
+export BOOTSTRAP_CONFIG_PATH="$GITOPS_ROOT/resources/svc.plus/prod/aws/bootstrap-identity.yaml"
+export GITHUB_ACTIONS_OIDC_CONFIG_PATH="$GITOPS_ROOT/resources/svc.plus/prod/aws/github-actions-oidc.json"
+```
+
+Generic AWS resource renders also take their inputs from GitOps. For example,
+UAT AI Aggregator uses
+`$GITOPS_ROOT/resources/svc.plus/uat/aws/ai-aggregator.yaml`.
 
 ## How to Run with Terragrunt
 
