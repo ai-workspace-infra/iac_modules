@@ -6,6 +6,21 @@ provider token/identity 只控制云资源；`TF_STATE_*` 只控制 state bucket
 
 ## Vault KV v2
 
+Cloud provider credentials are stored separately from the shared Terraform
+backend record. UCloud credentials use one KV v2 record per environment and
+UCloud project:
+
+```text
+CLI: vault kv get kv/CICD/<env>/ucloud/<project_id>
+API: kv/data/CICD/<env>/ucloud/<project_id>
+```
+
+The record contains `UCLOUD_PUBLIC_KEY`, `UCLOUD_PRIVATE_KEY`,
+`UCLOUD_PROJECT_ID`, and `UCLOUD_REGION`. Keep the public and private keys in
+Vault only; do not add them to GitOps declarations, Terraform variables files,
+or logs. The provider credential record is independent of
+`kv/CICD/<env>/iac_state`.
+
 每个环境有一条独立 state 记录：
 
 ```text
