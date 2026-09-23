@@ -46,6 +46,11 @@ environment: uat
 global:
   region: cn-bj2
   availability_zone: cn-bj2-03
+bootstrap:
+  # The UCloud bootstrap Job resolves or creates these IDs and exports the
+  # named values as TF_VAR_ucloud_bootstrap_* before Terraform runs.
+  security_group_id_env: UCLOUD_BOOTSTRAP_SECURITY_GROUP_ID
+  key_pair_id_env: UCLOUD_BOOTSTRAP_KEY_PAIR_ID
 network:
   name: ai-aggregator-uat
   cidr_blocks: [10.20.0.0/16]
@@ -53,12 +58,14 @@ network:
 hosts:
   - name: ai-aggregator-uhost
     instance_type: n-basic-2
-    security_group_id: firewall-xxxxx
-    key_pair_id: keypair-xxxxx
 ```
 
 The provider credentials and backend credentials are injected by the
-platform-ops workflow from Vault. A local render can be produced with:
+platform-ops workflow from Vault. Before Terraform render/plan, the UCloud
+bootstrap Job must export the two declared output names as
+`TF_VAR_ucloud_bootstrap_security_group_id` and
+`TF_VAR_ucloud_bootstrap_key_pair_id`. The renderer rejects inline IDs so these
+derived resources remain owned by the bootstrap Job.
 
 ```sh
 python3 scripts/generate.py render \

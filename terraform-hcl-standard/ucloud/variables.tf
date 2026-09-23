@@ -23,3 +23,15 @@ variable "ucloud_region" {
   type        = string
   default     = null
 }
+
+variable "ucloud_bootstrap_security_group_id" {
+  description = "Security group ID emitted by the UCloud bootstrap Job."
+  type        = string
+  nullable    = false
+}
+
+variable "ucloud_bootstrap_key_pair_id" {
+  description = "Key pair ID emitted by the UCloud bootstrap Job."
+  type        = string
+  nullable    = false
+}
