@@ -81,28 +81,38 @@ XConnect Gateway and TCP 22 on Vault nodes from the declared SSH allowlist; do
 not use `0.0.0.0/0` for SSH. The current operator/proxy egress CIDR must be
 provided in GitOps before a plan can pass validation.
 
-When `enable_iap_ssh` is false (the default), an optional
+For a shared Vault rollout, set `spec.ssh_access_mode: bootstrap-public` with
+the operator's exact public `/32` while installing the services. Only after
+XConnect Zero has enrolled the Gateway, One nodes, and operator Mac, and their
+assigned overlay IPs/internal names have been verified, switch to
+`ssh_access_mode: xconnect-zero` and an empty `ssh_source_ranges` list. The
+renderer then removes the GCP public TCP/22 firewall rule. Both modes keep IAP
+disabled. The Raft cluster always uses private VPC IPs, independent of the
+SSH connection address.
+
+When `enable_oslogin` is false (the default), an optional
 `TF_VAR_ssh_public_key` is installed as an instance-scoped metadata SSH key for
 each declared Vault VM; `TF_VAR_ssh_username` defaults to `github-actions`.
-Keep the matching private key in Vault/operator key storage and keep the
-firewall `/32` allowlist narrow. Metadata-managed SSH keys grant sudo on the
-VM. This is separate from OS Login; do not set the key when
-`enable_iap_ssh` is true.
+Metadata-managed SSH keys grant sudo on the VM. For GitHub Actions, prefer
+`enable_oslogin: true` and an ephemeral SSH key uploaded to the OS Login profile
+using the run's Google WIF identity; the pipeline should delete the key and
+local private material after Ansible completes. This does not require IAP and
+retains the declared SSH `/32` firewall allowlist.
 
 For Vault Raft HA, the renderer also permits TCP 8200 (API/peer traffic) and
 8201 (Raft forwarding) only from the declared VPC subnet to Vault nodes. These
 ports are never exposed to the internet; configure Vault listener and cluster
 addresses to use the nodes' private IPs.
 
-`spec.enable_iap_ssh` is an opt-in alternative for GitHub-hosted node
-configuration jobs. It defaults to `false`. When explicitly enabled, the
-renderer allows TCP 22 only from Google's IAP TCP forwarding range
-`35.235.240.0/20`, enables OS Login on the Vault VMs, grants the declared
-WIF deploy service account IAP tunnel and OS Admin Login on only the declared
-VM instances, and grants read-only Compute Viewer plus per-VM service-account
-user access required by the SSH client. This option requires the bootstrap/IaC identity to be
-allowed to manage these narrowly scoped IAM bindings. Leave it disabled until
-the IAP access path has been reviewed and approved.
+`spec.enable_iap_ssh` remains a separate opt-in network path. It defaults to
+`false`. When enabled, the renderer permits TCP 22 from Google's IAP TCP
+forwarding range `35.235.240.0/20` and creates IAP tunnel IAM bindings.
+`spec.enable_oslogin` controls IAM-based SSH identity independently and can be
+used with direct SSH from the approved operator egress CIDR; only the declared
+Vault instances receive the OS Admin Login binding. For this path, the runtime
+WIF deploy service account needs permission to create an ephemeral OS Login key
+and to act as the three VM runtime service accounts. Do not enable IAP unless
+the network path is explicitly selected.
 
 The existing `global.cloud_run_service_name` / `cloud_run_image` form remains
 supported and keeps the original Terraform address (`module.cloud_run`) for

@@ -80,6 +80,8 @@ def normalize_resources(document):
         "subnet_cidr": spec.get("subnet_cidr"),
         "enable_cloud_nat": spec.get("enable_cloud_nat", True),
         "enable_iap_ssh": spec.get("enable_iap_ssh", False),
+        "enable_oslogin": spec.get("enable_oslogin", spec.get("enable_iap_ssh", False)),
+        "ssh_access_mode": spec.get("ssh_access_mode", "legacy"),
         "ssh_source_ranges": spec.get("ssh_source_ranges", []),
         "artifact_registry_location": spec.get("artifact_registry_location"),
         "artifact_registry_id": spec.get("artifact_registry_id"),
@@ -99,6 +101,8 @@ def normalize_resources(document):
         raise SystemExit(f"GCPWorkloadNamespace spec is missing: {', '.join(missing)}")
     if not isinstance(global_config["enable_iap_ssh"], bool):
         raise SystemExit("spec.enable_iap_ssh must be a boolean")
+    if not isinstance(global_config["enable_oslogin"], bool):
+        raise SystemExit("spec.enable_oslogin must be a boolean")
     name = metadata.get("name")
     if spec["workspace"] != name or spec["state_namespace"] != name:
         raise SystemExit("metadata.name, spec.workspace, and spec.state_namespace must match")
@@ -121,8 +125,21 @@ def normalize_resources(document):
         roles = [item.get("xconnect_role") for item in vault_nodes]
         if roles.count("gateway") != 1 or any(role not in {"gateway", "one"} for role in roles):
             raise SystemExit("vault_nodes must include exactly one gateway and otherwise only one roles")
-        if not global_config["ssh_source_ranges"] and not global_config["enable_iap_ssh"]:
-            raise SystemExit("vault_nodes require ssh_source_ranges or enable_iap_ssh: true")
+        ssh_mode = global_config["ssh_access_mode"]
+        ssh_sources = global_config["ssh_source_ranges"]
+        if not isinstance(ssh_sources, list):
+            raise SystemExit("ssh_source_ranges must be a list of IPv4 /32 CIDRs")
+        if ssh_mode == "bootstrap-public":
+            if not ssh_sources or global_config["enable_iap_ssh"]:
+                raise SystemExit("bootstrap-public requires a /32 SSH allowlist and disables IAP")
+        elif ssh_mode == "xconnect-zero":
+            if ssh_sources or global_config["enable_iap_ssh"]:
+                raise SystemExit("xconnect-zero requires no public SSH allowlist and disables IAP")
+        elif ssh_mode == "legacy":
+            if not ssh_sources and not global_config["enable_iap_ssh"]:
+                raise SystemExit("vault_nodes require ssh_source_ranges or enable_iap_ssh: true")
+        else:
+            raise SystemExit("ssh_access_mode must be bootstrap-public or xconnect-zero")
         for cidr in global_config["ssh_source_ranges"]:
             try:
                 network = ipaddress.ip_network(cidr, strict=False)
@@ -218,6 +235,7 @@ def render(args):
         network_name=global_config.get("network_name", ""),
         subnet_cidr=global_config.get("subnet_cidr", ""),
         enable_iap_ssh=global_config.get("enable_iap_ssh", False),
+        enable_oslogin=global_config.get("enable_oslogin", global_config.get("enable_iap_ssh", False)),
         ssh_source_ranges=global_config.get("ssh_source_ranges", []),
     )
     generated = workdir / "generated_platform.tf"
