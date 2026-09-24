@@ -75,6 +75,18 @@ variable "enable_cloud_nat" {
   description = "Create Cloud NAT for private subnet egress. Disable for short-lived validation workloads that need no outbound internet."
 }
 
+variable "enable_oslogin" {
+  type        = bool
+  default     = false
+  description = "Enable IAM-based OS Login independently of whether SSH is tunneled through IAP."
+}
+
+variable "enable_iap_ssh" {
+  type        = bool
+  default     = false
+  description = "Allow SSH through Google IAP TCP forwarding. This is independent of OS Login."
+}
+
 variable "ssh_source_ranges" {
   type        = list(string)
   default     = []
