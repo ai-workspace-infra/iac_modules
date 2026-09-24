@@ -42,6 +42,8 @@ module "{{ node.name | tf_id }}" {
   public_ip     = {{ node.public_ip | default(false) | tojson }}
   enable_oslogin = {{ enable_iap_ssh | tojson }}
   os_login_principal_email = var.deploy_service_account
+  ssh_public_key = var.ssh_public_key
+  ssh_username   = var.ssh_username
   network      = module.network.network
   subnetwork   = module.network.subnet
 }

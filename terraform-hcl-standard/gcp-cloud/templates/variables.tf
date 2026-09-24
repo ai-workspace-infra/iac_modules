@@ -81,6 +81,18 @@ variable "ssh_source_ranges" {
   description = "Explicit SSH ingress allowlist CIDRs for GCP Vault nodes."
 }
 
+variable "ssh_public_key" {
+  type        = string
+  default     = ""
+  description = "Optional public key for metadata-based SSH to declared Vault VMs when IAP/OS Login is disabled."
+}
+
+variable "ssh_username" {
+  type        = string
+  default     = "github-actions"
+  description = "Linux username associated with ssh_public_key in instance metadata."
+}
+
 variable "artifact_registry_location" {
   type    = string
   default = null

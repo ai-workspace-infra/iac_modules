@@ -38,6 +38,19 @@ class VaultRaftFirewallContractTest(unittest.TestCase):
         self.assertIn("enable_iap_ssh: true", fixture)
         self.assertIn("ssh_source_ranges: []", fixture)
 
+    def test_direct_ssh_key_is_instance_scoped_and_disabled_with_oslogin(self):
+        template = TEMPLATE.read_text(encoding="utf-8")
+        module = (ROOT / "modules" / "vault_vm" / "main.tf").read_text(encoding="utf-8")
+        variables = (ROOT / "templates" / "variables.tf").read_text(encoding="utf-8")
+
+        self.assertIn("ssh_public_key = var.ssh_public_key", template)
+        self.assertIn("ssh_username   = var.ssh_username", template)
+        self.assertIn('"ssh-keys" = "${var.ssh_username}:${trimspace(var.ssh_public_key)}"', module)
+        self.assertIn('!var.enable_oslogin && trimspace(var.ssh_public_key) != ""', module)
+        self.assertIn('default     = "github-actions"', module)
+        self.assertIn('variable "ssh_public_key"', variables)
+        self.assertIn('variable "ssh_username"', variables)
+
 
 if __name__ == "__main__":
     unittest.main()
