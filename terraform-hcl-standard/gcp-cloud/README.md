@@ -81,6 +81,14 @@ XConnect Gateway and TCP 22 on Vault nodes from the declared SSH allowlist; do
 not use `0.0.0.0/0` for SSH. The current operator/proxy egress CIDR must be
 provided in GitOps before a plan can pass validation.
 
+When `enable_iap_ssh` is false (the default), an optional
+`TF_VAR_ssh_public_key` is installed as an instance-scoped metadata SSH key for
+each declared Vault VM; `TF_VAR_ssh_username` defaults to `github-actions`.
+Keep the matching private key in Vault/operator key storage and keep the
+firewall `/32` allowlist narrow. Metadata-managed SSH keys grant sudo on the
+VM. This is separate from OS Login; do not set the key when
+`enable_iap_ssh` is true.
+
 For Vault Raft HA, the renderer also permits TCP 8200 (API/peer traffic) and
 8201 (Raft forwarding) only from the declared VPC subnet to Vault nodes. These
 ports are never exposed to the internet; configure Vault listener and cluster

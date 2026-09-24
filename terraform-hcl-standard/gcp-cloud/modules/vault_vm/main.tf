@@ -67,6 +67,31 @@ variable "os_login_principal_email" {
   }
 }
 
+variable "ssh_public_key" {
+  type        = string
+  description = "Optional metadata-based SSH public key; ignored when OS Login is enabled."
+  default     = ""
+}
+
+variable "ssh_username" {
+  type        = string
+  description = "Linux username for the metadata-based SSH public key."
+  default     = "github-actions"
+  validation {
+    condition     = can(regex("^[a-z_][a-z0-9_-]{0,31}$", var.ssh_username))
+    error_message = "ssh_username must be a valid Linux username."
+  }
+}
+
+locals {
+  instance_metadata = merge(
+    var.enable_oslogin ? { "enable-oslogin" = "TRUE" } : {},
+    !var.enable_oslogin && trimspace(var.ssh_public_key) != "" ? {
+      "ssh-keys" = "${var.ssh_username}:${trimspace(var.ssh_public_key)}"
+    } : {},
+  )
+}
+
 resource "google_compute_address" "public" {
   count        = var.public_ip ? 1 : 0
   project      = var.project_id
@@ -96,7 +121,7 @@ resource "google_compute_instance" "this" {
   machine_type              = var.machine_type
   allow_stopping_for_update = true
   tags                      = var.xconnect_role == "gateway" ? ["vault", "vault-gateway"] : ["vault", "vault-one"]
-  metadata                  = var.enable_oslogin ? { "enable-oslogin" = "TRUE" } : {}
+  metadata                  = local.instance_metadata
 
   boot_disk {
     initialize_params {
