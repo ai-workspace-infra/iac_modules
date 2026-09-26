@@ -50,13 +50,15 @@ module "{{ node.name | tf_id }}" {
 
 {% endfor %}
 {% if vault_nodes | selectattr('xconnect_role', 'equalto', 'gateway') | list | length == 1 %}
+# The Vault API and the XConnect Gateway use distinct TLS hostnames on 443.
+# Every Raft node must answer vault.svc.plus before it enters the DNS pool.
 resource "google_compute_firewall" "vault_gateway_https" {
   project       = module.project.project_id
   name          = "{{ network_name }}-vault-gateway-https"
   network       = module.network.network
   direction     = "INGRESS"
   source_ranges = ["0.0.0.0/0"]
-  target_tags   = ["vault-gateway"]
+  target_tags   = ["vault"]
 
   allow {
     protocol = "tcp"

@@ -14,7 +14,17 @@ class VaultRaftFirewallContractTest(unittest.TestCase):
         self.assertIn('source_ranges = [{{ subnet_cidr | tojson }}]', template)
         self.assertIn('target_tags   = ["vault"]', template)
         self.assertIn('ports    = ["8200", "8201"]', template)
-        self.assertNotIn('source_ranges = ["0.0.0.0/0"]\n  target_tags   = ["vault"]', template)
+        raft_rule = template.split('resource "google_compute_firewall" "vault_raft_internal" {', 1)[1]
+        raft_rule = raft_rule.split('\nresource ', 1)[0]
+        self.assertNotIn('source_ranges = ["0.0.0.0/0"]', raft_rule)
+
+    def test_public_https_covers_every_vault_node(self):
+        template = TEMPLATE.read_text(encoding="utf-8")
+        https_rule = template.split('resource "google_compute_firewall" "vault_gateway_https" {', 1)[1]
+        https_rule = https_rule.split('\nresource ', 1)[0]
+        self.assertIn('source_ranges = ["0.0.0.0/0"]', https_rule)
+        self.assertIn('target_tags   = ["vault"]', https_rule)
+        self.assertIn('ports    = ["443"]', https_rule)
 
     def test_renderer_passes_manifest_subnet_into_template(self):
         generator = GENERATOR.read_text(encoding="utf-8")
