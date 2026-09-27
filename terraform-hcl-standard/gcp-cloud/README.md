@@ -70,6 +70,12 @@ Vault nodes require exactly one `xconnect_role: gateway` and any number of
 `max_run_duration_seconds` defaults to 3600. Cloud Run entries require `name`
 and `image`, and may override `region`.
 
+The optional `spec.state_project` is the logical project segment used by the
+organization-wide state contract. When present, the state key must be
+`terraform/<environment>/<state_project>/gcp-cloud/<gcp_account_id>/<namespace>/terraform.tfstate`;
+the real `spec.project_id` remains the Google Cloud project that owns the
+resources. Omitting `state_project` preserves the legacy project-based key.
+
 `spec.enable_cloud_nat` defaults to `true`; set it to `false` for short-lived
 validation VMs that do not need outbound internet, avoiding an otherwise
 billable Cloud NAT gateway.

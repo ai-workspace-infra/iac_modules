@@ -107,8 +107,15 @@ def normalize_resources(document):
     if spec["workspace"] != name or spec["state_namespace"] != name:
         raise SystemExit("metadata.name, spec.workspace, and spec.state_namespace must match")
     state_key = spec.get("state", {}).get("key")
+    # The logical state project is independent from the concrete GCP project
+    # that owns the resources.  This lets the platform contract use the same
+    # five-level key as AWS/Akamai while retaining the real GCP project ID for
+    # Terraform resources and credentials.
+    state_project = spec.get("state_project", spec["project_id"])
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", str(state_project)):
+        raise SystemExit("spec.state_project must contain only letters, digits, dot, underscore, or hyphen")
     expected_state_key = (
-        f"terraform/{environment}/{spec['project_id']}/gcp-cloud/"
+        f"terraform/{environment}/{state_project}/gcp-cloud/"
         f"{spec['gcp_account_id']}/{name}/terraform.tfstate"
     )
     if state_key != expected_state_key:
