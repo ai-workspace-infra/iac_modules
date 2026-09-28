@@ -86,8 +86,15 @@ variable "allowed_subjects" {
 variable "deploy_service_account_roles" {
   type = set(string)
   default = [
-    "roles/artifactregistry.writer",
+    # The deploy identity is the short-lived GitHub OIDC provisioner for the
+    # declared platform stack. Keep this explicit instead of granting project
+    # owner/editor: it must be able to reconcile network, runtime identities,
+    # Artifact Registry, and Cloud Run, but nothing outside those APIs.
+    "roles/artifactregistry.admin",
     "roles/compute.instanceAdmin.v1",
+    "roles/compute.networkAdmin",
+    "roles/iam.serviceAccountAdmin",
+    "roles/iam.serviceAccountUser",
     "roles/run.admin",
     "roles/serviceusage.serviceUsageConsumer",
   ]
