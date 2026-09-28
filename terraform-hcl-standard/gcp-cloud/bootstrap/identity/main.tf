@@ -84,9 +84,10 @@ variable "allowed_subjects" {
 }
 
 variable "deploy_service_account_roles" {
-  type = set(string)
+  description = "Project roles granted to the GitHub Actions deploy service account. Artifact Registry admin is required because the platform stack creates its repository during Terraform apply."
+  type        = set(string)
   default = [
-    "roles/artifactregistry.writer",
+    "roles/artifactregistry.admin",
     "roles/compute.instanceAdmin.v1",
     "roles/compute.networkAdmin",
     "roles/compute.securityAdmin",
