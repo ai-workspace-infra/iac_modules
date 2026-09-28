@@ -116,6 +116,7 @@ def inventory(args):
                 "name": node["name"],
                 "zone": node["zone"],
                 "private_ip": runtime.get("vault_private_ips", {}).get(node["name"]),
+                "public_ip": runtime.get("vault_public_ips", {}).get(node["name"]),
             }
             for node in resources.get("vault_nodes", [])
         ],

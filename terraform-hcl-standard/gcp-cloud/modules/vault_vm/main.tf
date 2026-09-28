@@ -36,6 +36,12 @@ variable "image" {
   default = "projects/debian-cloud/global/images/family/debian-12"
 }
 
+variable "public_ip" {
+  type        = bool
+  default     = false
+  description = "Allocate an ephemeral public IPv4 address for the instance."
+}
+
 resource "google_service_account" "runtime" {
   project      = var.project_id
   account_id   = "${var.name}-runtime"
@@ -61,6 +67,11 @@ resource "google_compute_instance" "this" {
   network_interface {
     network    = var.network
     subnetwork = var.subnetwork
+
+    dynamic "access_config" {
+      for_each = var.public_ip ? [1] : []
+      content {}
+    }
   }
 
   service_account {
@@ -81,4 +92,8 @@ output "self_link" {
 
 output "private_ip" {
   value = google_compute_instance.this.network_interface[0].network_ip
+}
+
+output "public_ip" {
+  value = try(google_compute_instance.this.network_interface[0].access_config[0].nat_ip, null)
 }
