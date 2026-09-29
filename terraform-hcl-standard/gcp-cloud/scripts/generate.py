@@ -82,6 +82,7 @@ def normalize_resources(document):
         "enable_iap_ssh": spec.get("enable_iap_ssh", False),
         "enable_oslogin": spec.get("enable_oslogin", spec.get("enable_iap_ssh", False)),
         "ssh_access_mode": spec.get("ssh_access_mode", "legacy"),
+        "xconnect_mode": spec.get("xconnect_mode", "gateway"),
         "ssh_source_ranges": spec.get("ssh_source_ranges", []),
         "spot_ssh_source_ranges": spec.get("spot_ssh_source_ranges", []),
         "spot_network_tags": spec.get("spot_network_tags", []),
@@ -106,6 +107,8 @@ def normalize_resources(document):
         raise SystemExit("spec.enable_iap_ssh must be a boolean")
     if not isinstance(global_config["enable_oslogin"], bool):
         raise SystemExit("spec.enable_oslogin must be a boolean")
+    if global_config["xconnect_mode"] not in {"gateway", "member"}:
+        raise SystemExit("spec.xconnect_mode must be gateway or member")
     name = metadata.get("name")
     if spec["workspace"] != name or spec["state_namespace"] != name:
         raise SystemExit("metadata.name, spec.workspace, and spec.state_namespace must match")
@@ -133,8 +136,13 @@ def normalize_resources(document):
         raise SystemExit("GCPWorkloadNamespace must declare at least one supported resource")
     if vault_nodes:
         roles = [item.get("xconnect_role") for item in vault_nodes]
-        if roles.count("gateway") != 1 or any(role not in {"gateway", "one"} for role in roles):
-            raise SystemExit("vault_nodes must include exactly one gateway and otherwise only one roles")
+        if any(role not in {"gateway", "one"} for role in roles):
+            raise SystemExit("vault_nodes xconnect_role must be gateway or one")
+        gateway_count = roles.count("gateway")
+        if global_config["xconnect_mode"] == "gateway" and gateway_count != 1:
+            raise SystemExit("gateway xconnect_mode requires exactly one gateway")
+        if global_config["xconnect_mode"] == "member" and (gateway_count != 0 or not roles):
+            raise SystemExit("member xconnect_mode requires one or more One members and no gateway")
         ssh_mode = global_config["ssh_access_mode"]
         ssh_sources = global_config["ssh_source_ranges"]
         if not isinstance(ssh_sources, list):

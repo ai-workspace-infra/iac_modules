@@ -63,9 +63,11 @@ managed GCP workload states. The manifest declares the project, account,
 region, workspace, state key, network inputs, and resource list; this renderer
 turns the declaration into Terraform modules. Each namespace state may declare
 `resources.spot_vms`, `resources.cloud_run_services`, and/or `resources.vault_nodes`.
-Vault nodes require exactly one `xconnect_role: gateway` and any number of
+Vault nodes default to exactly one `xconnect_role: gateway` and any number of
 `xconnect_role: one` members, plus an SSH `/32` allowlist in
-`spec.ssh_source_ranges`. Spot VMs require
+`spec.ssh_source_ranges`. A state that owns only XConnect One members may set
+`spec.xconnect_mode: member`; it must then contain one or more `one` nodes and
+no gateway. Spot VMs require
 `name`, `zone`, and `machine_type`; `image` defaults to Debian 12 and
 `max_run_duration_seconds` defaults to 3600. Cloud Run entries require `name`
 and `image`, and may override `region`.
