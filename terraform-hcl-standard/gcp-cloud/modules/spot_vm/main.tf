@@ -41,13 +41,33 @@ variable "labels" {
   default = {}
 }
 
+variable "network_tags" {
+  type    = list(string)
+  default = []
+}
+
+variable "public_ip" {
+  type    = bool
+  default = false
+}
+
+variable "ssh_public_key" {
+  type    = string
+  default = ""
+}
+
+variable "ssh_username" {
+  type    = string
+  default = "github-actions"
+}
+
 variable "max_run_duration_seconds" {
-  description = "Maximum lifetime of the disposable Spot instance before Compute Engine deletes it."
+  description = "Optional maximum lifetime. Omit for a service host that must not expire after one hour."
   type        = number
-  default     = 3600
+  default     = null
 
   validation {
-    condition     = var.max_run_duration_seconds >= 60
+    condition     = var.max_run_duration_seconds == null || var.max_run_duration_seconds >= 60
     error_message = "max_run_duration_seconds must be at least 60 seconds."
   }
 }
@@ -59,6 +79,17 @@ resource "google_compute_instance" "this" {
   machine_type              = var.machine_type
   allow_stopping_for_update = true
   labels                    = var.labels
+  tags                      = var.network_tags
+  metadata = var.ssh_public_key == "" ? {} : {
+    ssh-keys = "${var.ssh_username}:${var.ssh_public_key}"
+  }
+
+  lifecycle {
+    precondition {
+      condition     = !var.public_ip || trimspace(var.ssh_public_key) != ""
+      error_message = "A public Spot VM requires an SSH public key from the deploy environment."
+    }
+  }
 
   boot_disk {
     initialize_params {
@@ -71,6 +102,10 @@ resource "google_compute_instance" "this" {
   network_interface {
     network    = var.network
     subnetwork = var.subnetwork
+    dynamic "access_config" {
+      for_each = var.public_ip ? [1] : []
+      content {}
+    }
   }
 
   scheduling {
@@ -78,10 +113,13 @@ resource "google_compute_instance" "this" {
     on_host_maintenance         = "TERMINATE"
     preemptible                 = true
     provisioning_model          = "SPOT"
-    instance_termination_action = "DELETE"
+    instance_termination_action = "STOP"
 
-    max_run_duration {
-      seconds = var.max_run_duration_seconds
+    dynamic "max_run_duration" {
+      for_each = var.max_run_duration_seconds == null ? [] : [var.max_run_duration_seconds]
+      content {
+        seconds = max_run_duration.value
+      }
     }
   }
 }
@@ -104,4 +142,12 @@ output "project_id" {
 
 output "provisioning_model" {
   value = google_compute_instance.this.scheduling[0].provisioning_model
+}
+
+output "public_ip" {
+  value = try(google_compute_instance.this.network_interface[0].access_config[0].nat_ip, null)
+}
+
+output "private_ip" {
+  value = google_compute_instance.this.network_interface[0].network_ip
 }

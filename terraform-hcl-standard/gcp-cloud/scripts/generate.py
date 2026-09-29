@@ -83,6 +83,9 @@ def normalize_resources(document):
         "enable_oslogin": spec.get("enable_oslogin", spec.get("enable_iap_ssh", False)),
         "ssh_access_mode": spec.get("ssh_access_mode", "legacy"),
         "ssh_source_ranges": spec.get("ssh_source_ranges", []),
+        "spot_ssh_source_ranges": spec.get("spot_ssh_source_ranges", []),
+        "spot_network_tags": spec.get("spot_network_tags", []),
+        "ssh_username": spec.get("ssh_username", "github-actions"),
         "artifact_registry_location": spec.get("artifact_registry_location"),
         "artifact_registry_id": spec.get("artifact_registry_id"),
     }
@@ -161,10 +164,18 @@ def normalize_resources(document):
             raise SystemExit(f"Spot VM is missing required fields: {', '.join(missing)}")
         if not str(vm["zone"]).startswith(f"{global_config['region']}-"):
             raise SystemExit(f"Spot VM zone {vm['zone']} must belong to region {global_config['region']}")
-        duration = int(vm.get("max_run_duration_seconds", 3600))
-        if duration < 60:
-            raise SystemExit("Spot VM max_run_duration_seconds must be at least 60")
-        vm["max_run_duration_seconds"] = duration
+        if "max_run_duration_seconds" in vm:
+            duration = int(vm["max_run_duration_seconds"])
+            if duration < 60:
+                raise SystemExit("Spot VM max_run_duration_seconds must be at least 60")
+            vm["max_run_duration_seconds"] = duration
+        if vm.get("public_ip") and not global_config.get("spot_ssh_source_ranges"):
+            raise SystemExit("public Spot VMs require spot_ssh_source_ranges")
+        if not isinstance(vm.get("inventory_groups", []), list) or any(
+            not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", group)
+            for group in vm.get("inventory_groups", [])
+        ):
+            raise SystemExit("Spot VM inventory_groups must contain Ansible group names")
     return (
         global_config,
         vault_nodes,
@@ -194,6 +205,29 @@ def render(args):
     enable_cloud_run = bool(cloud_run_services)
     if (nodes or spot_vms) and not enable_network:
         raise SystemExit("vault_nodes/spot_vms require a declared network_name and subnet_cidr")
+    spot_ssh_sources = global_config.get("spot_ssh_source_ranges", [])
+    if not isinstance(spot_ssh_sources, list):
+        raise SystemExit("spot_ssh_source_ranges must be a list of IPv4 CIDRs")
+    for source in spot_ssh_sources:
+        try:
+            network = ipaddress.ip_network(source, strict=False)
+        except ValueError as error:
+            raise SystemExit(f"invalid Spot SSH source CIDR {source}: {error}") from error
+        if network.version != 4:
+            raise SystemExit("spot_ssh_source_ranges must contain IPv4 CIDRs")
+    if any(vm.get("public_ip") for vm in spot_vms) and not spot_ssh_sources:
+        raise SystemExit("public Spot VMs require spot_ssh_source_ranges")
+    spot_network_tags = global_config.get("spot_network_tags", [])
+    if not isinstance(spot_network_tags, list) or any(
+        not isinstance(tag, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,62}", tag)
+        for tag in spot_network_tags
+    ):
+        raise SystemExit("spot_network_tags must contain GCP network tags")
+    if any(vm.get("public_ip") for vm in spot_vms) and not spot_network_tags:
+        raise SystemExit("public Spot VMs require spot_network_tags for the SSH firewall")
+    for vm in spot_vms:
+        if vm.get("public_ip") and not set(spot_network_tags).intersection(vm.get("network_tags", [])):
+            raise SystemExit(f"public Spot VM {vm['name']} must include a declared spot_network_tag")
     if enable_network and not global_config.get("subnet_cidr"):
         raise SystemExit("network_name requires subnet_cidr")
     if nodes and global_config.get("ssh_source_ranges") and not isinstance(global_config["ssh_source_ranges"], list):
@@ -245,6 +279,8 @@ def render(args):
         enable_iap_ssh=global_config.get("enable_iap_ssh", False),
         enable_oslogin=global_config.get("enable_oslogin", global_config.get("enable_iap_ssh", False)),
         ssh_source_ranges=global_config.get("ssh_source_ranges", []),
+        spot_ssh_source_ranges=global_config.get("spot_ssh_source_ranges", []),
+        spot_network_tags=spot_network_tags,
     )
     generated = workdir / "generated_platform.tf"
     generated.write_text(content, encoding="utf-8")
@@ -268,6 +304,7 @@ def render(args):
         "subnet_cidr",
         "enable_cloud_nat",
         "ssh_source_ranges",
+        "ssh_username",
         "artifact_registry_location",
         "artifact_registry_id",
         "cloud_run_service_name",
@@ -325,9 +362,29 @@ def inventory(args):
         "declared_cloud_run_services": [item["name"] for item in cloud_run_services],
         "declared_spot_vms": [item["name"] for item in spot_vms],
     }
+    for vm in spot_vms:
+        facts = runtime.get("spot_instances", {}).get(vm["name"], {})
+        if vm.get("public_ip"):
+            address = facts.get("public_ip")
+            if not address:
+                raise SystemExit(f"Spot VM {vm['name']} has no public IP for deployment")
+            cmdb[vm["name"]] = {
+                "ip": address,
+                "ansible_user": global_config.get("ssh_username", "github-actions"),
+                "groups": vm.get("inventory_groups", []),
+                "provider": "gcp-cloud",
+                "provisioning_model": facts.get("provisioning_model"),
+            }
     (workdir / "cmdb.json").write_text(json.dumps(cmdb, indent=2) + "\n", encoding="utf-8")
     lines = ["[vault]"]
     lines.extend(f"{node['name']} ansible_host={node['name']}" for node in cmdb["vault_nodes"])
+    groups = sorted({group for vm in spot_vms for group in vm.get("inventory_groups", [])})
+    for group in groups:
+        lines.append(f"[{group}]")
+        lines.extend(
+            f"{vm['name']} ansible_host={cmdb[vm['name']]['ip']} ansible_user={cmdb[vm['name']]['ansible_user']}"
+            for vm in spot_vms if vm["name"] in cmdb and group in cmdb[vm["name"]]["groups"]
+        )
     (workdir / "inventory.ini").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"wrote {workdir / 'cmdb.json'} and {workdir / 'inventory.ini'}")
 
