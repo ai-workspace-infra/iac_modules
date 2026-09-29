@@ -17,6 +17,7 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
         generator = (ROOT / "scripts" / "generate.py").read_text(encoding="utf-8")
 
         self.assertIn('default     = null', module)
+        self.assertIn('var.max_run_duration_seconds == null ? true :', module)
         self.assertIn('instance_termination_action = "STOP"', module)
         self.assertIn('for_each = var.max_run_duration_seconds == null ? []', module)
         self.assertIn('condition     = !var.public_ip || trimspace(var.ssh_public_key) != ""', module)
