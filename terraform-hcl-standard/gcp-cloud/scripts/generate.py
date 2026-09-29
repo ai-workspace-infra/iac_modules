@@ -85,6 +85,7 @@ def normalize_resources(document):
         "xconnect_mode": spec.get("xconnect_mode", "gateway"),
         "ssh_source_ranges": spec.get("ssh_source_ranges", []),
         "external_ip_allowed_instances": spec.get("external_ip_allowed_instances", []),
+        "manage_external_ip_policy": spec.get("manage_external_ip_policy", True),
         "spot_ssh_source_ranges": spec.get("spot_ssh_source_ranges", []),
         "spot_network_tags": spec.get("spot_network_tags", []),
         "ssh_username": spec.get("ssh_username", "github-actions"),
