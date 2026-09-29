@@ -20,3 +20,12 @@ output "private_ip" {
 output "subnet_id" {
   value = aws_instance.this.subnet_id
 }
+output "vault_agent_iam_role_arn" {
+  description = "ARN to bind to a Vault AWS auth role when the optional Vault Agent profile is enabled"
+  value       = try(aws_iam_role.vault_agent[0].arn, null)
+}
+
+output "vault_agent_iam_instance_profile_name" {
+  description = "Name of the optional Vault Agent EC2 instance profile"
+  value       = try(aws_iam_instance_profile.vault_agent[0].name, null)
+}

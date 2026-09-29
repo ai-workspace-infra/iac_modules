@@ -55,9 +55,37 @@ resource "aws_instance" "this" {
   disable_api_termination = var.deletion_protection
   disable_api_stop        = false
 
+  # Optional runtime identity for services such as Vault Agent. A caller may
+  # supply a pre-created profile or ask this module to create a minimal EC2
+  # trust-only profile for AWS IAM authentication.
+  iam_instance_profile = var.iam_instance_profile_name != null ? var.iam_instance_profile_name : try(aws_iam_instance_profile.vault_agent[0].name, null)
+
   tags = merge(var.tags, {
     Name = "${var.name_prefix}-instance"
   })
+}
+
+resource "aws_iam_role" "vault_agent" {
+  count = var.vault_agent_iam_profile_enabled ? 1 : 0
+
+  name = coalesce(var.vault_agent_iam_role_name, "${var.name_prefix}-vault-agent")
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Action    = "sts:AssumeRole"
+      Principal = { Service = "ec2.amazonaws.com" }
+    }]
+  })
+  tags = var.tags
+}
+
+resource "aws_iam_instance_profile" "vault_agent" {
+  count = var.vault_agent_iam_profile_enabled ? 1 : 0
+
+  name = coalesce(var.vault_agent_iam_role_name, "${var.name_prefix}-vault-agent")
+  role = aws_iam_role.vault_agent[0].name
+  tags = var.tags
 }
 
 resource "aws_eip" "this" {

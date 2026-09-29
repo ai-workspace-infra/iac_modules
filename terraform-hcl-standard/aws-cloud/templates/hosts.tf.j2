@@ -186,6 +186,9 @@ module "compute_{{ hid }}" {
 {% endif %}
   sg_id               = aws_security_group.sg_{{ hid }}.id
   keypair_name        = aws_key_pair.{{ host_key_id if provider_alias != 'default' else base_key_id }}.key_name
+  iam_instance_profile_name = {{ host.get('iam_instance_profile_name') | tojson if host.get('iam_instance_profile_name') else 'null' }}
+  vault_agent_iam_profile_enabled = {{ host.get('vault_agent_iam_profile_enabled', false) | tojson }}
+  vault_agent_iam_role_name = {{ host.get('vault_agent_iam_role_name') | tojson if host.get('vault_agent_iam_role_name') else 'null' }}
 {% if ai_spot %}
   user_data = <<-EOT
 #!/bin/sh
@@ -223,6 +226,8 @@ output "cmdb_runtime" {
       private_ip  = module.compute_{{ hid }}.private_ip
       instance_id = module.compute_{{ hid }}.instance_id
       os_id       = {{ ami_expression }}
+      vault_agent_iam_role_arn = module.compute_{{ hid }}.vault_agent_iam_role_arn
+      vault_agent_iam_instance_profile_name = module.compute_{{ hid }}.vault_agent_iam_instance_profile_name
     }
 {% endfor %}
   }

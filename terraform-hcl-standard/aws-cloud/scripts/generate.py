@@ -241,6 +241,12 @@ def cmd_inventory(args):
         host_vars["spot_instance"] = host.get("spot_instance", False)
         host_vars["max_runtime_minutes"] = host.get("max_runtime_minutes", 0)
         host_vars["ansible_port"] = host.get("ssh_port", 22)
+        if rt.get("vault_agent_iam_role_arn"):
+            host_vars["vault_agent_iam_role_arn"] = rt["vault_agent_iam_role_arn"]
+        if rt.get("vault_agent_iam_instance_profile_name"):
+            host_vars["vault_agent_iam_instance_profile_name"] = rt[
+                "vault_agent_iam_instance_profile_name"
+            ]
 
         # inventory_hostname = service_domains 的首个 FQDN（动态取自资源声明 yaml）；
         # 无 service_domains 时回退到 name。CMDB / inventory / 分组均以此为键。
