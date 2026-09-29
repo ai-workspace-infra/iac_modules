@@ -11,6 +11,30 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class SpotVMDeploymentContractTest(unittest.TestCase):
+    def test_member_only_namespace_is_supported_without_gateway(self):
+        spec = importlib.util.spec_from_file_location("gcp_generate", ROOT / "scripts" / "generate.py")
+        generator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generator)
+        manifest = {
+            "kind": "GCPWorkloadNamespace",
+            "metadata": {"name": "shared-observability", "environment": "shared", "provider": "gcp"},
+            "spec": {
+                "gcp_account_id": "open-platform-shared", "project_id": "open-platform-shared",
+                "organization_id": "744119519286", "region": "asia-east1",
+                "workspace": "shared-observability", "state_namespace": "shared-observability",
+                "network_name": "shared-observability", "subnet_cidr": "10.83.0.0/20",
+                "xconnect_mode": "member", "ssh_access_mode": "bootstrap-public",
+                "ssh_source_ranges": ["203.0.113.10/32"],
+                "state": {"key": "terraform/shared/open-platform-shared/gcp-cloud/open-platform-shared/shared-observability/terraform.tfstate"},
+                "resources": {"vault_nodes": [{
+                    "name": "observability-shared-0", "zone": "asia-east1-a",
+                    "machine_type": "e2-medium", "xconnect_role": "one", "public_ip": True,
+                }]},
+            },
+        }
+        _, nodes, _, _, _ = generator.normalize_resources(manifest)
+        self.assertEqual(nodes[0]["xconnect_role"], "one")
+
     def test_public_spot_vm_has_configurable_ssh_and_no_forced_hourly_expiry(self):
         module = (ROOT / "modules" / "spot_vm" / "main.tf").read_text(encoding="utf-8")
         template = (ROOT / "templates" / "open-platform.tf.j2").read_text(encoding="utf-8")
