@@ -67,7 +67,7 @@ variable "max_run_duration_seconds" {
   default     = null
 
   validation {
-    condition     = var.max_run_duration_seconds == null || var.max_run_duration_seconds >= 60
+    condition     = var.max_run_duration_seconds == null ? true : var.max_run_duration_seconds >= 60
     error_message = "max_run_duration_seconds must be at least 60 seconds."
   }
 }
