@@ -231,6 +231,7 @@ def render(args):
     content = env.get_template("open-platform.tf.j2").render(
         environment=global_config["environment"],
         vault_nodes=nodes,
+        external_ip_allowed_instances=global_config.get("external_ip_allowed_instances", []),
         spot_vms=spot_vms,
         cloud_run_services=cloud_run_services,
         vault_machine_type=global_config.get("vault_machine_type", ""),
