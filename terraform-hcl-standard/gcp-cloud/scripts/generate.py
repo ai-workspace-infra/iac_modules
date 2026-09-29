@@ -370,17 +370,26 @@ def inventory(args):
         "deploy_account": runtime.get("deploy_account"),
         "cloud_run_services": runtime.get("cloud_run_services", {}),
         "spot_instances": runtime.get("spot_instances", {}),
-        "vault_nodes": [
-            {
-                "name": node["name"],
-                "zone": node["zone"],
-                "private_ip": runtime.get("vault_private_ips", {}).get(node["name"]),
-            }
-            for node in declared_nodes
-        ],
+        "vault_nodes": [],
         "declared_cloud_run_services": [item["name"] for item in cloud_run_services],
         "declared_spot_vms": [item["name"] for item in spot_vms],
     }
+    for node in declared_nodes:
+        private_ip = runtime.get("vault_private_ips", {}).get(node["name"])
+        public_ip = runtime.get("vault_public_ips", {}).get(node["name"])
+        if node.get("public_ip") and not public_ip:
+            raise SystemExit(f"Vault VM {node['name']} has no public IP for deployment")
+        ansible_host = public_ip or private_ip
+        if not ansible_host:
+            raise SystemExit(f"Vault VM {node['name']} has no reachable IP for deployment")
+        cmdb["vault_nodes"].append({
+            "name": node["name"],
+            "zone": node["zone"],
+            "private_ip": private_ip,
+            "public_ip": public_ip,
+            "ansible_host": ansible_host,
+            "ansible_user": global_config.get("ssh_username", "github-actions"),
+        })
     for vm in spot_vms:
         facts = runtime.get("spot_instances", {}).get(vm["name"], {})
         if vm.get("public_ip"):
@@ -396,7 +405,10 @@ def inventory(args):
             }
     (workdir / "cmdb.json").write_text(json.dumps(cmdb, indent=2) + "\n", encoding="utf-8")
     lines = ["[vault]"]
-    lines.extend(f"{node['name']} ansible_host={node['name']}" for node in cmdb["vault_nodes"])
+    lines.extend(
+        f"{node['name']} ansible_host={node['ansible_host']} ansible_user={node['ansible_user']}"
+        for node in cmdb["vault_nodes"]
+    )
     groups = sorted({group for vm in spot_vms for group in vm.get("inventory_groups", [])})
     for group in groups:
         lines.append(f"[{group}]")

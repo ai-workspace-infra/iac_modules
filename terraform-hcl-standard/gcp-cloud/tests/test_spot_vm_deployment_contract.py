@@ -11,6 +11,28 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class SpotVMDeploymentContractTest(unittest.TestCase):
+    def test_public_vault_node_inventory_uses_terraform_address(self):
+        spec = importlib.util.spec_from_file_location("gcp_generate", ROOT / "scripts" / "generate.py")
+        generator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generator)
+        manifest = {
+            "global": {"environment": "shared", "project_id": "open-platform-shared", "ssh_username": "ubuntu"},
+            "vault_nodes": [{"name": "vault-shared-0", "zone": "asia-east1-a", "public_ip": True}],
+        }
+        runtime = {
+            "project_id": "open-platform-shared",
+            "vault_private_ips": {"vault-shared-0": "10.82.0.2"},
+            "vault_public_ips": {"vault-shared-0": "198.51.100.20"},
+        }
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(
+            generator, "load_resources", return_value=manifest
+        ), patch.object(generator.subprocess, "check_output", return_value=json.dumps(runtime)):
+            generator.inventory(SimpleNamespace(resources="ignored", workdir=tempdir))
+            cmdb = json.loads((Path(tempdir) / "cmdb.json").read_text(encoding="utf-8"))
+            inventory = (Path(tempdir) / "inventory.ini").read_text(encoding="utf-8")
+        self.assertEqual(cmdb["vault_nodes"][0]["public_ip"], "198.51.100.20")
+        self.assertIn("vault-shared-0 ansible_host=198.51.100.20 ansible_user=ubuntu", inventory)
+
     def test_namespace_public_ip_allowlist_renders_project_org_policy(self):
         spec = importlib.util.spec_from_file_location("gcp_generate", ROOT / "scripts" / "generate.py")
         generator = importlib.util.module_from_spec(spec)
