@@ -7,7 +7,7 @@ module "project" {
   billing_account_id = var.billing_account_id
 }
 
-{% if external_ip_allowed_instances %}
+{% if external_ip_allowed_instances and manage_external_ip_policy %}
 resource "google_org_policy_policy" "vm_external_ip_access" {
   name   = "projects/${module.project.project_id}/policies/compute.vmExternalIpAccess"
   parent = "projects/${module.project.project_id}"
@@ -51,7 +51,7 @@ module "artifact_registry" {
 {% for node in vault_nodes %}
 module "{{ node.name | tf_id }}" {
   source       = "../../modules/vault_vm"
-  depends_on   = [module.project{% if external_ip_allowed_instances %}, google_org_policy_policy.vm_external_ip_access{% endif %}]
+  depends_on   = [module.project{% if external_ip_allowed_instances and manage_external_ip_policy %}, google_org_policy_policy.vm_external_ip_access{% endif %}]
   project_id   = module.project.project_id
   name         = {{ node.name | tojson }}
   zone         = {{ node.zone | tojson }}
