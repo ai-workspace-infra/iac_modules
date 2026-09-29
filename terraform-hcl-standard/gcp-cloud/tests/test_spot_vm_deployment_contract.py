@@ -11,6 +11,39 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class SpotVMDeploymentContractTest(unittest.TestCase):
+    def test_namespace_public_ip_allowlist_renders_project_org_policy(self):
+        spec = importlib.util.spec_from_file_location("gcp_generate", ROOT / "scripts" / "generate.py")
+        generator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generator)
+        manifest = {
+            "kind": "GCPWorkloadNamespace",
+            "metadata": {"name": "shared-vault", "environment": "shared", "provider": "gcp"},
+            "spec": {
+                "gcp_account_id": "open-platform-shared", "project_id": "open-platform-shared",
+                "organization_id": "744119519286", "region": "asia-east1",
+                "workspace": "shared-vault", "state_namespace": "shared-vault",
+                "state": {"key": "terraform/shared/open-platform-shared/gcp-cloud/open-platform-shared/shared-vault/terraform.tfstate"},
+                "network_name": "shared-vault", "subnet_cidr": "10.82.0.0/20",
+                "ssh_access_mode": "bootstrap-public", "ssh_source_ranges": ["203.0.113.10/32"],
+                "external_ip_allowed_instances": [
+                    {"name": "vault-shared-0", "zone": "asia-east1-a"},
+                    {"name": "observability-shared-0", "zone": "asia-east1-a"},
+                    {"name": "iam-shared-0", "zone": "asia-east1-a"},
+                ],
+                "resources": {"vault_nodes": [{
+                    "name": "vault-shared-0", "zone": "asia-east1-a",
+                    "machine_type": "e2-highcpu-2", "xconnect_role": "gateway", "public_ip": True,
+                }]},
+            },
+        }
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(generator, "load_resources", return_value=manifest):
+            generator.render(SimpleNamespace(resources="ignored", workdir=tempdir))
+            rendered = (Path(tempdir) / "generated_platform.tf").read_text(encoding="utf-8")
+        self.assertIn('resource "google_org_policy_policy" "vm_external_ip_access"', rendered)
+        for name in ("vault-shared-0", "observability-shared-0", "iam-shared-0"):
+            self.assertIn(f"instances/{name}", rendered)
+        self.assertIn("google_org_policy_policy.vm_external_ip_access", rendered)
+
     def test_member_only_namespace_is_supported_without_gateway(self):
         spec = importlib.util.spec_from_file_location("gcp_generate", ROOT / "scripts" / "generate.py")
         generator = importlib.util.module_from_spec(spec)

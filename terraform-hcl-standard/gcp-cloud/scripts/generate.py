@@ -84,6 +84,7 @@ def normalize_resources(document):
         "ssh_access_mode": spec.get("ssh_access_mode", "legacy"),
         "xconnect_mode": spec.get("xconnect_mode", "gateway"),
         "ssh_source_ranges": spec.get("ssh_source_ranges", []),
+        "external_ip_allowed_instances": spec.get("external_ip_allowed_instances", []),
         "spot_ssh_source_ranges": spec.get("spot_ssh_source_ranges", []),
         "spot_network_tags": spec.get("spot_network_tags", []),
         "ssh_username": spec.get("ssh_username", "github-actions"),
@@ -107,6 +108,16 @@ def normalize_resources(document):
         raise SystemExit("spec.enable_iap_ssh must be a boolean")
     if not isinstance(global_config["enable_oslogin"], bool):
         raise SystemExit("spec.enable_oslogin must be a boolean")
+    allowed_instances = global_config["external_ip_allowed_instances"]
+    if not isinstance(allowed_instances, list) or any(
+        not isinstance(item, dict)
+        or not re.fullmatch(r"[a-z][a-z0-9-]{0,61}[a-z0-9]", str(item.get("name", "")))
+        or not re.fullmatch(r"[a-z]+-[a-z0-9]+-[a-z]", str(item.get("zone", "")))
+        for item in allowed_instances
+    ):
+        raise SystemExit("spec.external_ip_allowed_instances must contain GCP instance names and zones")
+    if len({(item["name"], item["zone"]) for item in allowed_instances}) != len(allowed_instances):
+        raise SystemExit("spec.external_ip_allowed_instances must not contain duplicates")
     if global_config["xconnect_mode"] not in {"gateway", "member"}:
         raise SystemExit("spec.xconnect_mode must be gateway or member")
     name = metadata.get("name")
