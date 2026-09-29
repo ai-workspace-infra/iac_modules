@@ -127,4 +127,10 @@ Namespace `state.key` must equal
 `terraform/<environment>/<project>/gcp-cloud/<account>/<workspace>/terraform.tfstate`.
 
 Terraform 只负责 GCP 基础资源；Vault secret value、Vault policy 和 Ansible 服务配置
-由对应运维链路管理。本目录保留既有 AWS/GCP 示例模块，不在新环境中使用 HCL 循环。
+由对应运维链路管理。XConnect Zero 的 `net_security_vault`、`net_uat` 和
+`net_prod_dedicated` 网络事实必须来自 GitOps；existing Gateway 不进入 GCP
+Terraform state，只有 GitOps 明确选择 GCP 的 Terraform-managed Gateway 时才允许
+渲染资源。三网络职责契约见
+[`../../docs/howto/xconnect-zero-three-network-boundaries.md`](../../docs/howto/xconnect-zero-three-network-boundaries.md)。
+
+本目录保留既有 AWS/GCP 示例模块，不在新环境中使用 HCL 循环。

@@ -23,6 +23,7 @@ This `docs/` directory now has a bilingual canonical layer for the current repos
 
 - [Akamai Cloud / Linode VPS bootstrap and Vault KV](howto/akamai-cloud-bootstrap-vault-kv.md)
 - [Akamai UAT six-state migration and cleanup contract](howto/akamai-uat-six-state-migration.md)
+- [XConnect Zero three-network boundary contract](howto/xconnect-zero-three-network-boundaries.md)
 
 ## Current Repo Context / 当前仓库背景
 

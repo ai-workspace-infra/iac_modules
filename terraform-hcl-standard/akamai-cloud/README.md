@@ -21,6 +21,12 @@
 - **CMDB**：Terraform 只输出运行时事实，Python 将其与 GitOps 静态字段合并
 - **Edge/CDN**：未来使用 `edge_provider: akamai`，与 Cloudflare 并列，不复用
   `cloud_provider`
+- **XConnect Zero**：网络 ID、CIDR、Gateway/One 角色和 existing/protected 生命周期
+  由 GitOps 声明；Vault 只提供运行时 secret，Ansible 负责节点配置。本 provider tree
+  不得为 UAT 的 Ulighthost TW Gateway 或受保护的 Vault Gateway 创建/接管资源。
+
+三网络边界和 Terraform/Ansible/Vault 的职责见
+[`../../docs/howto/xconnect-zero-three-network-boundaries.md`](../../docs/howto/xconnect-zero-three-network-boundaries.md)。
 
 ## 数据流
 
