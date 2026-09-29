@@ -176,10 +176,31 @@ module "spot_{{ vm.name | tf_id }}" {
   network         = module.network.network
   subnetwork      = module.network.subnet
   labels          = {{ vm.labels | default({}) | tojson }}
-  max_run_duration_seconds = {{ vm.max_run_duration_seconds | default(3600) }}
+  network_tags    = {{ vm.network_tags | default([]) | tojson }}
+  public_ip       = {{ vm.public_ip | default(false) | tojson }}
+  ssh_public_key  = var.ssh_public_key
+  ssh_username    = var.ssh_username
+{% if vm.max_run_duration_seconds is defined %}
+  max_run_duration_seconds = {{ vm.max_run_duration_seconds }}
+{% endif %}
 }
 
 {% endfor %}
+{% if spot_vms and spot_ssh_source_ranges %}
+resource "google_compute_firewall" "spot_ssh" {
+  project       = module.project.project_id
+  name          = "{{ network_name }}-spot-ssh"
+  network       = module.network.network
+  direction     = "INGRESS"
+  source_ranges = {{ spot_ssh_source_ranges | tojson }}
+  target_tags   = {{ spot_network_tags | tojson }}
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+}
+{% endif %}
 {% if enable_cloud_run %}
 {% for service in cloud_run_services %}
 module "{{ service.module_name }}" {
@@ -217,6 +238,8 @@ output "platform_runtime" {
 {% for vm in spot_vms %}
       {{ vm.name | tojson }} = {
         name              = module.spot_{{ vm.name | tf_id }}.name
+        public_ip         = module.spot_{{ vm.name | tf_id }}.public_ip
+        private_ip        = module.spot_{{ vm.name | tf_id }}.private_ip
         self_link         = module.spot_{{ vm.name | tf_id }}.self_link
         zone              = module.spot_{{ vm.name | tf_id }}.zone
         project_id        = module.spot_{{ vm.name | tf_id }}.project_id
