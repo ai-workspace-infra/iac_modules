@@ -75,9 +75,10 @@ module "{{ node.name | tf_id }}" {
 }
 
 {% endfor %}
-{% if vault_nodes | selectattr('xconnect_role', 'equalto', 'gateway') | list | length == 1 %}
-# The Vault API and the XConnect Gateway use distinct TLS hostnames on 443.
-# Every Raft node must answer vault.svc.plus before it enters the DNS pool.
+{% if vault_nodes | selectattr('public_ip', 'equalto', true) | list | length > 0 %}
+# Public platform service entrypoints terminate TLS in Caddy on TCP 443.
+# This applies to Gateway and XConnect One/member states alike; the member
+# role controls overlay ownership and must not remove the service入口 firewall.
 resource "google_compute_firewall" "vault_gateway_https" {
   project       = module.project.project_id
   name          = "{{ network_name }}-vault-gateway-https"

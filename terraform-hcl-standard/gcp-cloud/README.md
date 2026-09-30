@@ -84,9 +84,11 @@ billable Cloud NAT gateway.
 
 Vault node manifests may set `enable_cloud_nat: false` and declare
 `ssh_source_ranges` as explicit IPv4 CIDRs. Vault VMs receive their own static
-external IPv4 address by default. Ingress is limited to TCP 443 on the single
-XConnect Gateway and TCP 22 on Vault nodes from the declared SSH allowlist; do
-not use `0.0.0.0/0` for SSH. The current operator/proxy egress CIDR must be
+external IPv4 address by default. Public service nodes with an external IP
+receive TCP 443 for their Caddy service entrypoint, regardless of whether the
+state owns the XConnect Gateway or only One/member nodes. Raft port 8200/8201
+remains private, and TCP 22 is limited to the declared SSH allowlist; do not
+use `0.0.0.0/0` for SSH. The current operator/proxy egress CIDR must be
 provided in GitOps before a plan can pass validation.
 
 For a shared Vault rollout, set `spec.ssh_access_mode: bootstrap-public` with
