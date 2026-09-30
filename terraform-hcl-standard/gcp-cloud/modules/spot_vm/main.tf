@@ -61,6 +61,12 @@ variable "ssh_username" {
   default = "github-actions"
 }
 
+variable "enable_oslogin" {
+  description = "Whether this VM uses GCP OS Login instead of instance metadata SSH keys."
+  type        = bool
+  default     = false
+}
+
 variable "max_run_duration_seconds" {
   description = "Optional maximum lifetime. Omit for a service host that must not expire after one hour."
   type        = number
@@ -80,9 +86,12 @@ resource "google_compute_instance" "this" {
   allow_stopping_for_update = true
   labels                    = var.labels
   tags                      = var.network_tags
-  metadata = var.ssh_public_key == "" ? {} : {
-    ssh-keys = "${var.ssh_username}:${var.ssh_public_key}"
-  }
+  metadata = merge(
+    { "enable-oslogin" = var.enable_oslogin ? "TRUE" : "FALSE" },
+    var.ssh_public_key == "" ? {} : {
+      "ssh-keys" = "${var.ssh_username}:${var.ssh_public_key}"
+    }
+  )
 
   lifecycle {
     precondition {

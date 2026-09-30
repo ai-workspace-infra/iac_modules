@@ -187,6 +187,7 @@ module "spot_{{ vm.name | tf_id }}" {
   public_ip       = {{ vm.public_ip | default(false) | tojson }}
   ssh_public_key  = var.ssh_public_key
   ssh_username    = var.ssh_username
+  enable_oslogin  = {{ vm.enable_oslogin | default(false) | tojson }}
 {% if vm.max_run_duration_seconds is defined %}
   max_run_duration_seconds = {{ vm.max_run_duration_seconds }}
 {% endif %}
