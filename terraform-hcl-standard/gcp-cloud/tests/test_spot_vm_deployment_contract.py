@@ -63,7 +63,8 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
             rendered = (Path(tempdir) / "generated_platform.tf").read_text(encoding="utf-8")
         self.assertIn('resource "google_org_policy_policy" "vm_external_ip_access"', rendered)
         self.assertIn('name   = "projects/${module.project.project_number}/policies/compute.vmExternalIpAccess"', rendered)
-        self.assertIn('parent = "projects/${module.project.project_number}"', rendered)
+        self.assertIn('parent = "projects/${module.project.project_id}"', rendered)
+        self.assertIn('ignore_changes = [name]', rendered)
         for name in ("vault-shared-0", "observability-shared-0", "iam-shared-0"):
             self.assertIn(f"instances/{name}", rendered)
         self.assertIn("google_org_policy_policy.vm_external_ip_access", rendered)

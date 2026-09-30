@@ -10,7 +10,14 @@ module "project" {
 {% if external_ip_allowed_instances and manage_external_ip_policy %}
 resource "google_org_policy_policy" "vm_external_ip_access" {
   name   = "projects/${module.project.project_number}/policies/compute.vmExternalIpAccess"
-  parent = "projects/${module.project.project_number}"
+  parent = "projects/${module.project.project_id}"
+
+  # The Google provider currently normalizes imported policy names to the
+  # short constraint name in state. Ignore only that import representation
+  # difference; continue managing the policy spec and parent normally.
+  lifecycle {
+    ignore_changes = [name]
+  }
 
   spec {
     rules {
