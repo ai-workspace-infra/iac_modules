@@ -9,8 +9,8 @@ module "project" {
 
 {% if external_ip_allowed_instances and manage_external_ip_policy %}
 resource "google_org_policy_policy" "vm_external_ip_access" {
-  name   = "projects/${module.project.project_id}/policies/compute.vmExternalIpAccess"
-  parent = "projects/${module.project.project_id}"
+  name   = "projects/${module.project.project_number}/policies/compute.vmExternalIpAccess"
+  parent = "projects/${module.project.project_number}"
 
   spec {
     rules {
