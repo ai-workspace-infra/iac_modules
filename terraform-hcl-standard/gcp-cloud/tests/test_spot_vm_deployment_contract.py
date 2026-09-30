@@ -92,6 +92,12 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
         }
         _, nodes, _, _, _ = generator.normalize_resources(manifest)
         self.assertEqual(nodes[0]["xconnect_role"], "one")
+        with tempfile.TemporaryDirectory() as tempdir:
+            with patch.object(generator, "load_resources", return_value=manifest):
+                generator.render(SimpleNamespace(resources="ignored", workdir=tempdir))
+            rendered = (Path(tempdir) / "generated_platform.tf").read_text(encoding="utf-8")
+        self.assertIn('resource "google_compute_firewall" "vault_gateway_https"', rendered)
+        self.assertIn('ports    = ["443"]', rendered)
 
     def test_public_spot_vm_has_configurable_ssh_and_no_forced_hourly_expiry(self):
         module = (ROOT / "modules" / "spot_vm" / "main.tf").read_text(encoding="utf-8")
