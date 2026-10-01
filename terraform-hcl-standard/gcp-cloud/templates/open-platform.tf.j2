@@ -195,6 +195,18 @@ module "spot_{{ vm.name | tf_id }}" {
 }
 
 {% endfor %}
+{% for vm in spot_vms if vm.enable_oslogin | default(false) %}
+# OS Login replaces metadata SSH keys; the deploy principal needs sudo on
+# exactly this VM to run Ansible.
+resource "google_compute_instance_iam_member" "spot_os_admin_login_{{ vm.name | tf_id }}" {
+  project       = module.project.project_id
+  zone          = {{ vm.zone | tojson }}
+  instance_name = module.spot_{{ vm.name | tf_id }}.name
+  role          = "roles/compute.osAdminLogin"
+  member        = "serviceAccount:${var.deploy_service_account}"
+}
+
+{% endfor %}
 {% if spot_vms and spot_ssh_source_ranges %}
 resource "google_compute_firewall" "spot_ssh" {
   project       = module.project.project_id

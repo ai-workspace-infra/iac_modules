@@ -86,17 +86,20 @@ resource "google_compute_instance" "this" {
   allow_stopping_for_update = true
   labels                    = var.labels
   tags                      = var.network_tags
+  # Never write enable-oslogin=FALSE: projects under the requireOsLogin
+  # organization policy reject it (HTTP 412). OS Login VMs take SSH keys from
+  # the deploy principal's OS Login profile, so they carry no metadata keys.
   metadata = merge(
-    { "enable-oslogin" = var.enable_oslogin ? "TRUE" : "FALSE" },
-    var.ssh_public_key == "" ? {} : {
-      "ssh-keys" = "${var.ssh_username}:${var.ssh_public_key}"
+    var.enable_oslogin ? { "enable-oslogin" = "TRUE" } : {},
+    var.enable_oslogin || trimspace(var.ssh_public_key) == "" ? {} : {
+      "ssh-keys" = "${var.ssh_username}:${trimspace(var.ssh_public_key)}"
     }
   )
 
   lifecycle {
     precondition {
-      condition     = !var.public_ip || trimspace(var.ssh_public_key) != ""
-      error_message = "A public Spot VM requires an SSH public key from the deploy environment."
+      condition     = !var.public_ip || var.enable_oslogin || trimspace(var.ssh_public_key) != ""
+      error_message = "A public Spot VM requires OS Login or an SSH public key from the deploy environment."
     }
   }
 

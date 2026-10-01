@@ -189,6 +189,8 @@ def normalize_resources(document):
             if duration < 60:
                 raise SystemExit("Spot VM max_run_duration_seconds must be at least 60")
             vm["max_run_duration_seconds"] = duration
+        if not isinstance(vm.get("enable_oslogin", False), bool):
+            raise SystemExit("Spot VM enable_oslogin must be a boolean")
         if vm.get("public_ip") and not global_config.get("spot_ssh_source_ranges"):
             raise SystemExit("public Spot VMs require spot_ssh_source_ranges")
         if not isinstance(vm.get("inventory_groups", []), list) or any(
@@ -353,6 +355,19 @@ def render(args):
     print(f"rendered {args.resources} -> {workdir}")
 
 
+def oslogin_username():
+    """Return the deploy principal's OS Login POSIX user from the environment.
+
+    The deployer registers its SSH key in its own OS Login profile before
+    rendering the inventory and exports the resolved username; Terraform
+    state does not know it.
+    """
+    username = os.environ.get("GCP_OSLOGIN_USERNAME", "").strip()
+    if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", username):
+        raise SystemExit("OS Login Spot VMs require GCP_OSLOGIN_USERNAME from the deploy principal's profile")
+    return username
+
+
 def inventory(args):
     document = load_resources(args.resources)
     global_config, declared_nodes, spot_vms, cloud_run_services, _ = normalize_resources(document)
@@ -400,7 +415,11 @@ def inventory(args):
                 raise SystemExit(f"Spot VM {vm['name']} has no public IP for deployment")
             cmdb[vm["name"]] = {
                 "ip": address,
-                "ansible_user": global_config.get("ssh_username", "github-actions"),
+                "ansible_user": (
+                    oslogin_username()
+                    if vm.get("enable_oslogin")
+                    else global_config.get("ssh_username", "github-actions")
+                ),
                 "groups": vm.get("inventory_groups", []),
                 "provider": "gcp-cloud",
                 "provisioning_model": facts.get("provisioning_model"),
