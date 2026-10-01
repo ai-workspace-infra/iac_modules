@@ -109,6 +109,13 @@ using the run's Google WIF identity; the pipeline should delete the key and
 local private material after Ansible completes. This does not require IAP and
 retains the declared SSH `/32` firewall allowlist.
 
+For `spot_vms`, `enable_oslogin: true` writes `enable-oslogin=TRUE` and omits
+metadata `ssh-keys`. When false, the module omits the `enable-oslogin` key
+entirely so a project-level `compute.requireOsLogin` policy is never overridden
+with `FALSE`; callers in such projects must explicitly enable OS Login and
+provide a matching deployment SSH path. A successful VM plan alone does not
+prove that Ansible can sign in.
+
 For Vault Raft HA, the renderer also permits TCP 8200 (API/peer traffic) and
 8201 (Raft forwarding) only from the declared VPC subnet to Vault nodes. These
 ports are never exposed to the internet; configure Vault listener and cluster
