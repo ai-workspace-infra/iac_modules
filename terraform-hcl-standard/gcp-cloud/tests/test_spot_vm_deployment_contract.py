@@ -109,10 +109,10 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
         self.assertIn('instance_termination_action = "STOP"', module)
         self.assertIn('for_each = var.max_run_duration_seconds == null ? []', module)
         self.assertIn('condition     = !var.public_ip || var.enable_oslogin || trimspace(var.ssh_public_key) != ""', module)
+        self.assertIn('var.enable_oslogin || trimspace(var.ssh_public_key) == "" ? {} : {', module)
         self.assertIn('variable "enable_oslogin"', module)
         self.assertIn('var.enable_oslogin ? { "enable-oslogin" = "TRUE" } : {}', module)
-        self.assertIn('!var.enable_oslogin && trimspace(var.ssh_public_key) != "" ? {', module)
-        self.assertNotIn('"enable-oslogin" = var.enable_oslogin ? "TRUE" : "FALSE"', module)
+        self.assertNotIn('"enable-oslogin" = "FALSE"', module)
         self.assertIn('public_ip       = {{ vm.public_ip | default(false) | tojson }}', template)
         self.assertIn('enable_oslogin  = {{ vm.enable_oslogin | default(false) | tojson }}', template)
         self.assertIn('source_ranges = {{ spot_ssh_source_ranges | tojson }}', template)
@@ -157,6 +157,95 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
         self.assertEqual(cmdb["sample-vm"]["ip"], "198.51.100.10")
         self.assertEqual(cmdb["sample-vm"]["groups"], ["ai_workspace"])
         self.assertIn("sample-vm ansible_host=198.51.100.10 ansible_user=deployer", inventory)
+
+    def oslogin_manifest(self):
+        return {
+            "kind": "GCPWorkloadNamespace",
+            "metadata": {"name": "sample", "environment": "uat", "provider": "gcp"},
+            "spec": {
+                "gcp_account_id": "test-account", "project_id": "test-project",
+                "organization_id": "123", "region": "asia-east1", "workspace": "sample",
+                "state_namespace": "sample", "network_name": "sample-net",
+                "state": {"key": "terraform/uat/test-project/gcp-cloud/test-account/sample/terraform.tfstate"},
+                "subnet_cidr": "10.40.0.0/24", "spot_ssh_source_ranges": ["203.0.113.10/32"],
+                "spot_network_tags": ["sample-ssh"], "ssh_username": "deployer",
+                "resources": {"spot_vms": [
+                    {
+                        "name": "sample-vm", "zone": "asia-east1-a", "machine_type": "e2-custom-4-8192",
+                        "public_ip": True, "network_tags": ["sample-ssh"], "enable_oslogin": True,
+                        "inventory_groups": ["ai_workspace"],
+                    },
+                    {
+                        "name": "legacy-vm", "zone": "asia-east1-a", "machine_type": "e2-small",
+                        "public_ip": True, "network_tags": ["sample-ssh"],
+                        "inventory_groups": ["legacy"],
+                    },
+                ]},
+            },
+        }
+
+    def load_generator(self):
+        spec = importlib.util.spec_from_file_location("gcp_generate", ROOT / "scripts" / "generate.py")
+        generator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generator)
+        return generator
+
+    def test_oslogin_spot_vm_grants_instance_admin_login_only_where_declared(self):
+        generator = self.load_generator()
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(
+            generator, "load_resources", return_value=self.oslogin_manifest()
+        ):
+            generator.render(SimpleNamespace(resources="ignored", workdir=tempdir))
+            rendered = (Path(tempdir) / "generated_platform.tf").read_text(encoding="utf-8")
+            manifest = json.loads((Path(tempdir) / "resources_manifest.json").read_text(encoding="utf-8"))
+        self.assertIn('resource "google_compute_instance_iam_member" "spot_os_admin_login_sample_vm"', rendered)
+        self.assertIn("instance_name = module.spot_sample_vm.name", rendered)
+        self.assertIn('role          = "roles/compute.osAdminLogin"', rendered)
+        self.assertNotIn("spot_os_admin_login_legacy_vm", rendered)
+        self.assertNotIn('"roles/compute.osAdmin"', rendered)
+        self.assertNotIn("google_project_iam_member", rendered)
+        self.assertEqual([vm.get("enable_oslogin") for vm in manifest["spot_vms"]], [True, None])
+
+    def test_oslogin_spot_vm_inventory_uses_the_deploy_principal_username(self):
+        generator = self.load_generator()
+        runtime = {"project_id": "test-project", "spot_instances": {
+            "sample-vm": {"public_ip": "198.51.100.10", "provisioning_model": "SPOT"},
+            "legacy-vm": {"public_ip": "198.51.100.11", "provisioning_model": "SPOT"},
+        }}
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(
+            generator, "load_resources", return_value=self.oslogin_manifest()
+        ), patch.object(generator.subprocess, "check_output", return_value=json.dumps(runtime)), patch.dict(
+            generator.os.environ, {"GCP_OSLOGIN_USERNAME": "sa_123456789012345678901"}
+        ):
+            generator.inventory(SimpleNamespace(resources="ignored", workdir=tempdir))
+            cmdb = json.loads((Path(tempdir) / "cmdb.json").read_text(encoding="utf-8"))
+            inventory = (Path(tempdir) / "inventory.ini").read_text(encoding="utf-8")
+        self.assertEqual(cmdb["sample-vm"]["ansible_user"], "sa_123456789012345678901")
+        self.assertEqual(cmdb["legacy-vm"]["ansible_user"], "deployer")
+        self.assertIn("sample-vm ansible_host=198.51.100.10 ansible_user=sa_123456789012345678901", inventory)
+        self.assertIn("legacy-vm ansible_host=198.51.100.11 ansible_user=deployer", inventory)
+
+    def test_oslogin_spot_vm_inventory_refuses_a_missing_or_invalid_username(self):
+        generator = self.load_generator()
+        runtime = {"spot_instances": {
+            "sample-vm": {"public_ip": "198.51.100.10"},
+            "legacy-vm": {"public_ip": "198.51.100.11"},
+        }}
+        for value in ("", "root;id", "Sa_UPPER"):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as tempdir, patch.object(
+                generator, "load_resources", return_value=self.oslogin_manifest()
+            ), patch.object(generator.subprocess, "check_output", return_value=json.dumps(runtime)), patch.dict(
+                generator.os.environ, {"GCP_OSLOGIN_USERNAME": value}
+            ):
+                with self.assertRaisesRegex(SystemExit, "GCP_OSLOGIN_USERNAME"):
+                    generator.inventory(SimpleNamespace(resources="ignored", workdir=tempdir))
+
+    def test_spot_vm_enable_oslogin_must_be_boolean(self):
+        generator = self.load_generator()
+        manifest = self.oslogin_manifest()
+        manifest["spec"]["resources"]["spot_vms"][0]["enable_oslogin"] = "true"
+        with self.assertRaisesRegex(SystemExit, "enable_oslogin must be a boolean"):
+            generator.normalize_resources(manifest)
 
 
 if __name__ == "__main__":
