@@ -1,4 +1,6 @@
 import json
+import subprocess
+import yaml
 import sys
 import tempfile
 import unittest
@@ -71,6 +73,36 @@ class GenerateTest(unittest.TestCase):
             cmdb = json.loads((workdir / "cmdb.json").read_text())
             self.assertEqual(cmdb["web.example.test"]["groups"], ["web", "debian"])
             self.assertEqual(cmdb["web.example.test"]["ansible_user"], "root")
+
+    def test_inventory_and_firewall_preserve_regional_contract(self):
+        source = yaml.safe_load((ROOT / "tests/fixtures/linode.yaml").read_text())
+        host = source["hosts"][0]
+        host["firewall"]["additional_tcp_ports"] = [1443]
+        host["host_vars"].update(xconnect_region="sg", xconnect_pool="sg pool", xconnect_fqdn="sg-xconnect.onwalk.net", xconnect_open_to_users=False)
+        with tempfile.TemporaryDirectory() as tempdir:
+            resource = Path(tempdir) / "node.yaml"
+            resource.write_text(yaml.safe_dump(source))
+            workdir = Path(tempdir) / "workdir"
+            generate.render(SimpleNamespace(resources=resource, workdir=workdir, namespace="web-saas"))
+            self.assertRegex((workdir / "generated_hosts.tf").read_text(), r'ports\s*= "1443"')
+            with mock.patch.object(generate, "terraform_output", return_value={"web-node": {"ip": "198.51.100.10"}}):
+                generate.inventory(SimpleNamespace(resources=resource, workdir=workdir))
+            inventory = json.loads(subprocess.check_output(["ansible-inventory", "-i", str(workdir / "inventory.ini"), "--list"], text=True))
+            variables = inventory["_meta"]["hostvars"]["web.example.test"]
+            self.assertEqual(variables["xconnect_pool"], "sg pool")
+            self.assertEqual(variables["xconnect_region"], "sg")
+            self.assertFalse(variables["xconnect_open_to_users"])
+            self.assertEqual(variables["service_domains"], ["web.example.test"])
+
+    def test_invalid_additional_tcp_ports_are_rejected(self):
+        for port in [True, 0, 65536, "1443"]:
+            with self.subTest(port=port), tempfile.TemporaryDirectory() as tempdir:
+                source = yaml.safe_load((ROOT / "tests/fixtures/linode.yaml").read_text())
+                source["hosts"][0]["firewall"]["additional_tcp_ports"] = [port]
+                resource = Path(tempdir) / "node.yaml"
+                resource.write_text(yaml.safe_dump(source))
+                with self.assertRaises(SystemExit):
+                    generate.load_sources(resource)
 
     def test_repo_workdir_must_match_namespace(self):
         fixture = ROOT / "tests" / "fixtures" / "linode.yaml"

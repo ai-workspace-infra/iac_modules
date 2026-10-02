@@ -60,6 +60,16 @@ resource "linode_firewall" "fw_{{ hid }}" {
     ipv6     = ["::/0"]
   }
 {% endif %}
+{% for port in firewall.get('additional_tcp_ports', []) | unique %}
+  inbound {
+    label    = "tcp-{{ port }}"
+    action   = "ACCEPT"
+    protocol = "TCP"
+    ports    = "{{ port }}"
+    ipv4     = ["0.0.0.0/0"]
+    ipv6     = ["::/0"]
+  }
+{% endfor %}
 }
 
 module "compute_{{ hid }}" {
