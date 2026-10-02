@@ -158,6 +158,44 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
         self.assertEqual(cmdb["sample-vm"]["groups"], ["ai_workspace"])
         self.assertIn("sample-vm ansible_host=198.51.100.10 ansible_user=deployer", inventory)
 
+    def test_private_spot_instance_uses_iap_inventory_and_firewall(self):
+        generator = self.load_generator()
+        manifest = {
+            "kind": "GCPWorkloadNamespace",
+            "metadata": {"name": "private-sample", "environment": "uat", "provider": "gcp"},
+            "spec": {
+                "gcp_account_id": "test-account", "project_id": "test-project",
+                "organization_id": "123", "region": "asia-east1", "workspace": "private-sample",
+                "state_namespace": "private-sample", "network_name": "private-net",
+                "state": {"key": "terraform/uat/test-project/gcp-cloud/test-account/private-sample/terraform.tfstate"},
+                "subnet_cidr": "10.40.0.0/24", "enable_iap_ssh": True, "enable_oslogin": True,
+                "spot_network_tags": ["private-ssh"], "ssh_username": "deployer",
+                "resources": {"spot_vms": [{
+                    "name": "private-vm", "zone": "asia-east1-a", "machine_type": "e2-custom-4-8192",
+                    "public_ip": False, "network_tags": ["private-ssh"], "enable_oslogin": True,
+                    "inventory_groups": ["ai_workspace"],
+                }]},
+            },
+        }
+        runtime = {"project_id": "test-project", "spot_instances": {"private-vm": {
+            "private_ip": "10.40.0.10", "public_ip": None, "zone": "asia-east1-a", "provisioning_model": "SPOT",
+        }}}
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(
+            generator, "load_resources", return_value=manifest
+        ), patch.object(generator.subprocess, "check_output", return_value=json.dumps(runtime)), patch.dict(
+            generator.os.environ,
+            {"GCP_OSLOGIN_USERNAME": "sa_123456789012345678901", "GCP_SSH_PRIVATE_KEY_FILE": "/tmp/one-run-key"},
+        ):
+            generator.render(SimpleNamespace(resources="ignored", workdir=tempdir))
+            generator.inventory(SimpleNamespace(resources="ignored", workdir=tempdir))
+            rendered = (Path(tempdir) / "generated_platform.tf").read_text(encoding="utf-8")
+            inventory = (Path(tempdir) / "inventory.ini").read_text(encoding="utf-8")
+        self.assertIn('resource "google_iap_tunnel_instance_iam_member" "spot_iap_tunnel_private_vm"', rendered)
+        self.assertIn('source_ranges = ["35.235.240.0/20"]', rendered)
+        self.assertIn("private-vm ansible_host=10.40.0.10", inventory)
+        self.assertIn("gcloud compute start-iap-tunnel private-vm 22", inventory)
+        self.assertIn("ansible_ssh_private_key_file=/tmp/one-run-key", inventory)
+
     def oslogin_manifest(self):
         return {
             "kind": "GCPWorkloadNamespace",

@@ -239,6 +239,8 @@ def render(args):
             raise SystemExit("spot_ssh_source_ranges must contain IPv4 CIDRs")
     if any(vm.get("public_ip") for vm in spot_vms) and not spot_ssh_sources:
         raise SystemExit("public Spot VMs require spot_ssh_source_ranges")
+    if any(not vm.get("public_ip", False) for vm in spot_vms) and not global_config.get("enable_iap_ssh", False):
+        raise SystemExit("private Spot VMs require enable_iap_ssh: true for Ansible deployment")
     spot_network_tags = global_config.get("spot_network_tags", [])
     if not isinstance(spot_network_tags, list) or any(
         not isinstance(tag, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,62}", tag)
@@ -250,6 +252,8 @@ def render(args):
     for vm in spot_vms:
         if vm.get("public_ip") and not set(spot_network_tags).intersection(vm.get("network_tags", [])):
             raise SystemExit(f"public Spot VM {vm['name']} must include a declared spot_network_tag")
+    if spot_vms and global_config.get("enable_iap_ssh"):
+        spot_ssh_sources = list(dict.fromkeys([*spot_ssh_sources, "35.235.240.0/20"]))
     if enable_network and not global_config.get("subnet_cidr"):
         raise SystemExit("network_name requires subnet_cidr")
     if nodes and global_config.get("ssh_source_ranges") and not isinstance(global_config["ssh_source_ranges"], list):
@@ -302,7 +306,7 @@ def render(args):
         enable_iap_ssh=global_config.get("enable_iap_ssh", False),
         enable_oslogin=global_config.get("enable_oslogin", global_config.get("enable_iap_ssh", False)),
         ssh_source_ranges=global_config.get("ssh_source_ranges", []),
-        spot_ssh_source_ranges=global_config.get("spot_ssh_source_ranges", []),
+        spot_ssh_source_ranges=spot_ssh_sources,
         spot_network_tags=spot_network_tags,
     )
     generated = workdir / "generated_platform.tf"
@@ -409,23 +413,27 @@ def inventory(args):
         })
     for vm in spot_vms:
         facts = runtime.get("spot_instances", {}).get(vm["name"], {})
-        if vm.get("public_ip"):
-            address = facts.get("public_ip")
-            if not address:
-                raise SystemExit(f"Spot VM {vm['name']} has no public IP for deployment")
-            cmdb[vm["name"]] = {
-                "ip": address,
-                "private_ip": facts.get("private_ip"),
-                "public_ip": facts.get("public_ip"),
-                "ansible_user": (
-                    oslogin_username()
-                    if vm.get("enable_oslogin")
-                    else global_config.get("ssh_username", "github-actions")
-                ),
-                "groups": vm.get("inventory_groups", []),
-                "provider": "gcp-cloud",
-                "provisioning_model": facts.get("provisioning_model"),
-            }
+        public_ip = facts.get("public_ip")
+        private_ip = facts.get("private_ip")
+        address = public_ip if vm.get("public_ip") else private_ip
+        if not address:
+            address_type = "public IP" if vm.get("public_ip") else "private IP"
+            raise SystemExit(f"Spot VM {vm['name']} has no {address_type} for deployment")
+        cmdb[vm["name"]] = {
+            "ip": address,
+            "private_ip": private_ip,
+            "public_ip": public_ip,
+            "zone": facts.get("zone", vm["zone"]),
+            "ansible_user": (
+                oslogin_username()
+                if vm.get("enable_oslogin")
+                else global_config.get("ssh_username", "github-actions")
+            ),
+            "groups": vm.get("inventory_groups", []),
+            "provider": "gcp-cloud",
+            "provisioning_model": facts.get("provisioning_model"),
+            "iap_tunnel": not vm.get("public_ip") and global_config.get("enable_iap_ssh", False),
+        }
     (workdir / "cmdb.json").write_text(json.dumps(cmdb, indent=2) + "\n", encoding="utf-8")
     lines = ["[vault]"]
     lines.extend(
@@ -433,12 +441,28 @@ def inventory(args):
         for node in cmdb["vault_nodes"]
     )
     groups = sorted({group for vm in spot_vms for group in vm.get("inventory_groups", [])})
+    private_key_file = os.environ.get("GCP_SSH_PRIVATE_KEY_FILE", "").strip()
     for group in groups:
         lines.append(f"[{group}]")
-        lines.extend(
-            f"{vm['name']} ansible_host={cmdb[vm['name']]['ip']} ansible_user={cmdb[vm['name']]['ansible_user']}"
-            for vm in spot_vms if vm["name"] in cmdb and group in cmdb[vm["name"]]["groups"]
-        )
+        for vm in spot_vms:
+            if vm["name"] not in cmdb or group not in cmdb[vm["name"]]["groups"]:
+                continue
+            item = cmdb[vm["name"]]
+            line = f"{vm['name']} ansible_host={item['ip']} ansible_user={item['ansible_user']}"
+            if item.get("iap_tunnel"):
+                if not private_key_file:
+                    raise SystemExit("GCP_SSH_PRIVATE_KEY_FILE is required for private Spot VM inventory")
+                project_id = cmdb.get("project_id")
+                proxy = (
+                    f'gcloud compute start-iap-tunnel {vm["name"]} 22 '
+                    f'--listen-on-stdin --project={project_id} --zone={item["zone"]}'
+                )
+                line += (
+                    f' ansible_ssh_private_key_file={private_key_file}'
+                    f' ansible_ssh_common_args=\'-o StrictHostKeyChecking=no '
+                    f'-o UserKnownHostsFile=/dev/null -o ProxyCommand="{proxy}"\''
+                )
+            lines.append(line)
     (workdir / "inventory.ini").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"wrote {workdir / 'cmdb.json'} and {workdir / 'inventory.ini'}")
 
