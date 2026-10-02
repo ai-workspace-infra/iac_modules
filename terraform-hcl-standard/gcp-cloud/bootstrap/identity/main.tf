@@ -155,6 +155,7 @@ variable "platform_services" {
     "artifactregistry.googleapis.com",
     "cloudresourcemanager.googleapis.com",
     "compute.googleapis.com",
+    "iap.googleapis.com",
     "logging.googleapis.com",
     "monitoring.googleapis.com",
     "run.googleapis.com",
