@@ -23,7 +23,14 @@ cat >"${workdir}/bin/aws" <<'SCRIPT'
 set -euo pipefail
 printf '%s\n' "$*" >>"${TEST_WORKDIR}/aws-commands.log"
 case "$*" in
-  *describe-instance-status*) printf '%s\n' "${TEST_INSTANCE_STATUS}" ;;
+  *describe-instance-status*)
+    if [[ "${TEST_DELAYED_READY:-false}" == true && ! -f "${TEST_WORKDIR}/first-status" ]]; then
+      touch "${TEST_WORKDIR}/first-status"
+      printf '%s\n' 'running ok initializing'
+    else
+      printf '%s\n' "${TEST_INSTANCE_STATUS}"
+    fi
+    ;;
   *get-console-output*) printf '%s\n' 'cloud-init: ssh.service failed to start' ;;
   *) echo "unexpected aws invocation: $*" >&2; exit 1 ;;
 esac
@@ -55,6 +62,20 @@ if grep -Fq 'get-console-output' "${workdir}/aws-commands.log"; then
   echo "healthy instances must not request console output" >&2
   exit 1
 fi
+
+# Fresh instances must be retried until BOTH checks pass, before probing SSH.
+TEST_WORKDIR="${workdir}" \
+TEST_DELAYED_READY=true \
+TEST_INSTANCE_STATUS='running ok ok' \
+TEST_SSH_READY=true \
+PATH="${workdir}/bin:${PATH}" \
+CMDB_FILE="${workdir}/cmdb.json" \
+AWS_BOOT_HEALTH_TIMEOUT_SECONDS=10 \
+AWS_BOOT_HEALTH_POLL_INTERVAL_SECONDS=0 \
+bash "${script}" >"${workdir}/delayed.log"
+grep -Fq 'system=ok instance=initializing' "${workdir}/delayed.log"
+grep -Fq 'system=ok instance=ok' "${workdir}/delayed.log"
+grep -Fq 'passed EC2 status and SSH banner checks' "${workdir}/delayed.log"
 
 : >"${workdir}/aws-commands.log"
 if TEST_WORKDIR="${workdir}" \
