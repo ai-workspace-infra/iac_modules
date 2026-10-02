@@ -116,8 +116,9 @@ environment's host variables.
 | `vpn-overlay/` | Cross-site L2/L3 overlay: `wireguard/`, `xray/`, `vxlan/`, `gretap/`, `config/sites.yaml`, topology diagrams |
 | `skills/` | Binding specs — `IAC-Spec` (IaC red lines), `terraform-yaml-render-pattern` (the render pattern), `release-branch-policy` |
 | `scripts/` | Repo-level helpers — `dynamic_inventory.py`, WireGuard key generation, gitleaks auto-fix, and `workflows/` helpers for Flux, Ansible, kubeconfig and xconfig |
-| `.github/actions/` | Pipeline definitions — per-cloud landing-zone baselines, infrastructure resources, monitoring exporter/server, SSL certificate renewal |
-| `.github/workflows/` | `validate-release-pr.yml` — the only workflow that runs in this repository |
+| `scripts/pipeline/` | Terraform / provision-phase steps called by the `platform-ops-toolkit` workflows (state reconcile, apply/destroy guard, plan mapping, cloud runtime checks) with their tests in `scripts/pipeline/tests/` |
+| `docs/archive/legacy-pipelines/` | Parked pipeline definitions that used to sit under `.github/actions/` (workflow-shaped files GitHub never ran) — see its [README](docs/archive/legacy-pipelines/README.md) |
+| `.github/workflows/` | `validate-release-pr.yml` (release-branch policy) and `pipeline-scripts.yml` (tests for `scripts/pipeline/`) |
 | `example/` | Reference samples: Pulumi (Python) and plain Terraform for AWS / Azure / GCP |
 | `docs/` | Bilingual documentation set — start at [`docs/README.md`](docs/README.md) |
 

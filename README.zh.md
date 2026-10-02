@@ -106,8 +106,9 @@ env 目录退化为纯粹的 Terraform 运行目录。
 | `vpn-overlay/` | 跨站点 L2/L3 覆盖网络：`wireguard/`、`xray/`、`vxlan/`、`gretap/`、`config/sites.yaml` 与拓扑图 |
 | `skills/` | 约束性规范 —— `IAC-Spec`（IaC 红线）、`terraform-yaml-render-pattern`（渲染范式）、`release-branch-policy` |
 | `scripts/` | 仓库级辅助脚本 —— `dynamic_inventory.py`、WireGuard 密钥生成、gitleaks 自动修复，以及 `workflows/` 下的 Flux / Ansible / kubeconfig / xconfig helper |
-| `.github/actions/` | 流水线定义 —— 各云的 Landing Zone 基线、基础设施资源、监控 exporter/server、SSL 证书续期 |
-| `.github/workflows/` | `validate-release-pr.yml` —— 本仓库唯一实际运行的 workflow |
+| `scripts/pipeline/` | 供 `platform-ops-toolkit` 工作流调用的 Terraform / provision 阶段步骤脚本（state 对账、apply/destroy 守卫、规格映射、云运行时检查），测试位于 `scripts/pipeline/tests/` |
+| `docs/archive/legacy-pipelines/` | 原先放在 `.github/actions/` 下、已停用的流水线定义（是 workflow 形态的文件，GitHub 从未运行过），见其 [README](docs/archive/legacy-pipelines/README.md) |
+| `.github/workflows/` | `validate-release-pr.yml`（发布分支策略）与 `pipeline-scripts.yml`（`scripts/pipeline/` 测试） |
 | `example/` | 参考样例：Pulumi（Python）与 AWS / Azure / GCP 的原生 Terraform |
 | `docs/` | 双语文档集，入口见 [`docs/README.md`](docs/README.md) |
 

@@ -1,0 +1,53 @@
+name: Pipeline Scripts
+
+# scripts/pipeline/ is called by the platform-ops-toolkit
+# workflows (checked out next to this repo). This gate keeps them runnable on their
+# own, so a change here is caught before the toolkit pins a new ref.
+on:
+  pull_request:
+    paths:
+      - "scripts/pipeline/**"
+      - ".github/workflows/pipeline-scripts.yml"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/pipeline/**"
+
+permissions:
+  contents: read
+
+jobs:
+  pipeline-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Static checks
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for f in scripts/pipeline/*.sh scripts/pipeline/lib/*.sh scripts/pipeline/tests/*.sh; do
+            bash -n "$f"
+          done
+          python3 -m py_compile scripts/pipeline/*.py scripts/pipeline/tests/*.py
+          shellcheck -S warning scripts/pipeline/*.sh scripts/pipeline/lib/*.sh scripts/pipeline/tests/*.sh
+
+      - name: Entry points are executable
+        run: |
+          # The toolkit workflows invoke these as bare commands; a lost exec bit
+          # fails the provision job only at run time.
+          bad=0
+          for f in $(git ls-files 'scripts/pipeline/*.sh' 'scripts/pipeline/tests/*.sh'); do
+            [[ "$(git ls-files -s -- "$f" | cut -c1-6)" == 100755 ]] || { echo "not 100755: $f"; bad=1; }
+          done
+          exit "$bad"
+
+      - name: Behaviour tests
+        run: |
+          set -euo pipefail
+          for t in scripts/pipeline/tests/*_test.sh; do
+            echo "::group::$t"
+            bash "$t"
+            echo "::endgroup::"
+          done
+          python3 -m unittest discover -s scripts/pipeline/tests -p '*test*.py' -v
