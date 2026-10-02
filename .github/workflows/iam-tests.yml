@@ -1,0 +1,25 @@
+name: AWS OIDC federation tests
+on:
+  pull_request:
+    paths: ['terraform-hcl-standard/aws-cloud/modules/oidc_federation/**', '.github/workflows/iam-tests.yml']
+  push:
+    branches: [main]
+    paths: ['terraform-hcl-standard/aws-cloud/modules/oidc_federation/**', '.github/workflows/iam-tests.yml']
+permissions:
+  contents: read
+jobs:
+  federation:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform-hcl-standard/aws-cloud/modules/oidc_federation
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.16.0'
+      - run: terraform fmt -check -recursive
+      # Keep the locked version; init records the verified Linux package hash.
+      - run: terraform init -backend=false -input=false
+      - run: terraform validate
+      - run: terraform test
