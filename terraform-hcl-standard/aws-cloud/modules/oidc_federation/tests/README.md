@@ -3,7 +3,7 @@
 Run from the module directory with the CI version, Terraform 1.16.0:
 
 ```bash
-terraform init -backend=false -input=false -lockfile=readonly
+terraform init -backend=false -input=false
 terraform fmt -check -recursive
 terraform validate
 terraform test
@@ -11,6 +11,8 @@ terraform test
 
 All eight runs use `command = plan` and `mock_provider`; they require no AWS
 credentials and perform no apply. Initial provider installation requires network.
+Init keeps the locked provider version and may record a package hash for the
+current platform; this is required when running Linux CI with a macOS-created lock.
 The valid case checks the actual input statement structure, including the exact
 aud/sub conditions and Federated principal, rather than trusting mock policy JSON.
 Seven invalid-input runs expect variable validation failures.

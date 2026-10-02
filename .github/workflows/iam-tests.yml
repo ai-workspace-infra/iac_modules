@@ -19,6 +19,7 @@ jobs:
         with:
           terraform_version: '1.16.0'
       - run: terraform fmt -check -recursive
-      - run: terraform init -backend=false -input=false -lockfile=readonly
+      # Keep the locked version; init records the verified Linux package hash.
+      - run: terraform init -backend=false -input=false
       - run: terraform validate
       - run: terraform test
