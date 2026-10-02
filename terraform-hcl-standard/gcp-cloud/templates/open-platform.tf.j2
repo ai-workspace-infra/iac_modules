@@ -207,6 +207,17 @@ resource "google_compute_instance_iam_member" "spot_os_admin_login_{{ vm.name | 
 }
 
 {% endfor %}
+{% for vm in spot_vms if enable_iap_ssh %}
+resource "google_iap_tunnel_instance_iam_member" "spot_iap_tunnel_{{ vm.name | tf_id }}" {
+  depends_on = [module.spot_{{ vm.name | tf_id }}]
+  project    = module.project.project_id
+  zone       = {{ vm.zone | tojson }}
+  instance   = {{ vm.name | tojson }}
+  role       = "roles/iap.tunnelResourceAccessor"
+  member     = "serviceAccount:${var.deploy_service_account}"
+}
+
+{% endfor %}
 {% if spot_vms and spot_ssh_source_ranges %}
 resource "google_compute_firewall" "spot_ssh" {
   project       = module.project.project_id
