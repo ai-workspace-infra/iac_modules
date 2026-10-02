@@ -91,6 +91,7 @@ variable "deploy_service_account_roles" {
     "roles/compute.instanceAdmin.v1",
     "roles/compute.networkAdmin",
     "roles/compute.securityAdmin",
+    "roles/iap.admin",
     "roles/iam.serviceAccountAdmin",
     "roles/iam.serviceAccountUser",
     "roles/run.admin",
