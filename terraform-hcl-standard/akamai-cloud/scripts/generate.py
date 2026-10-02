@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shutil
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -64,6 +65,9 @@ def load_sources(resources):
             name = str(host["name"])
             host["label"] = f"{prefix}-{name}" if prefix else name
             host["firewall_label"] = firewall_label(host["label"])
+            ports = (host.get("firewall", {}) or {}).get("additional_tcp_ports", [])
+            if not isinstance(ports, list) or any(type(port) is not int or not 1 <= port <= 65535 for port in ports):
+                raise SystemExit("firewall.additional_tcp_ports must be a list of TCP ports between 1 and 65535")
             host["_source"] = str(path)
             hosts.append(host)
     if not hosts:
@@ -227,7 +231,12 @@ def inventory(args):
             "ansible_user": ssh_user,
             "host_vars": host_vars,
         }
-        lines[fqdn] = f"{fqdn} ansible_host={facts.get('ip', '')} ansible_user={ssh_user}"
+        # INI host values are parsed as Python literals by Ansible. Quote the
+        # complete literal so spaces, lists and booleans survive shlex parsing.
+        inventory_vars = {**host_vars, "ansible_host": facts.get("ip", ""), "ansible_user": ssh_user}
+        lines[fqdn] = fqdn + " " + " ".join(
+            f"{key}={shlex.quote(repr(value))}" for key, value in inventory_vars.items()
+        )
         for group in host.get("groups", []) or []:
             groups.setdefault(str(group), []).append(fqdn)
     (workdir / "cmdb.json").write_text(

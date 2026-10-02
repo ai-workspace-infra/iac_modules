@@ -103,3 +103,11 @@ terraform -chdir=envs/test validate
 
 不要对该 fixture 执行 `apply`；它只用于渲染和 Terraform 语法/provider schema
 校验。
+
+## Regional entry metadata and ports
+
+GitOps host_vars are preserved in CMDB and the generated INI inventory, including
+typed lists and booleans. Use xconnect_region, xconnect_pool, xconnect_fqdn and
+xconnect_open_to_users for agent report metadata. firewall.additional_tcp_ports
+declares public TCP listeners such as 1443 as explicit inbound rules; each port
+must be an integer 1–65535. Declare allow_https: true for the public entry.
