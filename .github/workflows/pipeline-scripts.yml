@@ -37,7 +37,7 @@ jobs:
           # The toolkit workflows invoke these as bare commands; a lost exec bit
           # fails the provision job only at run time.
           bad=0
-          for f in $(git ls-files 'scripts/pipeline/*.sh' 'scripts/pipeline/tests/*.sh'); do
+          for f in $(git ls-files ':(glob)scripts/pipeline/*.sh' ':(glob)scripts/pipeline/tests/*.sh'); do
             [[ "$(git ls-files -s -- "$f" | cut -c1-6)" == 100755 ]] || { echo "not 100755: $f"; bad=1; }
           done
           exit "$bad"
