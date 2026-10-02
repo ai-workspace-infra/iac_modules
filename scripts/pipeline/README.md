@@ -36,3 +36,24 @@ never depends on another repo's layout.
 for t in scripts/pipeline/tests/*_test.sh; do bash "$t"; done
 python3 -m unittest discover -s scripts/pipeline/tests -p '*test*.py'
 ```
+
+## Repository boundary and change order
+
+This directory owns Terraform and provision-phase behavior only. The orchestrator and
+GitOps readers stay in
+[`platform-ops-toolkit/.github/scripts/`](https://github.com/ai-workspace-infra/platform-ops-toolkit/tree/main/.github/scripts),
+Ansible-phase behavior stays in
+[`playbooks/scripts/pipeline/`](https://github.com/ai-workspace-infra/playbooks/tree/main/scripts/pipeline),
+and desired state stays as YAML/Markdown data in
+[`gitops`](https://github.com/ai-workspace-infra/gitops).
+
+For a change crossing repositories, land the IaC and playbooks additions first, then
+update toolkit call sites in a dependent PR. The dependent toolkit PR must name the
+upstream PRs and the required merge order. Do not add workflow-prefixed wrappers here;
+use a short-hyphen script name, add a test under `scripts/pipeline/tests/`, and keep
+direct entry points executable (`100755`).
+
+`lib/require-env.sh` is intentionally byte-identical to the copies in playbooks and
+toolkit. Keep the copy local to this repository; do not source a helper through a sibling
+checkout. Release and branch rules are maintained in
+[`skills/release-branch-policy/SKILL.md`](../../skills/release-branch-policy/SKILL.md).
