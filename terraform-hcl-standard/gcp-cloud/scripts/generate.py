@@ -415,6 +415,8 @@ def inventory(args):
                 raise SystemExit(f"Spot VM {vm['name']} has no public IP for deployment")
             cmdb[vm["name"]] = {
                 "ip": address,
+                "private_ip": facts.get("private_ip"),
+                "public_ip": facts.get("public_ip"),
                 "ansible_user": (
                     oslogin_username()
                     if vm.get("enable_oslogin")
