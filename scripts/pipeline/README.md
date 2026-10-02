@@ -19,6 +19,12 @@ these scripts from the Terraform working directory, so every relative path in th
 | `adopt-resize-replacement.sh`, `resize-instance-apply-terraform.sh` | guarded resize flow |
 | `ensure-gcp-vm-running.py`, `register-gcp-oslogin-key.sh` | GCP runtime reconcile and OS Login key |
 | `verify-aws-boot-health.sh` | EC2 status-check gate |
+
+AWS boot readiness requires both EC2 checks to be `ok`, then an SSH banner.
+`AWS_BOOT_HEALTH_TIMEOUT_SECONDS` defaults to 600 seconds per instance;
+`AWS_SSH_BANNER_TIMEOUT_SECONDS` defaults to 180 seconds. Both budgets and
+their polling intervals can be overridden by the caller. A timeout fails the
+pipeline and captures console diagnostics; it never bypasses readiness.
 | `reconcile-backup-schedules.sh` | provider backup schedule reconcile |
 | `action-runner-iac.sh` | `render` / `terraform-init` / `terraform-action` / `inventory` / `build-matrix` for the runner VM |
 | `multi-cloud-load-aws-config.sh`, `multi-cloud-terraform-cli-args.sh <accounts\|resources>` | multi-cloud matrix backend config |

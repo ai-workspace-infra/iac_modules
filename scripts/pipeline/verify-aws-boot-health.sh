@@ -2,7 +2,9 @@
 set -euo pipefail
 
 : "${CMDB_FILE:?CMDB_FILE must point to the generated cmdb.json}"
-: "${AWS_BOOT_HEALTH_TIMEOUT_SECONDS:=180}"
+# EC2 can still report initializing after cloud-init has completed. Allow a
+# bounded ten-minute default without weakening either status-check gate.
+: "${AWS_BOOT_HEALTH_TIMEOUT_SECONDS:=600}"
 : "${AWS_BOOT_HEALTH_POLL_INTERVAL_SECONDS:=6}"
 # First boot can take longer than one minute after both EC2 status checks pass,
 # especially for fresh Debian ARM instances. Keep the check fail-closed, but
