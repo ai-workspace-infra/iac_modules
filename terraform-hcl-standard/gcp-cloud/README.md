@@ -116,6 +116,30 @@ with `FALSE`; callers in such projects must explicitly enable OS Login and
 provide a matching deployment SSH path. A successful VM plan alone does not
 prove that Ansible can sign in.
 
+A public Spot VM that serves traffic (for example a regional Agent Proxy)
+declares it on the VM:
+
+```yaml
+spot_vms:
+  - name: agent-proxy-us-uat
+    public_ip: true
+    network_tags: [agent-proxy-us]
+    public_tcp_ports: [80, 443]        # own firewall rule; 22 stays on spot_ssh
+    inventory_groups: [xconnect, agent_proxy]
+    host_vars:
+      service_domains: [us-xconnect.svc.plus]
+```
+
+`public_tcp_ports` renders one `0.0.0.0/0` firewall rule for the VM's
+`network_tags` and requires `public_ip: true`. When `host_vars.service_domains`
+is set, the CMDB and inventory key is the first service domain rather than the
+VM name — the same contract as the AWS and Akamai adapters, because the deploy
+jobs use that key as the node's public hostname — and `host_vars` are written
+as inline inventory variables. A VM that declares neither keeps its VM-name
+key and its plain inventory line. In a project with a
+`compute.vmExternalIpAccess` allowlist, the VM must also be listed in
+`external_ip_allowed_instances` of the namespace that owns the policy.
+
 For Vault Raft HA, the renderer also permits TCP 8200 (API/peer traffic) and
 8201 (Raft forwarding) only from the declared VPC subnet to Vault nodes. These
 ports are never exposed to the internet; configure Vault listener and cluster
