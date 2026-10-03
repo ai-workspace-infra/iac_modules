@@ -198,6 +198,7 @@ def normalize_resources(document):
             for group in vm.get("inventory_groups", [])
         ):
             raise SystemExit("Spot VM inventory_groups must contain Ansible group names")
+        validate_spot_service_declaration(vm)
     return (
         global_config,
         vault_nodes,
@@ -205,6 +206,62 @@ def normalize_resources(document):
         cloud_run_services,
         False,
     )
+
+
+DNS_NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+")
+HOST_VAR_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def spot_service_domains(vm):
+    domains = (vm.get("host_vars") or {}).get("service_domains") or []
+    if isinstance(domains, str):
+        domains = [item.strip() for item in domains.split(",")]
+    return [str(item).strip() for item in domains if str(item).strip()]
+
+
+def spot_inventory_name(vm):
+    """CMDB / inventory key of a Spot VM.
+
+    A VM that serves public names is keyed by its first service domain, the
+    same contract as the AWS and Akamai adapters: the deploy jobs use the key
+    as the node's public hostname. A VM without service domains keeps its VM
+    name, so existing declarations are unchanged.
+    """
+    domains = spot_service_domains(vm)
+    return domains[0] if domains else vm["name"]
+
+
+def validate_spot_service_declaration(vm):
+    ports = vm.get("public_tcp_ports", [])
+    if not isinstance(ports, list) or any(
+        isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535 for port in ports
+    ):
+        raise SystemExit(f"Spot VM {vm['name']} public_tcp_ports must be a list of TCP port numbers")
+    if 22 in ports:
+        raise SystemExit(
+            f"Spot VM {vm['name']} public_tcp_ports must not contain 22; SSH is governed by spot_ssh_source_ranges"
+        )
+    if len(set(ports)) != len(ports):
+        raise SystemExit(f"Spot VM {vm['name']} public_tcp_ports contains a duplicate port")
+    if ports and not vm.get("public_ip"):
+        raise SystemExit(f"Spot VM {vm['name']} public_tcp_ports requires public_ip: true")
+    if ports and not vm.get("network_tags"):
+        raise SystemExit(f"Spot VM {vm['name']} public_tcp_ports requires network_tags for the firewall target")
+    host_vars = vm.get("host_vars", {})
+    if not isinstance(host_vars, dict) or any(
+        not isinstance(key, str) or not HOST_VAR_NAME.fullmatch(key) for key in host_vars
+    ):
+        raise SystemExit(f"Spot VM {vm['name']} host_vars must be a mapping of Ansible variable names")
+    for value in host_vars.values():
+        if isinstance(value, dict) or '"' in str(value) or "\n" in str(value):
+            raise SystemExit(f"Spot VM {vm['name']} host_vars values must be scalars or lists without quotes")
+    domains = spot_service_domains(vm)
+    if any(not DNS_NAME.fullmatch(domain) for domain in domains):
+        raise SystemExit(f"Spot VM {vm['name']} host_vars.service_domains must contain DNS names")
+    if domains and not vm.get("public_ip"):
+        raise SystemExit(f"Spot VM {vm['name']} declares service_domains and therefore requires public_ip: true")
+    if not isinstance(vm.get("tags", []), list):
+        raise SystemExit(f"Spot VM {vm['name']} tags must be a list")
 
 
 def render(args):
@@ -252,6 +309,9 @@ def render(args):
     for vm in spot_vms:
         if vm.get("public_ip") and not set(spot_network_tags).intersection(vm.get("network_tags", [])):
             raise SystemExit(f"public Spot VM {vm['name']} must include a declared spot_network_tag")
+    inventory_names = [spot_inventory_name(vm) for vm in spot_vms]
+    if len(set(inventory_names)) != len(inventory_names):
+        raise SystemExit("Spot VMs must not share an inventory name (first service domain or VM name)")
     if spot_vms and global_config.get("enable_iap_ssh"):
         spot_ssh_sources = list(dict.fromkeys([*spot_ssh_sources, "35.235.240.0/20"]))
     if enable_network and not global_config.get("subnet_cidr"):
@@ -419,7 +479,19 @@ def inventory(args):
         if not address:
             address_type = "public IP" if vm.get("public_ip") else "private IP"
             raise SystemExit(f"Spot VM {vm['name']} has no {address_type} for deployment")
-        cmdb[vm["name"]] = {
+        host_vars = dict(vm.get("host_vars") or {})
+        host_vars.setdefault("node_id", vm.get("node_id") or vm["name"])
+        host_vars.setdefault("cloud_provider", "gcp-cloud")
+        host_vars.setdefault("cloud_region", global_config.get("region", ""))
+        for key in ("location", "node_label"):
+            if vm.get(key):
+                host_vars.setdefault(key, vm[key])
+        inventory_name = spot_inventory_name(vm)
+        if inventory_name in cmdb:
+            raise SystemExit(f"Spot VM inventory name {inventory_name} collides with a CMDB platform key")
+        cmdb[inventory_name] = {
+            "name": vm["name"],
+            "fqdn": inventory_name,
             "ip": address,
             "private_ip": private_ip,
             "public_ip": public_ip,
@@ -433,6 +505,10 @@ def inventory(args):
             "provider": "gcp-cloud",
             "provisioning_model": facts.get("provisioning_model"),
             "iap_tunnel": not vm.get("public_ip") and global_config.get("enable_iap_ssh", False),
+            "node_id": host_vars["node_id"],
+            "ansible_port": 22,
+            "tags": vm.get("tags", []) or [],
+            "host_vars": host_vars if vm.get("host_vars") else {},
         }
     (workdir / "cmdb.json").write_text(json.dumps(cmdb, indent=2) + "\n", encoding="utf-8")
     lines = ["[vault]"]
@@ -445,10 +521,15 @@ def inventory(args):
     for group in groups:
         lines.append(f"[{group}]")
         for vm in spot_vms:
-            if vm["name"] not in cmdb or group not in cmdb[vm["name"]]["groups"]:
+            inventory_name = spot_inventory_name(vm)
+            if inventory_name not in cmdb or group not in cmdb[inventory_name]["groups"]:
                 continue
-            item = cmdb[vm["name"]]
-            line = f"{vm['name']} ansible_host={item['ip']} ansible_user={item['ansible_user']}"
+            item = cmdb[inventory_name]
+            line = f"{inventory_name} ansible_host={item['ip']} ansible_user={item['ansible_user']}"
+            # Same rendering as the AWS adapter: declared host_vars become
+            # inline inventory variables for the playbooks.
+            for key, value in item["host_vars"].items():
+                line += f' {key}="{value}"'
             if item.get("iap_tunnel"):
                 if not private_key_file:
                     raise SystemExit("GCP_SSH_PRIVATE_KEY_FILE is required for private Spot VM inventory")
