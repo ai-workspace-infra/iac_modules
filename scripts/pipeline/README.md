@@ -17,6 +17,7 @@ these scripts from the Terraform working directory, so every relative path in th
 | `terraform-apply-destroy.sh` | plan / apply / destroy with the UAT no-delete and Vultr no-downgrade guards |
 | `assert-destroy-scope.sh` | refuses a destroy whose scope is empty or wrong; called by the script above and by the Akamai pipeline |
 | `adopt-resize-replacement.sh`, `resize-instance-apply-terraform.sh` | guarded resize flow |
+| `vultr-instance-snapshot.sh` | create or resume a Vultr instance snapshot and wait for completion |
 | `ensure-gcp-vm-running.py`, `register-gcp-oslogin-key.sh` | GCP runtime reconcile and OS Login key |
 | `verify-aws-boot-health.sh` | EC2 status-check gate |
 
@@ -25,6 +26,14 @@ AWS boot readiness requires both EC2 checks to be `ok`, then an SSH banner.
 `AWS_SSH_BANNER_TIMEOUT_SECONDS` defaults to 180 seconds. Both budgets and
 their polling intervals can be overridden by the caller. A timeout fails the
 pipeline and captures console diagnostics; it never bypasses readiness.
+
+`vultr-instance-snapshot.sh` requires `VULTR_API_KEY` and `INSTANCE_ID` from the
+caller. It optionally accepts `VULTR_SNAPSHOT_ID` to resume waiting without
+creating another backup, plus `VULTR_SNAPSHOT_WAIT_ATTEMPTS` and
+`VULTR_SNAPSHOT_WAIT_INTERVAL_SECONDS`. On success it writes `snapshot_id` to
+`GITHUB_OUTPUT` when present, otherwise stdout. Approval and exact instance
+selection stay with the caller; a failed snapshot stops replacement before
+Terraform runs. The script does not delete snapshots.
 | `reconcile-backup-schedules.sh` | provider backup schedule reconcile |
 | `action-runner-iac.sh` | `render` / `terraform-init` / `terraform-action` / `inventory` / `build-matrix` for the runner VM |
 | `multi-cloud-load-aws-config.sh`, `multi-cloud-terraform-cli-args.sh <accounts\|resources>` | multi-cloud matrix backend config |
