@@ -106,7 +106,7 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
 
         self.assertIn('default     = null', module)
         self.assertIn('var.max_run_duration_seconds == null ? true :', module)
-        self.assertIn('instance_termination_action = "STOP"', module)
+        self.assertIn('instance_termination_action = var.provisioning_model == "SPOT" ? "STOP" : null', module)
         self.assertIn('for_each = var.max_run_duration_seconds == null ? []', module)
         self.assertIn('condition     = !var.public_ip || var.enable_oslogin || trimspace(var.ssh_public_key) != ""', module)
         self.assertIn('var.enable_oslogin || trimspace(var.ssh_public_key) == "" ? {} : {', module)
@@ -121,6 +121,52 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
         self.assertIn('network_tags    = {{ vm.network_tags | default([]) | tojson }}', template)
         self.assertIn('"ip": address', generator)
         self.assertNotIn('"spot_ssh_source_ranges",', generator.split('declared = {', 1)[1].split('}', 1)[0])
+
+    def test_persistent_service_vm_keeps_address_and_protects_separate_disk(self):
+        spec = importlib.util.spec_from_file_location("gcp_generate", ROOT / "scripts" / "generate.py")
+        generator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generator)
+        vm = {
+            "name": "web-saas-uat", "zone": "asia-east1-a", "machine_type": "e2-medium",
+            "provisioning_model": "STANDARD", "deletion_protection": True,
+            "enable_oslogin": True, "public_ip": True, "network_tags": ["web-saas-ssh"],
+            "inventory_groups": ["web_saas"],
+            "data_disk": {"name": "web-saas-uat-data", "size_gb": 100,
+                          "type": "pd-balanced", "device_name": "web-saas-data",
+                          "mount_path": "/data"},
+        }
+        manifest = {
+            "kind": "GCPWorkloadNamespace",
+            "metadata": {"name": "web-saas", "environment": "uat", "provider": "gcp"},
+            "spec": {
+                "gcp_account_id": "xworktech", "project_id": "open-platform-uat",
+                "state_project": "svc.plus", "organization_id": "744119519286",
+                "region": "asia-east1", "workspace": "web-saas", "state_namespace": "web-saas",
+                "network_name": "web-saas-uat-gcp", "subnet_cidr": "10.63.0.0/24",
+                "spot_ssh_source_ranges": ["203.0.113.1/32"],
+                "spot_network_tags": ["web-saas-ssh"],
+                "state": {"key": "terraform/uat/svc.plus/gcp-cloud/xworktech/web-saas/terraform.tfstate"},
+                "resource": {"lifecycle": "persistent"},
+                "resources": {"service_vms": [vm]},
+            },
+        }
+        _, _, vms, _, _ = generator.normalize_resources(manifest)
+        self.assertEqual(vms[0]["name"], "web-saas-uat")
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(generator, "load_resources", return_value=manifest):
+            generator.render(SimpleNamespace(resources="ignored", workdir=tempdir))
+            rendered = (Path(tempdir) / "generated_platform.tf").read_text(encoding="utf-8")
+        self.assertIn('module "spot_web_saas_uat"', rendered)
+        self.assertIn('module "data_disk_web_saas_uat"', rendered)
+        self.assertRegex(rendered, r'data_disk_id\s+= module\.data_disk_web_saas_uat\.id')
+        self.assertRegex(rendered, r'provisioning_model\s+= "STANDARD"')
+        self.assertRegex(rendered, r'deletion_protection\s+= true')
+        disk_module = (ROOT / "modules" / "persistent_data_disk" / "main.tf").read_text()
+        self.assertIn('deletion_policy = "PREVENT"', disk_module)
+        self.assertIn('prevent_destroy = true', disk_module)
+
+        manifest["spec"]["resources"]["service_vms"][0]["deletion_protection"] = False
+        with self.assertRaises(SystemExit):
+            generator.normalize_resources(manifest)
 
     def test_public_spot_instance_reaches_deploy_matrix(self):
         spec = importlib.util.spec_from_file_location("gcp_generate", ROOT / "scripts" / "generate.py")

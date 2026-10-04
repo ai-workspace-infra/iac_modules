@@ -173,6 +173,17 @@ resource "google_compute_firewall" "vault_raft_internal" {
 {% endif %}
 
 {% for vm in spot_vms %}
+{% if vm.data_disk is defined %}
+module "data_disk_{{ vm.name | tf_id }}" {
+  source     = "../../modules/persistent_data_disk"
+  project_id = module.project.project_id
+  name       = {{ vm.data_disk.name | tojson }}
+  zone       = {{ vm.zone | tojson }}
+  size_gb    = {{ vm.data_disk.size_gb }}
+  disk_type  = {{ vm.data_disk.type | default('pd-balanced') | tojson }}
+  labels     = {{ vm.labels | default({}) | tojson }}
+}
+{% endif %}
 module "spot_{{ vm.name | tf_id }}" {
   source          = "../../modules/spot_vm"
   depends_on      = [module.project, module.network]
@@ -189,6 +200,12 @@ module "spot_{{ vm.name | tf_id }}" {
   ssh_public_key  = var.ssh_public_key
   ssh_username    = var.ssh_username
   enable_oslogin  = {{ vm.enable_oslogin | default(false) | tojson }}
+  provisioning_model = {{ vm.provisioning_model | default('SPOT') | tojson }}
+  deletion_protection = {{ vm.deletion_protection | default(false) | tojson }}
+{% if vm.data_disk is defined %}
+  data_disk_id = module.data_disk_{{ vm.name | tf_id }}.id
+  data_disk_device_name = {{ vm.data_disk.device_name | tojson }}
+{% endif %}
 {% if vm.max_run_duration_seconds is defined %}
   max_run_duration_seconds = {{ vm.max_run_duration_seconds }}
 {% endif %}
@@ -293,6 +310,11 @@ output "platform_runtime" {
         zone              = module.spot_{{ vm.name | tf_id }}.zone
         project_id        = module.spot_{{ vm.name | tf_id }}.project_id
         provisioning_model = module.spot_{{ vm.name | tf_id }}.provisioning_model
+{% if vm.data_disk is defined %}
+        data_disk_id = module.data_disk_{{ vm.name | tf_id }}.id
+        data_disk_device_name = {{ vm.data_disk.device_name | tojson }}
+        data_mount_path = {{ vm.data_disk.mount_path | tojson }}
+{% endif %}
       }
 {% endfor %}
     }
