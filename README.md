@@ -119,6 +119,12 @@ environment's host variables.
 | `skills/` | Binding specs — `IAC-Spec` (IaC red lines), `terraform-yaml-render-pattern` (the render pattern), `release-branch-policy` |
 | `scripts/` | Repo-level helpers — `dynamic_inventory.py`, WireGuard key generation, gitleaks auto-fix, and `workflows/` helpers for Flux, Ansible, kubeconfig and xconfig |
 | `scripts/pipeline/` | Terraform / provision-phase steps called by the `platform-ops-toolkit` workflows (state reconcile, apply/destroy guard, plan mapping, cloud runtime checks) with their tests in `scripts/pipeline/tests/` |
+
+The resize provider operations `vultr-instance-snapshot.sh`,
+`cloudflare-dns-cutover.sh` and `vultr-destroy-source-instance.sh` are owned here.
+Toolkit retains approval, sequence, Vault delivery and release evidence. Source
+instance destruction additionally requires `CONFIRM_DESTROY=true`; the owner
+test uses mocked provider responses and never mutates cloud resources.
 | `docs/archive/legacy-pipelines/` | Parked pipeline definitions that used to sit under `.github/actions/` (workflow-shaped files GitHub never ran) — see its [README](docs/archive/legacy-pipelines/README.md) |
 | `.github/workflows/` | `validate-release-pr.yml` (release-branch policy) and `pipeline-scripts.yml` (tests for `scripts/pipeline/`) |
 | `example/` | Reference samples: Pulumi (Python) and plain Terraform for AWS / Azure / GCP |
