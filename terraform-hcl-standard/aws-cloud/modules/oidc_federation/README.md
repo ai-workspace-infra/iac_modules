@@ -10,3 +10,7 @@ The module deliberately does not accept a wildcard subject. Separate roles are
 required for separate environments, repositories, or workloads. The issuer
 URL, client ID, and CA thumbprint must be recorded in the corresponding
 non-secret GitOps declaration and Vault bootstrap record.
+
+## Tests
+
+Run the offline mock suite before provisioning: [test instructions](tests/README.md).
