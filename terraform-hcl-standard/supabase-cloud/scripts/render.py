@@ -16,7 +16,8 @@ from jinja2 import Template
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE_FILES = ["provider.tf", "variables.tf", "main.tf", "outputs.tf"]
-DEFAULT_RESOURCES = ROOT / "config" / "resources" / "dev" / "supabase.yaml"
+GITOPS_ROOT = Path(os.environ.get("GITOPS_ROOT", ROOT.parents[2] / "gitops"))
+DEFAULT_RESOURCES = GITOPS_ROOT / "resources" / "svc.plus" / "dev" / "supabase" / "supabase.yaml"
 DEFAULT_WORKDIR = ROOT / "envs" / "dev"
 
 

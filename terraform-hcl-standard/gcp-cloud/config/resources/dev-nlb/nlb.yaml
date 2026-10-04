@@ -1,7 +1,0 @@
-project_id: "modern-app-dev"
-name: "dev-nlb"
-network: "projects/modern-app-dev/global/networks/dev-vpc"
-subnet: "projects/modern-app-dev/regions/us-central1/subnetworks/dev-public-1"
-
-port: 443
-zone: "us-central1-a"

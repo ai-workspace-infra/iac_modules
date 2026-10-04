@@ -16,8 +16,8 @@ for FILE in ${FILES}; do
   # Point any lingering envs/dev-* references to the new instance layout
   ${SED_CMD} -i'' -e 's|envs/dev-[a-zA-Z0-9_-]*/|instance/|g' "${FILE}"
 
-  # Ensure YAML lookups target the centralized gitops config root
-  ${SED_CMD} -i'' -e 's|file("${path.root}/../../config/|file("${local.config_root}/config/|g' "${FILE}"
+  # Declarations are supplied as explicit GitOps paths; this helper no longer
+  # rewrites references to a module-local config tree.
 
   # Keep module sources anchored on the shared modules directory
   ${SED_CMD} -i'' -e 's|source = "../../modules/|source = "../../modules/|g' "${FILE}"

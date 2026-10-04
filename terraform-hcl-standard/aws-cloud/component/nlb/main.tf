@@ -1,17 +1,10 @@
 locals {
-  config_root = coalesce(var.config_root, abspath("${path.root}/../../../../../gitops"))
-
-  account = yamldecode(
-    file("${local.config_root}/config/accounts/dev.yaml")
-  )
-
-  nlb_conf = yamldecode(
-    file("${local.config_root}/config/resources/dev-nlb/nlb.yaml")
-  )
+  account  = yamldecode(file(var.account_config_path))
+  nlb_conf = yamldecode(file(var.nlb_config_path))
 }
 
 module "nlb" {
-  source      = "../../modules/nlb"
+  source = "../../modules/nlb"
 
   name_prefix = local.nlb_conf.name_prefix
   vpc_id      = local.nlb_conf.vpc_id

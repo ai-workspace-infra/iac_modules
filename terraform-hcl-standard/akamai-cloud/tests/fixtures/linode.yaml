@@ -1,0 +1,25 @@
+global:
+  provider: akamai-cloud
+  environment: test
+  region: us-east
+  image: linode/debian12
+  type: g6-nanode-1
+  name_prefix: test
+  user_data_file: cloud-init.yaml
+
+ssh_keys:
+  - name: test-admin
+    public: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITest test-admin"
+
+hosts:
+  - name: web-node
+    private_ip: true
+    tags: [test, debian]
+    groups: [web, debian]
+    firewall:
+      ssh_cidrs: ["192.0.2.0/24"]
+      ssh_ipv6_cidrs: ["2001:db8::/32"]
+      allow_https: true
+    host_vars:
+      role: primary
+      service_domains: [web.example.test]

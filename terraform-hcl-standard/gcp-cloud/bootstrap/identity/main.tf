@@ -2,9 +2,21 @@ terraform {
   required_providers {
     google = {
       source  = "hashicorp/google"
-      version = ">= 5.0"
+      version = "~> 7.0"
     }
   }
+
+  # Terraform state uses the organization-wide S3-compatible object store.
+  # Endpoint, bucket, key, credentials, and region are supplied by the
+  # workflow from Vault's CICD state contract.
+  backend "s3" {}
+}
+
+variable "access_token" {
+  description = "Short-lived OAuth access token used by the bootstrap run."
+  type        = string
+  sensitive   = true
+  default     = null
 }
 
 variable "project_id" {
@@ -21,10 +33,82 @@ variable "service_account_id" {
 variable "service_account_roles" {
   description = "List of roles to attach to the bootstrap service account"
   type        = list(string)
-  default     = [
+  default = [
+    "roles/iam.workloadIdentityPoolAdmin",
+    "roles/iam.serviceAccountAdmin",
     "roles/resourcemanager.projectIamAdmin",
-    "roles/storage.admin",
-    "roles/compute.admin"
+    "roles/serviceusage.serviceUsageAdmin"
+  ]
+}
+
+variable "environment" {
+  description = "GitHub Actions environment bound to this identity."
+  type        = string
+}
+
+variable "github_owner" {
+  type = string
+}
+
+variable "github_repository" {
+  type = string
+}
+
+variable "pool_id" {
+  type    = string
+  default = "github-actions"
+}
+
+variable "provider_id" {
+  type    = string
+  default = "github"
+}
+
+variable "audience" {
+  description = "Explicit audience accepted from GitHub Actions."
+  type        = string
+}
+
+variable "deploy_service_account_id" {
+  type = string
+}
+
+variable "allowed_subjects" {
+  description = "GitHub OIDC subject patterns allowed to federate into the deploy Service Account. A trailing * is treated as a prefix wildcard."
+  type        = set(string)
+
+  validation {
+    condition     = length(var.allowed_subjects) > 0
+    error_message = "At least one GitHub OIDC subject must be configured."
+  }
+}
+
+variable "deploy_service_account_roles" {
+  description = "Project roles granted to the GitHub Actions deploy service account. Artifact Registry admin is required because the platform stack creates its repository during Terraform apply."
+  type        = set(string)
+  default = [
+    "roles/artifactregistry.admin",
+    "roles/compute.instanceAdmin.v1",
+    "roles/compute.networkAdmin",
+    "roles/compute.securityAdmin",
+    "roles/iap.admin",
+    "roles/iam.serviceAccountAdmin",
+    "roles/iam.serviceAccountUser",
+    "roles/run.admin",
+    "roles/serviceusage.serviceUsageConsumer",
+  ]
+}
+
+provider "google" {
+  project      = var.project_id
+  access_token = var.access_token
+}
+
+locals {
+  allowed_subject_conditions = [
+    for subject in var.allowed_subjects : endswith(subject, "*") ?
+    "assertion.sub.startsWith('${trimsuffix(subject, "*")}')" :
+    "assertion.sub == '${subject}'"
   ]
 }
 
@@ -51,7 +135,104 @@ resource "google_project_iam_member" "bootstrap" {
   member   = "serviceAccount:${google_service_account.bootstrap.email}"
 }
 
+resource "google_project_service" "iam_credentials" {
+  project            = var.project_id
+  service            = "iamcredentials.googleapis.com"
+  disable_on_destroy = false
+  depends_on         = [google_project_service.iam]
+}
+
+resource "google_project_service" "sts" {
+  project            = var.project_id
+  service            = "sts.googleapis.com"
+  disable_on_destroy = false
+  depends_on         = [google_project_service.iam]
+}
+
+variable "platform_services" {
+  description = "APIs the runtime platform stack uses. Enabled here by the bootstrap principal so the runtime deploy identity never needs serviceusage.services.enable."
+  type        = set(string)
+  default = [
+    "artifactregistry.googleapis.com",
+    "cloudresourcemanager.googleapis.com",
+    "compute.googleapis.com",
+    "iap.googleapis.com",
+    "logging.googleapis.com",
+    "monitoring.googleapis.com",
+    "run.googleapis.com",
+    "secretmanager.googleapis.com",
+  ]
+}
+
+resource "google_project_service" "platform" {
+  for_each           = var.platform_services
+  project            = var.project_id
+  service            = each.value
+  disable_on_destroy = false
+  depends_on         = [google_project_service.iam]
+}
+
+resource "google_iam_workload_identity_pool" "github" {
+  project                   = var.project_id
+  workload_identity_pool_id = var.pool_id
+  display_name              = "GitHub Actions ${upper(var.environment)}"
+  description               = "GitHub Actions OIDC federation for ${var.environment}"
+  disabled                  = false
+}
+
+resource "google_iam_workload_identity_pool_provider" "github" {
+  project                            = var.project_id
+  workload_identity_pool_id          = google_iam_workload_identity_pool.github.workload_identity_pool_id
+  workload_identity_pool_provider_id = var.provider_id
+  display_name                       = "GitHub Actions OIDC ${upper(var.environment)}"
+  attribute_condition                = "assertion.repository == '${var.github_owner}/${var.github_repository}' && (${join(" || ", local.allowed_subject_conditions)})"
+  attribute_mapping = {
+    "google.subject"        = "assertion.sub"
+    "attribute.repository"  = "assertion.repository"
+    "attribute.environment" = "assertion.environment"
+    "attribute.ref"         = "assertion.ref"
+  }
+
+  oidc {
+    issuer_uri        = "https://token.actions.githubusercontent.com"
+    allowed_audiences = [var.audience]
+  }
+}
+
+resource "google_service_account" "github_actions" {
+  project      = var.project_id
+  account_id   = var.deploy_service_account_id
+  display_name = "GitHub Actions ${upper(var.environment)} deployer"
+}
+
+resource "google_project_iam_member" "deploy" {
+  for_each = var.deploy_service_account_roles
+  project  = var.project_id
+  role     = each.value
+  member   = "serviceAccount:${google_service_account.github_actions.email}"
+}
+
+resource "google_service_account_iam_member" "federation" {
+  service_account_id = google_service_account.github_actions.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${var.github_owner}/${var.github_repository}"
+}
+
 output "service_account_email" {
+  value       = google_service_account.github_actions.email
+  description = "GitHub Actions deploy service account email"
+}
+
+output "bootstrap_service_account_email" {
   value       = google_service_account.bootstrap.email
   description = "Bootstrap service account email"
+}
+
+output "workload_identity_provider" {
+  value       = google_iam_workload_identity_pool_provider.github.name
+  description = "Full resource name used by google-github-actions/auth."
+}
+
+output "project_id" {
+  value = var.project_id
 }

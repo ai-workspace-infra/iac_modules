@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""共享渲染器：资源声明 (config/resources) -> Terraform 资源 / Ansible inventory。
+"""共享渲染器：GitOps 资源声明 -> Terraform 资源 / Ansible inventory。
 
 分层（本脚本不依赖某个具体 env，可被多套资源声明复用）：
-  - 声明:     ../config/resources/<name>-hosts.yaml        （--resources 覆盖）
+  - 声明:     GitOps resources/<project>/<env>/aws/*.yaml  （--resources 必填）
   - 共享模板: ../templates/{provider.tf, variables.tf, cloud-init.yaml,
                             hosts.tf.j2, inventory.ini.j2}
   - 运行目录: ../envs/<name>/  （--workdir 覆盖；渲染产物 + tfstate 落此，均 gitignore）
@@ -36,9 +36,6 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 AWS_CLOUD_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 TEMPLATE_DIR = os.path.join(AWS_CLOUD_ROOT, "templates")
 
-DEFAULT_RESOURCES = os.path.join(
-    AWS_CLOUD_ROOT, "config", "resources", "ai-workspace-hosts.yaml"
-)
 DEFAULT_WORKDIR = os.path.join(AWS_CLOUD_ROOT, "envs", "ai-workspace")
 
 # render 时从 templates/ 拷入运行目录的静态文件（使 workdir 成为独立根模块）。
@@ -331,7 +328,7 @@ def cmd_inventory(args):
 
 
 def _add_common(p):
-    p.add_argument("--resources", default=DEFAULT_RESOURCES, help="资源声明 YAML 路径")
+    p.add_argument("--resources", required=True, help="GitOps 资源声明 YAML 路径")
     p.add_argument("--workdir", default=DEFAULT_WORKDIR, help="terraform 运行目录")
 
 

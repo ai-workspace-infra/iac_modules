@@ -1,0 +1,336 @@
+import unittest
+import importlib.util
+import json
+import tempfile
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class SpotVMDeploymentContractTest(unittest.TestCase):
+    def test_public_vault_node_inventory_uses_terraform_address(self):
+        spec = importlib.util.spec_from_file_location("gcp_generate", ROOT / "scripts" / "generate.py")
+        generator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generator)
+        manifest = {
+            "global": {"environment": "shared", "project_id": "open-platform-shared", "ssh_username": "ubuntu"},
+            "vault_nodes": [{"name": "vault-shared-0", "zone": "asia-east1-a", "public_ip": True}],
+        }
+        runtime = {
+            "project_id": "open-platform-shared",
+            "vault_private_ips": {"vault-shared-0": "10.82.0.2"},
+            "vault_public_ips": {"vault-shared-0": "198.51.100.20"},
+        }
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(
+            generator, "load_resources", return_value=manifest
+        ), patch.object(generator.subprocess, "check_output", return_value=json.dumps(runtime)):
+            generator.inventory(SimpleNamespace(resources="ignored", workdir=tempdir))
+            cmdb = json.loads((Path(tempdir) / "cmdb.json").read_text(encoding="utf-8"))
+            inventory = (Path(tempdir) / "inventory.ini").read_text(encoding="utf-8")
+        self.assertEqual(cmdb["vault_nodes"][0]["public_ip"], "198.51.100.20")
+        self.assertIn("vault-shared-0 ansible_host=198.51.100.20 ansible_user=ubuntu", inventory)
+
+    def test_namespace_public_ip_allowlist_renders_project_org_policy(self):
+        spec = importlib.util.spec_from_file_location("gcp_generate", ROOT / "scripts" / "generate.py")
+        generator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generator)
+        manifest = {
+            "kind": "GCPWorkloadNamespace",
+            "metadata": {"name": "shared-vault", "environment": "shared", "provider": "gcp"},
+            "spec": {
+                "gcp_account_id": "open-platform-shared", "project_id": "open-platform-shared",
+                "organization_id": "744119519286", "region": "asia-east1",
+                "workspace": "shared-vault", "state_namespace": "shared-vault",
+                "state": {"key": "terraform/shared/open-platform-shared/gcp-cloud/open-platform-shared/shared-vault/terraform.tfstate"},
+                "network_name": "shared-vault", "subnet_cidr": "10.82.0.0/20",
+                "ssh_access_mode": "bootstrap-public", "ssh_source_ranges": ["203.0.113.10/32"],
+                "external_ip_allowed_instances": [
+                    {"name": "vault-shared-0", "zone": "asia-east1-a"},
+                    {"name": "observability-shared-0", "zone": "asia-east1-a"},
+                    {"name": "iam-shared-0", "zone": "asia-east1-a"},
+                ],
+                "resources": {"vault_nodes": [{
+                    "name": "vault-shared-0", "zone": "asia-east1-a",
+                    "machine_type": "e2-highcpu-2", "xconnect_role": "gateway", "public_ip": True,
+                }]},
+            },
+        }
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(generator, "load_resources", return_value=manifest):
+            generator.render(SimpleNamespace(resources="ignored", workdir=tempdir))
+            rendered = (Path(tempdir) / "generated_platform.tf").read_text(encoding="utf-8")
+        self.assertIn('resource "google_org_policy_policy" "vm_external_ip_access"', rendered)
+        self.assertIn('name   = "projects/${module.project.project_number}/policies/compute.vmExternalIpAccess"', rendered)
+        self.assertIn('parent = "projects/${module.project.project_id}"', rendered)
+        self.assertIn('ignore_changes = [name]', rendered)
+        for name in ("vault-shared-0", "observability-shared-0", "iam-shared-0"):
+            self.assertIn(f"instances/{name}", rendered)
+        self.assertIn("google_org_policy_policy.vm_external_ip_access", rendered)
+
+    def test_member_only_namespace_is_supported_without_gateway(self):
+        spec = importlib.util.spec_from_file_location("gcp_generate", ROOT / "scripts" / "generate.py")
+        generator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generator)
+        manifest = {
+            "kind": "GCPWorkloadNamespace",
+            "metadata": {"name": "shared-observability", "environment": "shared", "provider": "gcp"},
+            "spec": {
+                "gcp_account_id": "open-platform-shared", "project_id": "open-platform-shared",
+                "organization_id": "744119519286", "region": "asia-east1",
+                "workspace": "shared-observability", "state_namespace": "shared-observability",
+                "network_name": "shared-observability", "subnet_cidr": "10.83.0.0/20",
+                "xconnect_mode": "member", "ssh_access_mode": "bootstrap-public",
+                "ssh_source_ranges": ["203.0.113.10/32"],
+                "state": {"key": "terraform/shared/open-platform-shared/gcp-cloud/open-platform-shared/shared-observability/terraform.tfstate"},
+                "resources": {"vault_nodes": [{
+                    "name": "observability-shared-0", "zone": "asia-east1-a",
+                    "machine_type": "e2-medium", "xconnect_role": "one", "public_ip": True,
+                }]},
+            },
+        }
+        _, nodes, _, _, _ = generator.normalize_resources(manifest)
+        self.assertEqual(nodes[0]["xconnect_role"], "one")
+        with tempfile.TemporaryDirectory() as tempdir:
+            with patch.object(generator, "load_resources", return_value=manifest):
+                generator.render(SimpleNamespace(resources="ignored", workdir=tempdir))
+            rendered = (Path(tempdir) / "generated_platform.tf").read_text(encoding="utf-8")
+        self.assertIn('resource "google_compute_firewall" "vault_gateway_https"', rendered)
+        self.assertIn('ports    = ["443"]', rendered)
+
+    def test_public_spot_vm_has_configurable_ssh_and_no_forced_hourly_expiry(self):
+        module = (ROOT / "modules" / "spot_vm" / "main.tf").read_text(encoding="utf-8")
+        template = (ROOT / "templates" / "open-platform.tf.j2").read_text(encoding="utf-8")
+        generator = (ROOT / "scripts" / "generate.py").read_text(encoding="utf-8")
+
+        self.assertIn('default     = null', module)
+        self.assertIn('var.max_run_duration_seconds == null ? true :', module)
+        self.assertIn('instance_termination_action = var.provisioning_model == "SPOT" ? "STOP" : null', module)
+        self.assertIn('for_each = var.max_run_duration_seconds == null ? []', module)
+        self.assertIn('condition     = !var.public_ip || var.enable_oslogin || trimspace(var.ssh_public_key) != ""', module)
+        self.assertIn('var.enable_oslogin || trimspace(var.ssh_public_key) == "" ? {} : {', module)
+        self.assertIn('variable "enable_oslogin"', module)
+        self.assertIn('var.enable_oslogin ? { "enable-oslogin" = "TRUE" } : {}', module)
+        self.assertNotIn('"enable-oslogin" = "FALSE"', module)
+        self.assertIn('public_ip       = {{ vm.public_ip | default(false) | tojson }}', template)
+        self.assertIn('enable_oslogin  = {{ vm.enable_oslogin | default(false) | tojson }}', template)
+        self.assertIn('source_ranges = {{ spot_ssh_source_ranges | tojson }}', template)
+        self.assertIn('ssh_public_key  = var.ssh_public_key', template)
+        self.assertIn('"groups": vm.get("inventory_groups", [])', generator)
+        self.assertIn('network_tags    = {{ vm.network_tags | default([]) | tojson }}', template)
+        self.assertIn('"ip": address', generator)
+        self.assertNotIn('"spot_ssh_source_ranges",', generator.split('declared = {', 1)[1].split('}', 1)[0])
+
+    def test_persistent_service_vm_keeps_address_and_protects_separate_disk(self):
+        spec = importlib.util.spec_from_file_location("gcp_generate", ROOT / "scripts" / "generate.py")
+        generator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generator)
+        vm = {
+            "name": "web-saas-uat", "zone": "asia-east1-a", "machine_type": "e2-medium",
+            "provisioning_model": "STANDARD", "deletion_protection": True,
+            "enable_oslogin": True, "public_ip": True, "network_tags": ["web-saas-ssh"],
+            "inventory_groups": ["web_saas"],
+            "data_disk": {"name": "web-saas-uat-data", "size_gb": 100,
+                          "type": "pd-balanced", "device_name": "web-saas-data",
+                          "mount_path": "/data"},
+        }
+        manifest = {
+            "kind": "GCPWorkloadNamespace",
+            "metadata": {"name": "web-saas", "environment": "uat", "provider": "gcp"},
+            "spec": {
+                "gcp_account_id": "xworktech", "project_id": "open-platform-uat",
+                "state_project": "svc.plus", "organization_id": "744119519286",
+                "region": "asia-east1", "workspace": "web-saas", "state_namespace": "web-saas",
+                "network_name": "web-saas-uat-gcp", "subnet_cidr": "10.63.0.0/24",
+                "spot_ssh_source_ranges": ["203.0.113.1/32"],
+                "spot_network_tags": ["web-saas-ssh"],
+                "state": {"key": "terraform/uat/svc.plus/gcp-cloud/xworktech/web-saas/terraform.tfstate"},
+                "resource": {"lifecycle": "persistent"},
+                "resources": {"service_vms": [vm]},
+            },
+        }
+        _, _, vms, _, _ = generator.normalize_resources(manifest)
+        self.assertEqual(vms[0]["name"], "web-saas-uat")
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(generator, "load_resources", return_value=manifest):
+            generator.render(SimpleNamespace(resources="ignored", workdir=tempdir))
+            rendered = (Path(tempdir) / "generated_platform.tf").read_text(encoding="utf-8")
+        self.assertIn('module "spot_web_saas_uat"', rendered)
+        self.assertIn('module "data_disk_web_saas_uat"', rendered)
+        self.assertRegex(rendered, r'data_disk_id\s+= module\.data_disk_web_saas_uat\.id')
+        self.assertRegex(rendered, r'provisioning_model\s+= "STANDARD"')
+        self.assertRegex(rendered, r'deletion_protection\s+= true')
+        disk_module = (ROOT / "modules" / "persistent_data_disk" / "main.tf").read_text()
+        self.assertIn('deletion_policy = "PREVENT"', disk_module)
+        self.assertIn('prevent_destroy = true', disk_module)
+
+        manifest["spec"]["resources"]["service_vms"][0]["deletion_protection"] = False
+        with self.assertRaises(SystemExit):
+            generator.normalize_resources(manifest)
+
+    def test_public_spot_instance_reaches_deploy_matrix(self):
+        spec = importlib.util.spec_from_file_location("gcp_generate", ROOT / "scripts" / "generate.py")
+        generator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generator)
+        manifest = {
+            "kind": "GCPWorkloadNamespace",
+            "metadata": {"name": "sample", "environment": "uat", "provider": "gcp"},
+            "spec": {
+                "gcp_account_id": "test-account", "project_id": "test-project",
+                "organization_id": "123", "region": "asia-east1", "workspace": "sample",
+                "state_namespace": "sample", "network_name": "sample-net",
+                "state": {"key": "terraform/uat/test-project/gcp-cloud/test-account/sample/terraform.tfstate"},
+                "subnet_cidr": "10.40.0.0/24", "spot_ssh_source_ranges": ["203.0.113.10/32"],
+                "spot_network_tags": ["sample-ssh"], "ssh_username": "deployer",
+                "resources": {"spot_vms": [{
+                    "name": "sample-vm", "zone": "asia-east1-a", "machine_type": "e2-custom-4-8192",
+                    "public_ip": True, "network_tags": ["sample-ssh"],
+                    "inventory_groups": ["ai_workspace"],
+                }]},
+            },
+        }
+        runtime = {
+            "project_id": "test-project", "spot_instances": {"sample-vm": {
+                "public_ip": "198.51.100.10", "provisioning_model": "SPOT",
+            }},
+        }
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(
+            generator, "load_resources", return_value=manifest
+        ), patch.object(generator.subprocess, "check_output", return_value=json.dumps(runtime)):
+            generator.inventory(SimpleNamespace(resources="ignored", workdir=tempdir))
+            cmdb = json.loads((Path(tempdir) / "cmdb.json").read_text(encoding="utf-8"))
+            inventory = (Path(tempdir) / "inventory.ini").read_text(encoding="utf-8")
+        self.assertEqual(cmdb["sample-vm"]["ip"], "198.51.100.10")
+        self.assertEqual(cmdb["sample-vm"]["groups"], ["ai_workspace"])
+        self.assertIn("sample-vm ansible_host=198.51.100.10 ansible_user=deployer", inventory)
+
+    def test_private_spot_instance_uses_iap_inventory_and_firewall(self):
+        generator = self.load_generator()
+        manifest = {
+            "kind": "GCPWorkloadNamespace",
+            "metadata": {"name": "private-sample", "environment": "uat", "provider": "gcp"},
+            "spec": {
+                "gcp_account_id": "test-account", "project_id": "test-project",
+                "organization_id": "123", "region": "asia-east1", "workspace": "private-sample",
+                "state_namespace": "private-sample", "network_name": "private-net",
+                "state": {"key": "terraform/uat/test-project/gcp-cloud/test-account/private-sample/terraform.tfstate"},
+                "subnet_cidr": "10.40.0.0/24", "enable_iap_ssh": True, "enable_oslogin": True,
+                "spot_network_tags": ["private-ssh"], "ssh_username": "deployer",
+                "resources": {"spot_vms": [{
+                    "name": "private-vm", "zone": "asia-east1-a", "machine_type": "e2-custom-4-8192",
+                    "public_ip": False, "network_tags": ["private-ssh"], "enable_oslogin": True,
+                    "inventory_groups": ["ai_workspace"],
+                }]},
+            },
+        }
+        runtime = {"project_id": "test-project", "spot_instances": {"private-vm": {
+            "private_ip": "10.40.0.10", "public_ip": None, "zone": "asia-east1-a", "provisioning_model": "SPOT",
+        }}}
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(
+            generator, "load_resources", return_value=manifest
+        ), patch.object(generator.subprocess, "check_output", return_value=json.dumps(runtime)), patch.dict(
+            generator.os.environ,
+            {"GCP_OSLOGIN_USERNAME": "sa_123456789012345678901", "GCP_SSH_PRIVATE_KEY_FILE": "/tmp/one-run-key"},
+        ):
+            generator.render(SimpleNamespace(resources="ignored", workdir=tempdir))
+            generator.inventory(SimpleNamespace(resources="ignored", workdir=tempdir))
+            rendered = (Path(tempdir) / "generated_platform.tf").read_text(encoding="utf-8")
+            inventory = (Path(tempdir) / "inventory.ini").read_text(encoding="utf-8")
+        self.assertIn('resource "google_iap_tunnel_instance_iam_member" "spot_iap_tunnel_private_vm"', rendered)
+        self.assertIn('source_ranges = ["35.235.240.0/20"]', rendered)
+        self.assertIn("private-vm ansible_host=10.40.0.10", inventory)
+        self.assertIn("gcloud compute start-iap-tunnel private-vm 22", inventory)
+        self.assertIn("ansible_ssh_private_key_file=/tmp/one-run-key", inventory)
+
+    def oslogin_manifest(self):
+        return {
+            "kind": "GCPWorkloadNamespace",
+            "metadata": {"name": "sample", "environment": "uat", "provider": "gcp"},
+            "spec": {
+                "gcp_account_id": "test-account", "project_id": "test-project",
+                "organization_id": "123", "region": "asia-east1", "workspace": "sample",
+                "state_namespace": "sample", "network_name": "sample-net",
+                "state": {"key": "terraform/uat/test-project/gcp-cloud/test-account/sample/terraform.tfstate"},
+                "subnet_cidr": "10.40.0.0/24", "spot_ssh_source_ranges": ["203.0.113.10/32"],
+                "spot_network_tags": ["sample-ssh"], "ssh_username": "deployer",
+                "resources": {"spot_vms": [
+                    {
+                        "name": "sample-vm", "zone": "asia-east1-a", "machine_type": "e2-custom-4-8192",
+                        "public_ip": True, "network_tags": ["sample-ssh"], "enable_oslogin": True,
+                        "inventory_groups": ["ai_workspace"],
+                    },
+                    {
+                        "name": "legacy-vm", "zone": "asia-east1-a", "machine_type": "e2-small",
+                        "public_ip": True, "network_tags": ["sample-ssh"],
+                        "inventory_groups": ["legacy"],
+                    },
+                ]},
+            },
+        }
+
+    def load_generator(self):
+        spec = importlib.util.spec_from_file_location("gcp_generate", ROOT / "scripts" / "generate.py")
+        generator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generator)
+        return generator
+
+    def test_oslogin_spot_vm_grants_instance_admin_login_only_where_declared(self):
+        generator = self.load_generator()
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(
+            generator, "load_resources", return_value=self.oslogin_manifest()
+        ):
+            generator.render(SimpleNamespace(resources="ignored", workdir=tempdir))
+            rendered = (Path(tempdir) / "generated_platform.tf").read_text(encoding="utf-8")
+            manifest = json.loads((Path(tempdir) / "resources_manifest.json").read_text(encoding="utf-8"))
+        self.assertIn('resource "google_compute_instance_iam_member" "spot_os_admin_login_sample_vm"', rendered)
+        self.assertIn("instance_name = module.spot_sample_vm.name", rendered)
+        self.assertIn('role          = "roles/compute.osAdminLogin"', rendered)
+        self.assertNotIn("spot_os_admin_login_legacy_vm", rendered)
+        self.assertNotIn('"roles/compute.osAdmin"', rendered)
+        self.assertNotIn("google_project_iam_member", rendered)
+        self.assertEqual([vm.get("enable_oslogin") for vm in manifest["spot_vms"]], [True, None])
+
+    def test_oslogin_spot_vm_inventory_uses_the_deploy_principal_username(self):
+        generator = self.load_generator()
+        runtime = {"project_id": "test-project", "spot_instances": {
+            "sample-vm": {"public_ip": "198.51.100.10", "provisioning_model": "SPOT"},
+            "legacy-vm": {"public_ip": "198.51.100.11", "provisioning_model": "SPOT"},
+        }}
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(
+            generator, "load_resources", return_value=self.oslogin_manifest()
+        ), patch.object(generator.subprocess, "check_output", return_value=json.dumps(runtime)), patch.dict(
+            generator.os.environ, {"GCP_OSLOGIN_USERNAME": "sa_123456789012345678901"}
+        ):
+            generator.inventory(SimpleNamespace(resources="ignored", workdir=tempdir))
+            cmdb = json.loads((Path(tempdir) / "cmdb.json").read_text(encoding="utf-8"))
+            inventory = (Path(tempdir) / "inventory.ini").read_text(encoding="utf-8")
+        self.assertEqual(cmdb["sample-vm"]["ansible_user"], "sa_123456789012345678901")
+        self.assertEqual(cmdb["legacy-vm"]["ansible_user"], "deployer")
+        self.assertIn("sample-vm ansible_host=198.51.100.10 ansible_user=sa_123456789012345678901", inventory)
+        self.assertIn("legacy-vm ansible_host=198.51.100.11 ansible_user=deployer", inventory)
+
+    def test_oslogin_spot_vm_inventory_refuses_a_missing_or_invalid_username(self):
+        generator = self.load_generator()
+        runtime = {"spot_instances": {
+            "sample-vm": {"public_ip": "198.51.100.10"},
+            "legacy-vm": {"public_ip": "198.51.100.11"},
+        }}
+        for value in ("", "root;id", "Sa_UPPER"):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as tempdir, patch.object(
+                generator, "load_resources", return_value=self.oslogin_manifest()
+            ), patch.object(generator.subprocess, "check_output", return_value=json.dumps(runtime)), patch.dict(
+                generator.os.environ, {"GCP_OSLOGIN_USERNAME": value}
+            ):
+                with self.assertRaisesRegex(SystemExit, "GCP_OSLOGIN_USERNAME"):
+                    generator.inventory(SimpleNamespace(resources="ignored", workdir=tempdir))
+
+    def test_spot_vm_enable_oslogin_must_be_boolean(self):
+        generator = self.load_generator()
+        manifest = self.oslogin_manifest()
+        manifest["spec"]["resources"]["spot_vms"][0]["enable_oslogin"] = "true"
+        with self.assertRaisesRegex(SystemExit, "enable_oslogin must be a boolean"):
+            generator.normalize_resources(manifest)
+
+
+if __name__ == "__main__":
+    unittest.main()

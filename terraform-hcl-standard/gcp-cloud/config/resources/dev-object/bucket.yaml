@@ -1,7 +1,0 @@
-project_id: "modern-app-dev"
-name: "dev-app-artifacts"
-location: "US"
-storage_class: "STANDARD"
-
-versioning: true
-retention_days: 30

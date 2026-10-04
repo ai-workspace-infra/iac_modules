@@ -1,0 +1,344 @@
+module "project" {
+  source             = "../../modules/project"
+  create_project     = var.create_project
+  project_id         = var.project_id
+  name               = var.project_name
+  organization_id    = var.organization_id
+  billing_account_id = var.billing_account_id
+}
+
+{% if external_ip_allowed_instances and manage_external_ip_policy %}
+resource "google_org_policy_policy" "vm_external_ip_access" {
+  name   = "projects/${module.project.project_number}/policies/compute.vmExternalIpAccess"
+  parent = "projects/${module.project.project_id}"
+
+  # The Google provider currently normalizes imported policy names to the
+  # short constraint name in state. Ignore only that import representation
+  # difference; continue managing the policy spec and parent normally.
+  lifecycle {
+    ignore_changes = [name]
+  }
+
+  spec {
+    rules {
+      values {
+        allowed_values = [
+{% for instance in external_ip_allowed_instances %}
+          "projects/${module.project.project_id}/zones/{{ instance.zone }}/instances/{{ instance.name }}",
+{% endfor %}
+        ]
+      }
+    }
+  }
+}
+{% endif %}
+
+{% if enable_network %}
+module "network" {
+  source       = "../../modules/network"
+  depends_on   = [module.project]
+  project_id   = module.project.project_id
+  region       = var.region
+  network_name = var.network_name
+  subnet_cidr  = var.subnet_cidr
+  enable_nat   = var.enable_cloud_nat
+}
+{% endif %}
+
+{% if enable_artifact_registry %}
+module "artifact_registry" {
+  source        = "../../modules/artifact_registry"
+  depends_on    = [module.project]
+  project_id    = module.project.project_id
+  location      = var.artifact_registry_location
+  repository_id = var.artifact_registry_id
+}
+{% endif %}
+
+{% for node in vault_nodes %}
+module "{{ node.name | tf_id }}" {
+  source       = "../../modules/vault_vm"
+  depends_on   = [module.project{% if external_ip_allowed_instances and manage_external_ip_policy %}, google_org_policy_policy.vm_external_ip_access{% endif %}]
+  project_id   = module.project.project_id
+  name         = {{ node.name | tojson }}
+  zone         = {{ node.zone | tojson }}
+  machine_type = {{ node.machine_type | default(vault_machine_type) | tojson }}
+  image        = {{ node.image | default(vault_image) | tojson }}
+  xconnect_role = {{ node.xconnect_role | tojson }}
+  public_ip     = {{ node.public_ip | default(false) | tojson }}
+  enable_oslogin = {{ enable_oslogin | tojson }}
+  os_login_principal_email = var.deploy_service_account
+  ssh_public_key = var.ssh_public_key
+  ssh_username   = var.ssh_username
+  network      = module.network.network
+  subnetwork   = module.network.subnet
+}
+
+{% endfor %}
+{% if vault_nodes | selectattr('public_ip', 'equalto', true) | list | length > 0 %}
+# Public platform service entrypoints terminate TLS in Caddy on TCP 443.
+# This applies to Gateway and XConnect One/member states alike; the member
+# role controls overlay ownership and must not remove the service入口 firewall.
+resource "google_compute_firewall" "vault_gateway_https" {
+  project       = module.project.project_id
+  name          = "{{ network_name }}-vault-gateway-https"
+  network       = module.network.network
+  direction     = "INGRESS"
+  source_ranges = ["0.0.0.0/0"]
+  target_tags   = ["vault"]
+
+  allow {
+    protocol = "tcp"
+    ports    = ["443"]
+  }
+}
+{% endif %}
+
+{% if vault_nodes and ssh_source_ranges %}
+resource "google_compute_firewall" "vault_ssh_allowlist" {
+  project       = module.project.project_id
+  name          = "{{ network_name }}-vault-ssh-allowlist"
+  network       = module.network.network
+  direction     = "INGRESS"
+  source_ranges = {{ ssh_source_ranges | tojson }}
+  target_tags   = ["vault"]
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+}
+{% endif %}
+
+{% if vault_nodes and enable_iap_ssh %}
+resource "google_compute_firewall" "vault_ssh_iap" {
+  project       = module.project.project_id
+  name          = "{{ network_name }}-vault-ssh-iap"
+  network       = module.network.network
+  direction     = "INGRESS"
+  source_ranges = ["35.235.240.0/20"]
+  target_tags   = ["vault"]
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+}
+
+resource "google_project_iam_member" "vault_iap_compute_viewer" {
+  project = module.project.project_id
+  role    = "roles/compute.viewer"
+  member  = "serviceAccount:${var.deploy_service_account}"
+}
+
+{% for node in vault_nodes %}
+resource "google_iap_tunnel_instance_iam_member" "vault_iap_tunnel_{{ node.name | tf_id }}" {
+  depends_on = [module.{{ node.name | tf_id }}]
+  project    = module.project.project_id
+  zone       = {{ node.zone | tojson }}
+  instance   = {{ node.name | tojson }}
+  role       = "roles/iap.tunnelResourceAccessor"
+  member     = "serviceAccount:${var.deploy_service_account}"
+}
+{% endfor %}
+{% endif %}
+
+{% if vault_nodes and enable_oslogin %}
+{% for node in vault_nodes %}
+resource "google_compute_instance_iam_member" "vault_os_admin_login_{{ node.name | tf_id }}" {
+  depends_on    = [module.{{ node.name | tf_id }}]
+  project       = module.project.project_id
+  zone          = {{ node.zone | tojson }}
+  instance_name = {{ node.name | tojson }}
+  role          = "roles/compute.osAdminLogin"
+  member        = "serviceAccount:${var.deploy_service_account}"
+}
+{% endfor %}
+{% endif %}
+
+{% if vault_nodes %}
+resource "google_compute_firewall" "vault_raft_internal" {
+  project       = module.project.project_id
+  name          = "{{ network_name }}-vault-raft-internal"
+  network       = module.network.network
+  direction     = "INGRESS"
+  source_ranges = [{{ subnet_cidr | tojson }}]
+  target_tags   = ["vault"]
+
+  allow {
+    protocol = "tcp"
+    ports    = ["8200", "8201"]
+  }
+}
+{% endif %}
+
+{% for vm in spot_vms %}
+{% if vm.data_disk is defined %}
+module "data_disk_{{ vm.name | tf_id }}" {
+  source     = "../../modules/persistent_data_disk"
+  project_id = module.project.project_id
+  name       = {{ vm.data_disk.name | tojson }}
+  zone       = {{ vm.zone | tojson }}
+  size_gb    = {{ vm.data_disk.size_gb }}
+  disk_type  = {{ vm.data_disk.type | default('pd-balanced') | tojson }}
+  labels     = {{ vm.labels | default({}) | tojson }}
+}
+{% endif %}
+module "spot_{{ vm.name | tf_id }}" {
+  source          = "../../modules/spot_vm"
+  depends_on      = [module.project, module.network]
+  project_id      = module.project.project_id
+  name            = {{ vm.name | tojson }}
+  zone            = {{ vm.zone | tojson }}
+  machine_type    = {{ vm.machine_type | tojson }}
+  image           = {{ vm.image | default('projects/debian-cloud/global/images/family/debian-12') | tojson }}
+  network         = module.network.network
+  subnetwork      = module.network.subnet
+  labels          = {{ vm.labels | default({}) | tojson }}
+  network_tags    = {{ vm.network_tags | default([]) | tojson }}
+  public_ip       = {{ vm.public_ip | default(false) | tojson }}
+  ssh_public_key  = var.ssh_public_key
+  ssh_username    = var.ssh_username
+  enable_oslogin  = {{ vm.enable_oslogin | default(false) | tojson }}
+  provisioning_model = {{ vm.provisioning_model | default('SPOT') | tojson }}
+  deletion_protection = {{ vm.deletion_protection | default(false) | tojson }}
+{% if vm.data_disk is defined %}
+  data_disk_id = module.data_disk_{{ vm.name | tf_id }}.id
+  data_disk_device_name = {{ vm.data_disk.device_name | tojson }}
+{% endif %}
+{% if vm.max_run_duration_seconds is defined %}
+  max_run_duration_seconds = {{ vm.max_run_duration_seconds }}
+{% endif %}
+}
+
+{% endfor %}
+{% for vm in spot_vms if vm.enable_oslogin | default(false) %}
+# OS Login replaces metadata SSH keys; the deploy principal needs sudo on
+# exactly this VM to run Ansible.
+resource "google_compute_instance_iam_member" "spot_os_admin_login_{{ vm.name | tf_id }}" {
+  project       = module.project.project_id
+  zone          = {{ vm.zone | tojson }}
+  instance_name = module.spot_{{ vm.name | tf_id }}.name
+  role          = "roles/compute.osAdminLogin"
+  member        = "serviceAccount:${var.deploy_service_account}"
+}
+
+{% endfor %}
+{% for vm in spot_vms if enable_iap_ssh %}
+resource "google_iap_tunnel_instance_iam_member" "spot_iap_tunnel_{{ vm.name | tf_id }}" {
+  depends_on = [module.spot_{{ vm.name | tf_id }}]
+  project    = module.project.project_id
+  zone       = {{ vm.zone | tojson }}
+  instance   = {{ vm.name | tojson }}
+  role       = "roles/iap.tunnelResourceAccessor"
+  member     = "serviceAccount:${var.deploy_service_account}"
+}
+
+{% endfor %}
+{% for vm in spot_vms if vm.public_tcp_ports | default([]) %}
+# Public service ports of this VM only. SSH stays on the spot_ssh rule below.
+resource "google_compute_firewall" "spot_public_tcp_{{ vm.name | tf_id }}" {
+  project       = module.project.project_id
+  name          = "{{ vm.name }}-public-tcp"
+  network       = module.network.network
+  direction     = "INGRESS"
+  source_ranges = ["0.0.0.0/0"]
+  target_tags   = {{ vm.network_tags | tojson }}
+
+  allow {
+    protocol = "tcp"
+    ports    = {{ vm.public_tcp_ports | map("string") | list | tojson }}
+  }
+}
+
+{% endfor %}
+{% for vm in spot_vms if vm.private_tcp_ports | default([]) %}
+# Service traffic for this VM is accepted only from declared source tags.
+resource "google_compute_firewall" "spot_private_tcp_{{ vm.name | tf_id }}" {
+  project     = module.project.project_id
+  name        = "{{ vm.name }}-private-tcp"
+  network     = module.network.network
+  direction   = "INGRESS"
+  source_tags = {{ vm.private_source_tags | tojson }}
+  target_tags = {{ vm.private_target_tags | tojson }}
+
+  allow {
+    protocol = "tcp"
+    ports    = {{ vm.private_tcp_ports | map("string") | list | tojson }}
+  }
+}
+
+{% endfor %}
+{% if spot_vms and spot_ssh_source_ranges %}
+resource "google_compute_firewall" "spot_ssh" {
+  project       = module.project.project_id
+  name          = "{{ network_name }}-spot-ssh"
+  network       = module.network.network
+  direction     = "INGRESS"
+  source_ranges = {{ spot_ssh_source_ranges | tojson }}
+  target_tags   = {{ spot_network_tags | tojson }}
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+}
+{% endif %}
+{% if enable_cloud_run %}
+{% for service in cloud_run_services %}
+module "{{ service.module_name }}" {
+  source          = "../../modules/cloud_run"
+  depends_on      = [module.project]
+  project_id      = module.project.project_id
+  region          = {{ service.region | default('asia-east1') | tojson }}
+  service_name    = {{ service.name | tojson }}
+  image           = {{ service.image | tojson }}
+  service_account = var.deploy_service_account
+}
+
+{% endfor %}
+{% endif %}
+
+output "platform_runtime" {
+  description = "Runtime facts consumed by the CMDB renderer."
+  value = {
+    project_id        = module.project.project_id
+    project_number    = module.project.project_number
+    cloud_run_uri     = {{ "module." ~ cloud_run_services[0].module_name ~ ".uri" if enable_cloud_run else "null" }}
+    oidc_provider     = var.workload_identity_provider
+    deploy_account    = var.deploy_service_account
+    vault_private_ips = {
+{% for node in vault_nodes %}
+      {{ node.name | tojson }} = module.{{ node.name | tf_id }}.private_ip
+{% endfor %}
+    }
+    vault_public_ips = {
+{% for node in vault_nodes %}
+      {{ node.name | tojson }} = module.{{ node.name | tf_id }}.public_ip
+{% endfor %}
+    }
+    spot_instances = {
+{% for vm in spot_vms %}
+      {{ vm.name | tojson }} = {
+        name              = module.spot_{{ vm.name | tf_id }}.name
+        public_ip         = module.spot_{{ vm.name | tf_id }}.public_ip
+        private_ip        = module.spot_{{ vm.name | tf_id }}.private_ip
+        self_link         = module.spot_{{ vm.name | tf_id }}.self_link
+        zone              = module.spot_{{ vm.name | tf_id }}.zone
+        project_id        = module.spot_{{ vm.name | tf_id }}.project_id
+        provisioning_model = module.spot_{{ vm.name | tf_id }}.provisioning_model
+{% if vm.data_disk is defined %}
+        data_disk_id = module.data_disk_{{ vm.name | tf_id }}.id
+        data_disk_device_name = {{ vm.data_disk.device_name | tojson }}
+        data_mount_path = {{ vm.data_disk.mount_path | tojson }}
+{% endif %}
+      }
+{% endfor %}
+    }
+    cloud_run_services = {
+{% for service in cloud_run_services %}
+      {{ service.name | tojson }} = module.{{ service.module_name }}.uri
+{% endfor %}
+    }
+  }
+}

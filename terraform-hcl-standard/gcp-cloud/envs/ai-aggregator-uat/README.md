@@ -1,11 +1,9 @@
 # AI Aggregator UAT (GCP Spot)
 
-This directory is a generated Terraform root. Render it from
-`config/resources/ai-aggregator-vps-uat.yaml` with
-`scripts/generate_ai_aggregator.py` and inject `GCP_PROJECT_ID`, the operator
-SSH public key, and fixed `/32` allowlists at runtime. Generated state,
-inventory, and variables are intentionally ignored.
-
-The contract expands one Gateway and four CPA nodes as explicit Spot module
-blocks. Every node receives a 60-minute local shutdown guard and all CPA
-service ports are limited to the VPC gateway tag.
+This is a generated Terraform root. The environment declaration lives in
+GitOps at `resources/xworktech.com/uat/gcp/ai-aggregator-vps-uat.yaml`.
+Render it with the shared `gcp-cloud/scripts/generate.py` using `--resources`
+and `--workdir envs/ai-aggregator-uat`. Generated state, inventory, and
+variables are ignored. The shared renderer expands one gateway and four CPA
+nodes into explicit Spot modules, with a 3600-second maximum runtime and
+CPA service ports reachable only from gateway-tagged VMs.

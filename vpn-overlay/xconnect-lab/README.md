@@ -3,6 +3,12 @@
 This root creates a disposable, self-hosted Linux data-plane lab with two
 symmetrical nodes:
 
+> This is a disposable protocol/transport lab only. It is not the source of
+> truth for the persistent `net_security_vault`, `net_uat`, or
+> `net_prod_dedicated` networks. Their non-sensitive topology belongs in
+> GitOps; secrets are read from Vault; persistent node configuration is done by
+> Ansible. See `../../docs/howto/xconnect-zero-three-network-boundaries.md`.
+
 | Node | Role | Runtime baseline |
 |---|---|---|
 | XConnect-Gateway | `relay/service` (`role=relay`) | Independent Linux node, external WireGuard + external Xray, forwarding and relay health |

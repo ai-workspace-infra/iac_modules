@@ -43,8 +43,8 @@ resource "google_compute_instance_group" "placeholder" {
 }
 
 resource "google_compute_health_check" "tcp" {
-  name               = "${var.name}-hc"
-  project            = var.project_id
+  name    = "${var.name}-hc"
+  project = var.project_id
   tcp_health_check {
     port = var.port
   }

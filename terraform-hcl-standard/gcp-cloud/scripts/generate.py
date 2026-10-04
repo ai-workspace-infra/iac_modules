@@ -1,0 +1,631 @@
+#!/usr/bin/env python3
+"""Render GCP GitOps resource declarations into Terraform and CMDB artifacts."""
+
+import argparse
+import ipaddress
+import json
+import os
+import re
+import subprocess
+from pathlib import Path
+
+import yaml
+from jinja2 import Environment, FileSystemLoader, StrictUndefined
+
+ROOT = Path(__file__).resolve().parents[1]
+TEMPLATES = ROOT / "templates"
+GITOPS_ROOT = Path(os.environ.get("GITOPS_ROOT", ROOT.parents[2] / "gitops"))
+DEFAULT_RESOURCES = GITOPS_ROOT / "resources" / "xworktech.com" / "uat" / "gcp" / "open-platform-uat.yaml"
+DEFAULT_WORKDIR = ROOT / "envs" / "uat"
+
+
+def tf_id(value):
+    return re.sub(r"[^0-9A-Za-z_]", "_", str(value))
+
+
+def load_resources(path):
+    with Path(path).open(encoding="utf-8") as handle:
+        return yaml.safe_load(handle) or {}
+
+
+def normalize_resources(document):
+    """Normalize the legacy platform manifest and namespace declarations."""
+    if "global" in document:
+        global_config = dict(document["global"])
+        cloud_run_services = list(document.get("cloud_run_services", []))
+        legacy_cloud_run = bool(global_config.get("cloud_run_service_name"))
+        if legacy_cloud_run:
+            cloud_run_services.insert(
+                0,
+                {
+                    "name": global_config["cloud_run_service_name"],
+                    "image": global_config.get("cloud_run_image"),
+                    "region": global_config.get("region"),
+                    "module_name": "cloud_run",
+                },
+            )
+        for index, service in enumerate(cloud_run_services):
+            service.setdefault("region", global_config.get("region"))
+            service["module_name"] = (
+                "cloud_run" if legacy_cloud_run and index == 0
+                else f"cloud_run_{tf_id(service['name'])}"
+            )
+        return (
+            global_config,
+            list(document.get("vault_nodes", [])),
+            [*document.get("spot_vms", []), *document.get("service_vms", [])],
+            cloud_run_services,
+            legacy_cloud_run,
+        )
+
+    if document.get("kind") != "GCPWorkloadNamespace":
+        raise SystemExit("manifest must declare `global` or kind GCPWorkloadNamespace")
+    metadata = document.get("metadata", {})
+    spec = document.get("spec", {})
+    environment = metadata.get("environment")
+    if environment not in {"uat", "prod", "shared"}:
+        raise SystemExit("metadata.environment must be uat, prod, or shared")
+    if metadata.get("provider") != "gcp":
+        raise SystemExit("metadata.provider must be gcp")
+
+    resources = spec.get("resources", {})
+    global_config = {
+        "environment": environment,
+        "bootstrap_project_id": spec.get("bootstrap_project_id", ""),
+        "project_id": spec.get("project_id"),
+        "project_name": spec.get("project_name", ""),
+        "organization_id": spec.get("organization_id"),
+        "region": spec.get("region"),
+        "network_name": spec.get("network_name"),
+        "subnet_cidr": spec.get("subnet_cidr"),
+        "enable_cloud_nat": spec.get("enable_cloud_nat", True),
+        "enable_iap_ssh": spec.get("enable_iap_ssh", False),
+        "enable_oslogin": spec.get("enable_oslogin", spec.get("enable_iap_ssh", False)),
+        "ssh_access_mode": spec.get("ssh_access_mode", "legacy"),
+        "xconnect_mode": spec.get("xconnect_mode", "gateway"),
+        "ssh_source_ranges": spec.get("ssh_source_ranges", []),
+        "external_ip_allowed_instances": spec.get("external_ip_allowed_instances", []),
+        "manage_external_ip_policy": spec.get("manage_external_ip_policy", True),
+        "spot_ssh_source_ranges": spec.get("spot_ssh_source_ranges", []),
+        "spot_network_tags": spec.get("spot_network_tags", []),
+        "ssh_username": spec.get("ssh_username", "github-actions"),
+        "artifact_registry_location": spec.get("artifact_registry_location"),
+        "artifact_registry_id": spec.get("artifact_registry_id"),
+    }
+    required_spec = (
+        "gcp_account_id",
+        "project_id",
+        "organization_id",
+        "region",
+        "workspace",
+        "state_namespace",
+        "network_name",
+        "subnet_cidr",
+    )
+    missing = [key for key in required_spec if not spec.get(key)]
+    if missing:
+        raise SystemExit(f"GCPWorkloadNamespace spec is missing: {', '.join(missing)}")
+    if not isinstance(global_config["enable_iap_ssh"], bool):
+        raise SystemExit("spec.enable_iap_ssh must be a boolean")
+    if not isinstance(global_config["enable_oslogin"], bool):
+        raise SystemExit("spec.enable_oslogin must be a boolean")
+    allowed_instances = global_config["external_ip_allowed_instances"]
+    if not isinstance(allowed_instances, list) or any(
+        not isinstance(item, dict)
+        or not re.fullmatch(r"[a-z][a-z0-9-]{0,61}[a-z0-9]", str(item.get("name", "")))
+        or not re.fullmatch(r"[a-z]+-[a-z0-9]+-[a-z]", str(item.get("zone", "")))
+        for item in allowed_instances
+    ):
+        raise SystemExit("spec.external_ip_allowed_instances must contain GCP instance names and zones")
+    if len({(item["name"], item["zone"]) for item in allowed_instances}) != len(allowed_instances):
+        raise SystemExit("spec.external_ip_allowed_instances must not contain duplicates")
+    if global_config["xconnect_mode"] not in {"gateway", "member"}:
+        raise SystemExit("spec.xconnect_mode must be gateway or member")
+    name = metadata.get("name")
+    if spec["workspace"] != name or spec["state_namespace"] != name:
+        raise SystemExit("metadata.name, spec.workspace, and spec.state_namespace must match")
+    state_key = spec.get("state", {}).get("key")
+    # The logical state project is independent from the concrete GCP project
+    # that owns the resources.  This lets the platform contract use the same
+    # five-level key as AWS/Akamai while retaining the real GCP project ID for
+    # Terraform resources and credentials.
+    state_project = spec.get("state_project", spec["project_id"])
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", str(state_project)):
+        raise SystemExit("spec.state_project must contain only letters, digits, dot, underscore, or hyphen")
+    expected_state_key = (
+        f"terraform/{environment}/{state_project}/gcp-cloud/"
+        f"{spec['gcp_account_id']}/{name}/terraform.tfstate"
+    )
+    if state_key != expected_state_key:
+        raise SystemExit(f"state.key must be {expected_state_key}")
+    cloud_run_services = [dict(item) for item in resources.get("cloud_run_services", [])]
+    for service in cloud_run_services:
+        service.setdefault("region", global_config.get("region"))
+        service["module_name"] = f"cloud_run_{tf_id(service['name'])}"
+    # Retain legacy spot_* Terraform addresses while accepting durable service
+    # VMs in the same renderer. Renaming module addresses would replace hosts.
+    spot_vms = [dict(item) for item in [*resources.get("spot_vms", []), *resources.get("service_vms", [])]]
+    vault_nodes = [dict(item) for item in resources.get("vault_nodes", [])]
+    if not spot_vms and not cloud_run_services and not vault_nodes:
+        raise SystemExit("GCPWorkloadNamespace must declare at least one supported resource")
+    if vault_nodes:
+        roles = [item.get("xconnect_role") for item in vault_nodes]
+        if any(role not in {"gateway", "one"} for role in roles):
+            raise SystemExit("vault_nodes xconnect_role must be gateway or one")
+        gateway_count = roles.count("gateway")
+        if global_config["xconnect_mode"] == "gateway" and gateway_count != 1:
+            raise SystemExit("gateway xconnect_mode requires exactly one gateway")
+        if global_config["xconnect_mode"] == "member" and (gateway_count != 0 or not roles):
+            raise SystemExit("member xconnect_mode requires one or more One members and no gateway")
+        ssh_mode = global_config["ssh_access_mode"]
+        ssh_sources = global_config["ssh_source_ranges"]
+        if not isinstance(ssh_sources, list):
+            raise SystemExit("ssh_source_ranges must be a list of IPv4 /32 CIDRs")
+        if ssh_mode == "bootstrap-public":
+            if not ssh_sources or global_config["enable_iap_ssh"]:
+                raise SystemExit("bootstrap-public requires a /32 SSH allowlist and disables IAP")
+        elif ssh_mode == "xconnect-zero":
+            if ssh_sources or global_config["enable_iap_ssh"]:
+                raise SystemExit("xconnect-zero requires no public SSH allowlist and disables IAP")
+        elif ssh_mode == "legacy":
+            if not ssh_sources and not global_config["enable_iap_ssh"]:
+                raise SystemExit("vault_nodes require ssh_source_ranges or enable_iap_ssh: true")
+        else:
+            raise SystemExit("ssh_access_mode must be bootstrap-public or xconnect-zero")
+        for cidr in global_config["ssh_source_ranges"]:
+            try:
+                network = ipaddress.ip_network(cidr, strict=False)
+            except ValueError as error:
+                raise SystemExit(f"invalid SSH source CIDR {cidr}: {error}") from error
+            if network.version != 4 or network.prefixlen != 32:
+                raise SystemExit("ssh_source_ranges must contain individual IPv4 addresses as /32 CIDRs")
+    for vm in spot_vms:
+        required = ("name", "zone", "machine_type")
+        missing = [key for key in required if not vm.get(key)]
+        if missing:
+            raise SystemExit(f"Spot VM is missing required fields: {', '.join(missing)}")
+        if not str(vm["zone"]).startswith(f"{global_config['region']}-"):
+            raise SystemExit(f"Spot VM zone {vm['zone']} must belong to region {global_config['region']}")
+        if "max_run_duration_seconds" in vm:
+            duration = int(vm["max_run_duration_seconds"])
+            if duration < 60:
+                raise SystemExit("Spot VM max_run_duration_seconds must be at least 60")
+            vm["max_run_duration_seconds"] = duration
+        if not isinstance(vm.get("enable_oslogin", False), bool):
+            raise SystemExit("Spot VM enable_oslogin must be a boolean")
+        model = vm.get("provisioning_model", "SPOT")
+        if model not in {"SPOT", "STANDARD"}:
+            raise SystemExit("VM provisioning_model must be SPOT or STANDARD")
+        if not isinstance(vm.get("deletion_protection", False), bool):
+            raise SystemExit("VM deletion_protection must be a boolean")
+        data_disk = vm.get("data_disk")
+        if data_disk is not None:
+            if not isinstance(data_disk, dict):
+                raise SystemExit("VM data_disk must be an object")
+            if not re.fullmatch(r"[a-z][a-z0-9-]{0,61}[a-z0-9]", str(data_disk.get("name", ""))):
+                raise SystemExit("VM data_disk.name must be a GCP disk name")
+            if type(data_disk.get("size_gb")) is not int or data_disk["size_gb"] < 50:
+                raise SystemExit("VM data_disk.size_gb must be at least 50")
+            if data_disk.get("type", "pd-balanced") not in {"pd-balanced", "pd-ssd", "pd-standard"}:
+                raise SystemExit("VM data_disk.type must be a persistent disk type")
+            if data_disk.get("mount_path") != "/data":
+                raise SystemExit("VM data_disk.mount_path must be /data")
+            if not re.fullmatch(r"[a-z][a-z0-9-]{0,61}[a-z0-9]", str(data_disk.get("device_name", ""))):
+                raise SystemExit("VM data_disk.device_name must be a stable GCP device name")
+        if model == "STANDARD" and (not vm.get("deletion_protection") or data_disk is None):
+            raise SystemExit("STANDARD service VMs require deletion_protection and data_disk")
+        if model == "STANDARD" and "max_run_duration_seconds" in vm:
+            raise SystemExit("STANDARD service VMs must not have max_run_duration_seconds")
+        if vm.get("public_ip") and not global_config.get("spot_ssh_source_ranges"):
+            raise SystemExit("public Spot VMs require spot_ssh_source_ranges")
+        if not isinstance(vm.get("inventory_groups", []), list) or any(
+            not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", group)
+            for group in vm.get("inventory_groups", [])
+        ):
+            raise SystemExit("Spot VM inventory_groups must contain Ansible group names")
+        validate_spot_service_declaration(vm)
+    if resources.get("service_vms") and any(
+        vm.get("provisioning_model") != "STANDARD" for vm in resources["service_vms"]
+    ):
+        raise SystemExit("service_vms must explicitly use STANDARD provisioning")
+    if spec.get("resource", {}).get("lifecycle") == "persistent" and not resources.get("service_vms"):
+        raise SystemExit("persistent workload namespaces require service_vms")
+    return (
+        global_config,
+        vault_nodes,
+        spot_vms,
+        cloud_run_services,
+        False,
+    )
+
+
+DNS_NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+")
+HOST_VAR_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def spot_service_domains(vm):
+    domains = (vm.get("host_vars") or {}).get("service_domains") or []
+    if isinstance(domains, str):
+        domains = [item.strip() for item in domains.split(",")]
+    return [str(item).strip() for item in domains if str(item).strip()]
+
+
+def spot_inventory_name(vm):
+    """CMDB / inventory key of a Spot VM.
+
+    A VM that serves public names is keyed by its first service domain, the
+    same contract as the AWS and Akamai adapters: the deploy jobs use the key
+    as the node's public hostname. A VM without service domains keeps its VM
+    name, so existing declarations are unchanged.
+    """
+    domains = spot_service_domains(vm)
+    return domains[0] if domains else vm["name"]
+
+
+def validate_spot_service_declaration(vm):
+    ports = vm.get("public_tcp_ports", [])
+    if not isinstance(ports, list) or any(
+        isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535 for port in ports
+    ):
+        raise SystemExit(f"Spot VM {vm['name']} public_tcp_ports must be a list of TCP port numbers")
+    if 22 in ports:
+        raise SystemExit(
+            f"Spot VM {vm['name']} public_tcp_ports must not contain 22; SSH is governed by spot_ssh_source_ranges"
+        )
+    if len(set(ports)) != len(ports):
+        raise SystemExit(f"Spot VM {vm['name']} public_tcp_ports contains a duplicate port")
+    if ports and not vm.get("public_ip"):
+        raise SystemExit(f"Spot VM {vm['name']} public_tcp_ports requires public_ip: true")
+    if ports and not vm.get("network_tags"):
+        raise SystemExit(f"Spot VM {vm['name']} public_tcp_ports requires network_tags for the firewall target")
+    private_ports = vm.get("private_tcp_ports", [])
+    source_tags = vm.get("private_source_tags", [])
+    target_tags = vm.get("private_target_tags", [])
+    if not isinstance(private_ports, list) or any(
+        isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535
+        for port in private_ports
+    ) or len(set(private_ports)) != len(private_ports) or 22 in private_ports:
+        raise SystemExit(f"Spot VM {vm['name']} private_tcp_ports must contain unique non-SSH TCP ports")
+    if not isinstance(source_tags, list) or any(
+        not isinstance(tag, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,62}", tag)
+        for tag in source_tags
+    ) or len(set(source_tags)) != len(source_tags):
+        raise SystemExit(f"Spot VM {vm['name']} private_source_tags must contain unique GCP network tags")
+    if bool(private_ports) != bool(source_tags):
+        raise SystemExit(f"Spot VM {vm['name']} private TCP ports require source tags and vice versa")
+    if private_ports and not vm.get("network_tags"):
+        raise SystemExit(f"Spot VM {vm['name']} private_tcp_ports requires network_tags for the firewall target")
+    if not isinstance(target_tags, list) or any(
+        not isinstance(tag, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,62}", tag)
+        for tag in target_tags
+    ) or len(set(target_tags)) != len(target_tags):
+        raise SystemExit(f"Spot VM {vm['name']} private_target_tags must contain unique GCP network tags")
+    if private_ports and (not target_tags or not set(target_tags).issubset(vm["network_tags"])):
+        raise SystemExit(f"Spot VM {vm['name']} private_target_tags must be declared on the VM")
+    if target_tags and not private_ports:
+        raise SystemExit(f"Spot VM {vm['name']} private_target_tags requires private_tcp_ports")
+    host_vars = vm.get("host_vars", {})
+    if not isinstance(host_vars, dict) or any(
+        not isinstance(key, str) or not HOST_VAR_NAME.fullmatch(key) for key in host_vars
+    ):
+        raise SystemExit(f"Spot VM {vm['name']} host_vars must be a mapping of Ansible variable names")
+    for value in host_vars.values():
+        if isinstance(value, dict) or '"' in str(value) or "\n" in str(value):
+            raise SystemExit(f"Spot VM {vm['name']} host_vars values must be scalars or lists without quotes")
+    domains = spot_service_domains(vm)
+    if any(not DNS_NAME.fullmatch(domain) for domain in domains):
+        raise SystemExit(f"Spot VM {vm['name']} host_vars.service_domains must contain DNS names")
+    if domains and not vm.get("public_ip"):
+        raise SystemExit(f"Spot VM {vm['name']} declares service_domains and therefore requires public_ip: true")
+    if not isinstance(vm.get("tags", []), list):
+        raise SystemExit(f"Spot VM {vm['name']} tags must be a list")
+
+
+def render(args):
+    document = load_resources(args.resources)
+    global_config, declared_nodes, spot_vms, cloud_run_services, legacy_cloud_run = normalize_resources(document)
+    nodes = []
+    for node in declared_nodes:
+        item = dict(node)
+        item.setdefault("xconnect_role", "one")
+        item.setdefault("public_ip", False)
+        item.setdefault("machine_type", global_config.get("vault_machine_type"))
+        item.setdefault("image", global_config.get("vault_image"))
+        nodes.append(item)
+
+    # Optional platform components are rendered only when the manifest
+    # declares them, so a minimal manifest (for example a Spot VM validation
+    # stack) does not plan the full platform.
+    enable_network = bool(global_config.get("network_name"))
+    enable_artifact_registry = bool(global_config.get("artifact_registry_id"))
+    enable_cloud_run = bool(cloud_run_services)
+    if (nodes or spot_vms) and not enable_network:
+        raise SystemExit("vault_nodes/spot_vms require a declared network_name and subnet_cidr")
+    spot_ssh_sources = global_config.get("spot_ssh_source_ranges", [])
+    if not isinstance(spot_ssh_sources, list):
+        raise SystemExit("spot_ssh_source_ranges must be a list of IPv4 CIDRs")
+    for source in spot_ssh_sources:
+        try:
+            network = ipaddress.ip_network(source, strict=False)
+        except ValueError as error:
+            raise SystemExit(f"invalid Spot SSH source CIDR {source}: {error}") from error
+        if network.version != 4:
+            raise SystemExit("spot_ssh_source_ranges must contain IPv4 CIDRs")
+    if any(vm.get("public_ip") for vm in spot_vms) and not spot_ssh_sources:
+        raise SystemExit("public Spot VMs require spot_ssh_source_ranges")
+    if any(not vm.get("public_ip", False) for vm in spot_vms) and not global_config.get("enable_iap_ssh", False):
+        raise SystemExit("private Spot VMs require enable_iap_ssh: true for Ansible deployment")
+    spot_network_tags = global_config.get("spot_network_tags", [])
+    if not isinstance(spot_network_tags, list) or any(
+        not isinstance(tag, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,62}", tag)
+        for tag in spot_network_tags
+    ):
+        raise SystemExit("spot_network_tags must contain GCP network tags")
+    if any(vm.get("public_ip") for vm in spot_vms) and not spot_network_tags:
+        raise SystemExit("public Spot VMs require spot_network_tags for the SSH firewall")
+    for vm in spot_vms:
+        validate_spot_service_declaration(vm)
+        if vm.get("public_ip") and not set(spot_network_tags).intersection(vm.get("network_tags", [])):
+            raise SystemExit(f"public Spot VM {vm['name']} must include a declared spot_network_tag")
+    inventory_names = [spot_inventory_name(vm) for vm in spot_vms]
+    if len(set(inventory_names)) != len(inventory_names):
+        raise SystemExit("Spot VMs must not share an inventory name (first service domain or VM name)")
+    if spot_vms and global_config.get("enable_iap_ssh"):
+        spot_ssh_sources = list(dict.fromkeys([*spot_ssh_sources, "35.235.240.0/20"]))
+    if enable_network and not global_config.get("subnet_cidr"):
+        raise SystemExit("network_name requires subnet_cidr")
+    if nodes and global_config.get("ssh_source_ranges") and not isinstance(global_config["ssh_source_ranges"], list):
+        raise SystemExit("ssh_source_ranges must be a list of IPv4 CIDRs")
+    if enable_artifact_registry and not global_config.get("artifact_registry_location"):
+        raise SystemExit("global.artifact_registry_id requires global.artifact_registry_location")
+    for service in cloud_run_services:
+        if not service.get("name") or not service.get("image"):
+            raise SystemExit("each cloud_run_services item requires name and image")
+    module_names = [service["module_name"] for service in cloud_run_services]
+    if len(module_names) != len(set(module_names)):
+        raise SystemExit("Cloud Run service names must render to unique Terraform module names")
+    spot_module_names = [f"spot_{tf_id(vm['name'])}" for vm in spot_vms]
+    if len(spot_module_names) != len(set(spot_module_names)):
+        raise SystemExit("Spot VM names must render to unique Terraform module names")
+    project_id = global_config.get("project_id")
+    if not project_id:
+        raise SystemExit("manifest requires project_id")
+
+    workdir = Path(args.workdir)
+    workdir.mkdir(parents=True, exist_ok=True)
+    # Remove the legacy generated provider filename so old renders cannot
+    # coexist with the platform provider and create duplicate configurations.
+    stale_provider = workdir / "provider.tf"
+    if stale_provider.exists():
+        stale_provider.unlink()
+    env = Environment(
+        loader=FileSystemLoader(str(TEMPLATES)),
+        undefined=StrictUndefined,
+        trim_blocks=True,
+        lstrip_blocks=True,
+        keep_trailing_newline=True,
+    )
+    env.filters["tf_id"] = tf_id
+    content = env.get_template("open-platform.tf.j2").render(
+        environment=global_config["environment"],
+        vault_nodes=nodes,
+        external_ip_allowed_instances=global_config.get("external_ip_allowed_instances", []),
+        manage_external_ip_policy=global_config.get("manage_external_ip_policy", True),
+        spot_vms=spot_vms,
+        cloud_run_services=cloud_run_services,
+        vault_machine_type=global_config.get("vault_machine_type", ""),
+        vault_image=global_config.get("vault_image", ""),
+        enable_network=enable_network,
+        enable_artifact_registry=enable_artifact_registry,
+        enable_cloud_run=enable_cloud_run,
+        legacy_cloud_run=legacy_cloud_run,
+        network_name=global_config.get("network_name", ""),
+        subnet_cidr=global_config.get("subnet_cidr", ""),
+        enable_iap_ssh=global_config.get("enable_iap_ssh", False),
+        enable_oslogin=global_config.get("enable_oslogin", global_config.get("enable_iap_ssh", False)),
+        ssh_source_ranges=global_config.get("ssh_source_ranges", []),
+        spot_ssh_source_ranges=spot_ssh_sources,
+        spot_network_tags=spot_network_tags,
+    )
+    generated = workdir / "generated_platform.tf"
+    generated.write_text(content, encoding="utf-8")
+    subprocess.run(["terraform", "fmt", str(generated)], check=True, stdout=subprocess.DEVNULL)
+    (workdir / "backend.tf").write_text(
+        (TEMPLATES / "backend.tf").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    for name in ("platform-provider.tf", "variables.tf"):
+        (workdir / name).write_text((TEMPLATES / name).read_text(encoding="utf-8"), encoding="utf-8")
+
+    # Billing is intentionally absent from YAML and generated tfvars.
+    declared = {
+        "bootstrap_project_id",
+        "project_id",
+        "project_name",
+        "organization_id",
+        "region",
+        "github_owner",
+        "github_repository",
+        "network_name",
+        "subnet_cidr",
+        "enable_cloud_nat",
+        "ssh_source_ranges",
+        "ssh_username",
+        "artifact_registry_location",
+        "artifact_registry_id",
+        "cloud_run_service_name",
+        "cloud_run_image",
+    }
+    tfvars = {key: value for key, value in global_config.items() if key in declared}
+    (workdir / "terraform.auto.tfvars.json").write_text(
+        json.dumps(tfvars, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    (workdir / "resources_manifest.json").write_text(
+        json.dumps(
+            {
+                "environment": global_config["environment"],
+                "project_id": project_id,
+                "vault_nodes": nodes,
+                "spot_vms": spot_vms,
+                "cloud_run_services": cloud_run_services,
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    print(f"rendered {args.resources} -> {workdir}")
+
+
+def oslogin_username():
+    """Return the deploy principal's OS Login POSIX user from the environment.
+
+    The deployer registers its SSH key in its own OS Login profile before
+    rendering the inventory and exports the resolved username; Terraform
+    state does not know it.
+    """
+    username = os.environ.get("GCP_OSLOGIN_USERNAME", "").strip()
+    if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", username):
+        raise SystemExit("OS Login Spot VMs require GCP_OSLOGIN_USERNAME from the deploy principal's profile")
+    return username
+
+
+def inventory(args):
+    document = load_resources(args.resources)
+    global_config, declared_nodes, spot_vms, cloud_run_services, _ = normalize_resources(document)
+    workdir = Path(args.workdir)
+    raw = subprocess.check_output(
+        ["terraform", f"-chdir={workdir}", "output", "-json", "platform_runtime"],
+        text=True,
+    )
+    runtime = json.loads(raw)
+    environment = global_config["environment"]
+    cmdb = {
+        "environment": environment,
+        "project_id": runtime.get("project_id"),
+        "project_number": runtime.get("project_number"),
+        "cloud_run_uri": runtime.get("cloud_run_uri"),
+        "oidc_provider": runtime.get("oidc_provider"),
+        "deploy_account": runtime.get("deploy_account"),
+        "cloud_run_services": runtime.get("cloud_run_services", {}),
+        "spot_instances": runtime.get("spot_instances", {}),
+        "vault_nodes": [],
+        "declared_cloud_run_services": [item["name"] for item in cloud_run_services],
+        "declared_spot_vms": [item["name"] for item in spot_vms],
+    }
+    for node in declared_nodes:
+        private_ip = runtime.get("vault_private_ips", {}).get(node["name"])
+        public_ip = runtime.get("vault_public_ips", {}).get(node["name"])
+        if node.get("public_ip") and not public_ip:
+            raise SystemExit(f"Vault VM {node['name']} has no public IP for deployment")
+        ansible_host = public_ip or private_ip
+        if not ansible_host:
+            raise SystemExit(f"Vault VM {node['name']} has no reachable IP for deployment")
+        cmdb["vault_nodes"].append({
+            "name": node["name"],
+            "zone": node["zone"],
+            "private_ip": private_ip,
+            "public_ip": public_ip,
+            "ansible_host": ansible_host,
+            "ansible_user": global_config.get("ssh_username", "github-actions"),
+        })
+    for vm in spot_vms:
+        facts = runtime.get("spot_instances", {}).get(vm["name"], {})
+        public_ip = facts.get("public_ip")
+        private_ip = facts.get("private_ip")
+        address = public_ip if vm.get("public_ip") else private_ip
+        if not address:
+            address_type = "public IP" if vm.get("public_ip") else "private IP"
+            raise SystemExit(f"Spot VM {vm['name']} has no {address_type} for deployment")
+        host_vars = dict(vm.get("host_vars") or {})
+        host_vars.setdefault("node_id", vm.get("node_id") or vm["name"])
+        host_vars.setdefault("cloud_provider", "gcp-cloud")
+        host_vars.setdefault("cloud_region", global_config.get("region", ""))
+        for key in ("location", "node_label"):
+            if vm.get(key):
+                host_vars.setdefault(key, vm[key])
+        inventory_name = spot_inventory_name(vm)
+        if inventory_name in cmdb:
+            raise SystemExit(f"Spot VM inventory name {inventory_name} collides with a CMDB platform key")
+        cmdb[inventory_name] = {
+            "name": vm["name"],
+            "fqdn": inventory_name,
+            "ip": address,
+            "private_ip": private_ip,
+            "public_ip": public_ip,
+            "zone": facts.get("zone", vm["zone"]),
+            "ansible_user": (
+                oslogin_username()
+                if vm.get("enable_oslogin")
+                else global_config.get("ssh_username", "github-actions")
+            ),
+            "groups": vm.get("inventory_groups", []),
+            "provider": "gcp-cloud",
+            "provisioning_model": facts.get("provisioning_model"),
+            "iap_tunnel": not vm.get("public_ip") and global_config.get("enable_iap_ssh", False),
+            "node_id": host_vars["node_id"],
+            "ansible_port": 22,
+            "tags": vm.get("tags", []) or [],
+            "host_vars": host_vars if vm.get("host_vars") else {},
+        }
+        if vm.get("data_disk"):
+            disk_id = facts.get("data_disk_id")
+            if not disk_id:
+                raise SystemExit(f"VM {vm['name']} has no provisioned data disk in Terraform output")
+            cmdb[inventory_name]["data_disk"] = {
+                "id": disk_id,
+                "device_name": facts.get("data_disk_device_name"),
+                "mount_path": vm["data_disk"]["mount_path"],
+            }
+    (workdir / "cmdb.json").write_text(json.dumps(cmdb, indent=2) + "\n", encoding="utf-8")
+    lines = ["[vault]"]
+    lines.extend(
+        f"{node['name']} ansible_host={node['ansible_host']} ansible_user={node['ansible_user']}"
+        for node in cmdb["vault_nodes"]
+    )
+    groups = sorted({group for vm in spot_vms for group in vm.get("inventory_groups", [])})
+    private_key_file = os.environ.get("GCP_SSH_PRIVATE_KEY_FILE", "").strip()
+    for group in groups:
+        lines.append(f"[{group}]")
+        for vm in spot_vms:
+            inventory_name = spot_inventory_name(vm)
+            if inventory_name not in cmdb or group not in cmdb[inventory_name]["groups"]:
+                continue
+            item = cmdb[inventory_name]
+            line = f"{inventory_name} ansible_host={item['ip']} ansible_user={item['ansible_user']}"
+            # Same rendering as the AWS adapter: declared host_vars become
+            # inline inventory variables for the playbooks.
+            for key, value in item["host_vars"].items():
+                line += f' {key}="{value}"'
+            if item.get("iap_tunnel"):
+                if not private_key_file:
+                    raise SystemExit("GCP_SSH_PRIVATE_KEY_FILE is required for private Spot VM inventory")
+                project_id = cmdb.get("project_id")
+                proxy = (
+                    f'gcloud compute start-iap-tunnel {vm["name"]} 22 '
+                    f'--listen-on-stdin --project={project_id} --zone={item["zone"]}'
+                )
+                line += (
+                    f' ansible_ssh_private_key_file={private_key_file}'
+                    f' ansible_ssh_common_args=\'-o StrictHostKeyChecking=no '
+                    f'-o UserKnownHostsFile=/dev/null -o ProxyCommand="{proxy}"\''
+                )
+            lines.append(line)
+    (workdir / "inventory.ini").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"wrote {workdir / 'cmdb.json'} and {workdir / 'inventory.ini'}")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("command", choices=("render", "inventory"))
+    parser.add_argument("--resources", type=Path, default=DEFAULT_RESOURCES)
+    parser.add_argument("--workdir", type=Path, default=DEFAULT_WORKDIR)
+    args = parser.parse_args()
+    if args.command == "render":
+        render(args)
+    else:
+        inventory(args)
+
+
+if __name__ == "__main__":
+    main()
