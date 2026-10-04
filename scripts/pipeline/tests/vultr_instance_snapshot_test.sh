@@ -35,7 +35,7 @@ export VULTR_API_KEY='test-only' INSTANCE_ID='instance-123' VULTR_SNAPSHOT_WAIT_
 
 GITHUB_OUTPUT="${tmp}/output" FAKE_STATUS=pending-then-complete "${script}"
 grep -qx 'snapshot_id=snap-123' "${tmp}/output"
-[[ "$(rg -c -- '-X POST' "${CALL_LOG}")" == 1 ]]
+[[ "$(grep -c -- '-X POST' "${CALL_LOG}")" == 1 ]]
 [[ "$(cat "${READ_COUNT}")" == 2 ]]
 
 : > "${CALL_LOG}"
@@ -43,17 +43,17 @@ grep -qx 'snapshot_id=snap-123' "${tmp}/output"
 printf 0 > "${READ_COUNT}"
 GITHUB_OUTPUT="${tmp}/output" VULTR_SNAPSHOT_ID=snap-existing "${script}"
 grep -qx 'snapshot_id=snap-existing' "${tmp}/output"
-! rg -q -- '-X POST' "${CALL_LOG}"
+! grep -q -- '-X POST' "${CALL_LOG}"
 
 printf 0 > "${READ_COUNT}"
 if FAKE_STATUS=error "${script}" > "${tmp}/stdout" 2> "${tmp}/stderr"; then exit 1; fi
-rg -q 'reported snapshot failure' "${tmp}/stderr"
+grep -q 'reported snapshot failure' "${tmp}/stderr"
 
 printf 0 > "${READ_COUNT}"
 if FAKE_STATUS=pending "${script}" > "${tmp}/stdout" 2> "${tmp}/stderr"; then exit 1; fi
-rg -q 'did not complete' "${tmp}/stderr"
+grep -q 'did not complete' "${tmp}/stderr"
 
 if VULTR_SNAPSHOT_WAIT_ATTEMPTS=0 "${script}" > "${tmp}/stdout" 2> "${tmp}/stderr"; then exit 1; fi
-rg -q 'attempts must be positive' "${tmp}/stderr"
+grep -q 'attempts must be positive' "${tmp}/stderr"
 
 echo 'vultr snapshot executor contract: PASS'
