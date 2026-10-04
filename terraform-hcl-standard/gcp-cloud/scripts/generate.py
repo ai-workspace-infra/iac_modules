@@ -278,6 +278,32 @@ def validate_spot_service_declaration(vm):
         raise SystemExit(f"Spot VM {vm['name']} public_tcp_ports requires public_ip: true")
     if ports and not vm.get("network_tags"):
         raise SystemExit(f"Spot VM {vm['name']} public_tcp_ports requires network_tags for the firewall target")
+    private_ports = vm.get("private_tcp_ports", [])
+    source_tags = vm.get("private_source_tags", [])
+    target_tags = vm.get("private_target_tags", [])
+    if not isinstance(private_ports, list) or any(
+        isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535
+        for port in private_ports
+    ) or len(set(private_ports)) != len(private_ports) or 22 in private_ports:
+        raise SystemExit(f"Spot VM {vm['name']} private_tcp_ports must contain unique non-SSH TCP ports")
+    if not isinstance(source_tags, list) or any(
+        not isinstance(tag, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,62}", tag)
+        for tag in source_tags
+    ) or len(set(source_tags)) != len(source_tags):
+        raise SystemExit(f"Spot VM {vm['name']} private_source_tags must contain unique GCP network tags")
+    if bool(private_ports) != bool(source_tags):
+        raise SystemExit(f"Spot VM {vm['name']} private TCP ports require source tags and vice versa")
+    if private_ports and not vm.get("network_tags"):
+        raise SystemExit(f"Spot VM {vm['name']} private_tcp_ports requires network_tags for the firewall target")
+    if not isinstance(target_tags, list) or any(
+        not isinstance(tag, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,62}", tag)
+        for tag in target_tags
+    ) or len(set(target_tags)) != len(target_tags):
+        raise SystemExit(f"Spot VM {vm['name']} private_target_tags must contain unique GCP network tags")
+    if private_ports and (not target_tags or not set(target_tags).issubset(vm["network_tags"])):
+        raise SystemExit(f"Spot VM {vm['name']} private_target_tags must be declared on the VM")
+    if target_tags and not private_ports:
+        raise SystemExit(f"Spot VM {vm['name']} private_target_tags requires private_tcp_ports")
     host_vars = vm.get("host_vars", {})
     if not isinstance(host_vars, dict) or any(
         not isinstance(key, str) or not HOST_VAR_NAME.fullmatch(key) for key in host_vars
@@ -338,6 +364,7 @@ def render(args):
     if any(vm.get("public_ip") for vm in spot_vms) and not spot_network_tags:
         raise SystemExit("public Spot VMs require spot_network_tags for the SSH firewall")
     for vm in spot_vms:
+        validate_spot_service_declaration(vm)
         if vm.get("public_ip") and not set(spot_network_tags).intersection(vm.get("network_tags", [])):
             raise SystemExit(f"public Spot VM {vm['name']} must include a declared spot_network_tag")
     inventory_names = [spot_inventory_name(vm) for vm in spot_vms]

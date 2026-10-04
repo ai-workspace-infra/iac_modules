@@ -252,6 +252,23 @@ resource "google_compute_firewall" "spot_public_tcp_{{ vm.name | tf_id }}" {
 }
 
 {% endfor %}
+{% for vm in spot_vms if vm.private_tcp_ports | default([]) %}
+# Service traffic for this VM is accepted only from declared source tags.
+resource "google_compute_firewall" "spot_private_tcp_{{ vm.name | tf_id }}" {
+  project     = module.project.project_id
+  name        = "{{ vm.name }}-private-tcp"
+  network     = module.network.network
+  direction   = "INGRESS"
+  source_tags = {{ vm.private_source_tags | tojson }}
+  target_tags = {{ vm.private_target_tags | tojson }}
+
+  allow {
+    protocol = "tcp"
+    ports    = {{ vm.private_tcp_ports | map("string") | list | tojson }}
+  }
+}
+
+{% endfor %}
 {% if spot_vms and spot_ssh_source_ranges %}
 resource "google_compute_firewall" "spot_ssh" {
   project       = module.project.project_id

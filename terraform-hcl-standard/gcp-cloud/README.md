@@ -42,6 +42,21 @@ GitOps 仓库 `resources/xworktech.com/<env>/gcp/open-platform-*.yaml` 声明，
    ```
 3. UAT 通过验证并获得发布审批后，再对 `open-platform-prod.yaml` 重复渲染和计划。
 
+本目录仅新增 GCP 代码，不改动现有 AWS 模板。
+
+## AI Aggregator UAT Spot
+
+The five-node UAT declaration lives in GitOps at
+`resources/xworktech.com/uat/gcp/ai-aggregator-vps-uat.yaml`. Render it with
+the shared `scripts/generate.py` into `envs/ai-aggregator-uat`. The existing
+`modules/spot_vm` provides the reusable Spot instance; the shared renderer
+expands each declared host into an explicit Terraform module and emits the
+CMDB and Ansible inventory from Terraform runtime outputs. This profile uses
+private VMs with IAP and OS Login, avoiding an external-IP policy exception.
+The gateway-to-CPA service ports are restricted by declared network tags.
+All five VMs have a 3600-second maximum runtime. Vault and Ansible own the
+service credentials and OAuth material.
+
 `bootstrap/identity` 已先创建 WIF Pool、Provider 和环境 deploy Service Account；
 平台运行目录默认 `create_project = false`，读取已存在的目标项目，并通过运行时
 Vault JWT -> Google STS/WIF 注入 `deploy_service_account` 和

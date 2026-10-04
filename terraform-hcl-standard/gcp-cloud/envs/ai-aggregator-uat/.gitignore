@@ -1,0 +1,12 @@
+.terraform/
+.terraform.lock.hcl
+*.tfstate*
+generated_hosts.tf
+generated_platform.tf
+backend.tf
+platform-provider.tf
+variables.tf
+resources_manifest.json
+terraform.auto.tfvars.json
+cmdb.json
+inventory.ini
