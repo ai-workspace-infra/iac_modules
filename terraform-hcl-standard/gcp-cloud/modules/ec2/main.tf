@@ -41,11 +41,24 @@ variable "ssh_keys" {
   default     = []
 }
 
+variable "network_tags" {
+  description = "Firewall target tags for the VPS role"
+  type        = list(string)
+  default     = []
+}
+
+variable "startup_script" {
+  description = "Optional non-secret startup script"
+  type        = string
+  default     = ""
+}
+
 resource "google_compute_instance" "vm" {
   name         = var.name
   project      = var.project_id
   zone         = var.zone
   machine_type = var.machine_type
+  tags         = var.network_tags
 
   boot_disk {
     initialize_params {
@@ -62,9 +75,21 @@ resource "google_compute_instance" "vm" {
   metadata = length(var.ssh_keys) > 0 ? {
     ssh-keys = join("\n", var.ssh_keys)
   } : {}
+
+  metadata_startup_script = var.startup_script != "" ? var.startup_script : null
 }
 
 output "instance_self_link" {
   value       = google_compute_instance.vm.self_link
   description = "Instance self link"
+}
+
+output "private_ip" {
+  value       = google_compute_instance.vm.network_interface[0].network_ip
+  description = "VPC private IPv4 address"
+}
+
+output "public_ip" {
+  value       = google_compute_instance.vm.network_interface[0].access_config[0].nat_ip
+  description = "Ephemeral public IPv4 address"
 }

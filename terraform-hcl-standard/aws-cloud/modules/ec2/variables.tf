@@ -30,3 +30,15 @@ variable "tags" {
   type        = map(string)
   description = "Common tags"
 }
+
+variable "elastic_ip" {
+  type        = bool
+  description = "Allocate and associate an Elastic IP"
+  default     = false
+}
+
+variable "deletion_protection" {
+  type        = bool
+  description = "Prevent Terraform and EC2 API termination"
+  default     = false
+}

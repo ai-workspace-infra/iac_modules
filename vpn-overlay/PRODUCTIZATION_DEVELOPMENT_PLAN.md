@@ -1,14 +1,23 @@
-# XConnect Zero Trust Overlay 产品化开发计划
+# XConnect-One Zero Trust Overlay 产品化开发计划
 
 状态：Draft v1
 日期：2026-08-27
 范围：产品化 CLI、多平台运行时、动态 ACL、控制面投影、Gateway 动态配置、测试与文档体系
 
+## 0. 产品命名
+
+- 产品系列和对外品牌统一为 **XConnect-One**。
+- **XConnect-APP** 是五平台客户端、账号入口和安全连接运行时底座；**XConnect-One** 是加载在该底座上的零信任组网产品能力。两者互补组合，不互相替代。
+- 终端产品命名为 **XConnect-One Client**，控制面命名为 **XConnect-One Controller**，网关组件命名为 **XConnect-One Gateway Agent**，中继节点命名为 **XConnect-One Relay**。
+- CLI 可执行文件、用户命令和稳定技术标识保持小写 `xconnect`；守护进程和服务名可使用 `xconnectd`、`xconnect-gateway-agent`。
+- 现有仓库名 `xconnect-app`、`accounts.svc.plus`、`playbooks` 和 `iac_modules` 保持不变，避免仅因品牌命名制造代码迁移。
+- 分支、API、配置键和协议标识中的 `xconnect` 保持稳定；面向用户的标题、安装包说明和文档使用 XConnect-One。
+
 ## 1. 目标与边界
 
 ### 1.1 产品目标
 
-将现有可工作的 WireGuard-over-VLESS、现有 CLI 能力、`accounts.svc.plus` Overlay API、Ansible Gateway 部署和 XConnect 多平台客户端收敛为一个产品。现有 `overlayctl` 正式重命名为 `xconnect`，发布物、进程帮助、文档和用户命令均使用 `xconnect`：
+将现有可工作的 WireGuard-over-VLESS、现有 CLI 能力、`accounts.svc.plus` Overlay API、Ansible Gateway 部署和 XConnect-One 多平台客户端收敛为一个产品。现有 `overlayctl` 正式重命名为 `xconnect`，发布物、进程帮助、文档和用户命令均使用 `xconnect`：
 
 ```bash
 xconnect join <controller-or-invite>
@@ -23,6 +32,8 @@ xconnect join <controller-or-invite>
 - iOS、Android 通过 App 登录、邀请链接或二维码执行等价 Join 协议。
 - WireGuard 提供端到端加密。
 - 现有 VLESS/TLS/XUDP 作为第一版可靠传输。
+- 第一版唯一代理内核为 Xray-core：客户端统一通过仓库锁定的 `libXray` 嵌入，Gateway/Relay 使用锁定版本的 Xray-core。
+- 第一版不包含 sing-box 依赖、运行时适配器、配置生成器、二进制、服务、fallback 或测试矩阵。
 - ACL 默认拒绝，按用户、组、设备、标签、服务和端口授权。
 - `accounts.svc.plus` 成为设备、地址、节点、策略和配置版本的唯一事实来源。
 - Ansible 只负责 Gateway/Relay 的初始安装和升级，不再维护终端 Peer 静态列表。
@@ -32,41 +43,51 @@ xconnect join <controller-or-invite>
 - iOS/Android 完整 L2 Ethernet TAP。
 - 默认启用 VXLAN、广播或 DHCP 延伸。
 - 任意多租户共享 L2 广播域。
-- 第一版同时支持 Xray 和 sing-box 两套运行时。
+- sing-box runtime、adapter、配置兼容层和双内核自动切换。
 - 第一版实现完全去中心化的控制面。
 - 在 Join 命令中直接运行服务器 Ansible Playbook。
+
+### 1.4 与 XConnect-APP 的组合关系
+
+XConnect-APP 提供可复用的应用外壳和平台能力：登录会话、Flutter 导航、系统安全存储、升级发布、诊断框架，以及每个平台唯一的系统 VPN 入口。XConnect-One 以产品模块接入，提供网络加入、设备身份、Overlay 配置、动态 ACL、WireGuard-over-VLESS 数据面和 Gateway 协同。
+
+组合必须满足以下边界：
+
+- 用户可在同一个 XConnect-APP 中启用 XConnect-One，也可继续使用既有 Secure Tunnel 能力。
+- XConnect-One 不复制登录、密钥存储、平台 VPN、更新器和诊断基础设施。
+- XConnect-APP 不硬编码 XConnect-One 的控制面 schema、ACL 语义或传输选择。
+- CLI 与 GUI 通过相同产品插件调用 shared use case；`xconnect join` 是 XConnect-One 的快捷入口。
+- 首期采用编译期内置插件，稳定 ABI/API 后再支持签名的可选插件包；移动端遵循 App Store/Play Store 对动态代码的限制。
 
 ## 2. 已有资产和复用决策
 
 | 资产 | 当前能力 | 产品化决策 |
 |---|---|---|
-| `xconnect-app` | Flutter、Go core、Apple Packet Tunnel、Android VpnService、Windows/Linux 宿主、五平台构建 | 作为唯一终端产品仓库，新增 Overlay 模块和 CLI；不新建第二套客户端 |
+| `xconnect-app` | XConnect-APP 的 Flutter、Go core、Apple Packet Tunnel、Android VpnService、Windows/Linux 宿主、五平台构建 | 作为共享客户端底座和插件宿主，内置 XConnect-One 产品模块与 CLI；不新建第二套客户端 |
 | `xconnect` CLI（原 `overlayctl`） | login、register-device、sync、render、preflight、up、check、ack、down | 二进制正式重命名为 `xconnect`，并迁入 xconnect-app shared core；`overlayctl` 不再作为产品发布物 |
 | `accounts.svc.plus` | Overlay 设备注册、配置下发、ACK、节点 heartbeat 契约 | 作为控制面唯一事实来源；补齐 OpenAPI、ACL、投影和事件流 |
 | `xworkmate_bridge_distributed_vpn` | 双向 WireGuard-over-VLESS/XUDP、Vault、Gateway heartbeat、Peer 验证 | 作为 Gateway 数据面基线，泛化命名并改为动态配置 agent |
 | `vpn-overlay/wireguard` | 通用 Hub/Site WireGuard | 保留为普通 UDP 和站点网络部署能力 |
 | `vpn-overlay/vxlan` | Linux VXLAN over WG | 后续作为 Linux L2 Gateway 后端，不进入移动端 |
 | `setup-dnat` | 网络和服务映射 | 后续映射成受 ACL 管理的 route/service publish |
-| `xray-exporter`、Alloy | Xray 和系统日志观测 | 统一为 XConnect transport/runtime 指标 |
+| `xray-exporter`、Alloy | Xray 和系统日志观测 | 统一为 XConnect-One transport/runtime 指标 |
 | closure scripts | 可重放的端到端闭环与证据目录 | 升级为 CI/E2E 的正式验收框架 |
 
 ## 3. 目标系统架构
 
 ```text
-                         HTTPS / mTLS
- ┌──────────────────┐  enroll/config/events/ack  ┌────────────────────────┐
- │ XConnect Clients │────────────────────────────▶│ accounts.svc.plus      │
- │                  │                             │ Overlay Control Plane  │
- │ CLI / Flutter UI │                             └────────────┬───────────┘
- │ Runtime SPI      │                                          │ signed snapshot
- │ WG + Xray        │                                          │ SSE/long poll
- └────────┬─────────┘                                          ▼
-          │ encrypted WG packets                    ┌────────────────────────┐
-          │ wrapped by VLESS/TLS/XUDP               │ xconnect-gateway-agent │
-          └────────────────────────────────────────▶│ wg syncconf + policy   │
-                                                   └────────────┬───────────┘
-                                                                │
-                                                        Private services/LAN
+┌──────────────────────────────┐   HTTPS / mTLS   ┌────────────────────────┐
+│ XConnect-APP Host            │─────────────────▶│ accounts.svc.plus      │
+│ Account / UI / Secret Store  │ config/events/ack│ Overlay Control Plane  │
+│ ┌──────────────────────────┐ │                  └────────────┬───────────┘
+│ │ XConnect-One Plugin      │ │                               │ signed snapshot
+│ │ CLI / Flutter routes     │ │                               ▼
+│ │ shared usecase/providers │ │                  ┌────────────────────────┐
+│ └──────────────────────────┘ │                  │ xconnect-gateway-agent │
+│ System Tunnel Runtime SPI    │── WG/VLESS/XUDP ─▶│ provider/backends      │
+└──────────────────────────────┘                  └────────────┬───────────┘
+                                                              ▼
+                                                      Private services/LAN
 ```
 
 ### 3.1 控制面职责
@@ -109,6 +130,33 @@ xconnect join <controller-or-invite>
 
 Ansible 不再渲染动态客户端 Peer，不再因用户 Join 而重跑。
 
+### 3.5 产品插件架构
+
+XConnect-APP 通过稳定的 Product Plugin API 组合 XConnect-One。首期插件随应用编译和签名，不加载任意第三方动态代码，但接口按可扩展能力设计：
+
+```go
+type ProductPlugin interface {
+    Manifest() ProductManifest
+    Register(HostServices) error
+    Commands() []CommandSpec
+    Profiles() []ProfileProvider
+    Health(context.Context) PluginHealth
+}
+```
+
+`HostServices` 只暴露最小能力：账号会话、Secret Store、系统 Tunnel Runtime、受控网络请求、事件总线、日志/指标和 UI route registration。插件不能直接持有平台 root 权限或另起第二个系统 VPN 入口。
+
+扩展点分为：
+
+- `ControlPlaneProvider`：注册、配置同步、事件和 ACK。
+- `TransportProvider`：第一版仅注册由 Xray-core/libXray 驱动的 VLESS/TLS/XUDP；其他实现不进入 v1。
+- `PolicyProvider`：策略验证、解释和本地快速拒绝；Gateway 仍是强制执行点。
+- `ProfileProvider`：把产品配置编译为平台无关 Tunnel Profile。
+- `DiagnosticsContributor`：向统一诊断包添加已脱敏证据。
+- `GatewayProvider`：把控制面 snapshot 对接到 WireGuard、ACL 和 Relay 后端。
+
+插件 manifest 至少包含 plugin ID、语义版本、host API 范围、所需 capability、配置 schema 版本和签名信息。Host 必须在激活前完成兼容性、来源、权限和 schema 校验；插件失败不得破坏其他 XConnect-APP 连接模式。
+
 ## 4. 仓库设计
 
 不建议增加新的顶层产品仓库。使用三个现有仓库，契约由控制面 OpenAPI 生成客户端代码。
@@ -119,6 +167,9 @@ Ansible 不再渲染动态客户端 Peer，不再因用户 Join 而重跑。
 xconnect-app/
 ├── cmd/
 │   └── xconnect/                 # Go CLI：join/up/down/status/diagnose
+├── product/
+│   ├── sdk/                      # Product Plugin API、manifest、HostServices
+│   └── xconnect_one/             # XConnect-One 内置产品插件
 ├── overlay/
 │   ├── api/                      # OpenAPI 生成的 Go client
 │   ├── auth/                     # 登录、device code、token refresh
@@ -286,15 +337,20 @@ INIT
   "config_etag": "sha256:...",
   "runtime": {
     "state": "connected",
+    "proxy_core": "xray",
     "platform_adapter": "darwin-packet-tunnel",
     "active_transport": "vless-tls-xudp"
   }
 }
 ```
 
+SignedConfig、GatewaySnapshot、manifest 和本地状态中的 `proxy_core` 在 v1 必须使用闭集枚举 `xray`，不能接受自由字符串后再尝试其他运行时。
+
 私钥和 refresh token 必须存系统安全存储：Apple Keychain、Android Keystore、Windows Credential Manager/DPAPI、Linux Secret Service；没有安全存储时使用 root-only 文件并明确降级状态。
 
 ## 6. 多平台 Runtime SPI
+
+这里的 Runtime SPI 只抽象系统 VPN 生命周期、权限、路由和平台桥接，不表示第一版支持多个代理内核。v1 的唯一 core ID 为 `xray`：客户端实现绑定 `libXray/xray-core`，Gateway/Relay 实现绑定 Xray-core。任何 `sing-box` core ID、依赖或配置均视为不支持并在校验阶段拒绝。
 
 ### 6.1 平台无关接口
 
@@ -320,6 +376,7 @@ type Runtime interface {
   "l2_gateway": false,
   "wireguard_backend": "userspace",
   "system_tunnel": "network-extension",
+  "proxy_core": "xray",
   "transports": ["vless-tls-xudp"],
   "ipv6": true,
   "policy_enforcement": "packet-filter"
@@ -330,11 +387,11 @@ type Runtime interface {
 
 | 平台 | 系统入口 | Runtime 实现 | 首期支持 |
 |---|---|---|---|
-| macOS | `NEPacketTunnelProvider` | Swift Host + Go/Xray core | L3、配置、状态、诊断 |
-| iOS | `NEPacketTunnelProvider` | Swift Packet Tunnel + Go/Xray core | L3、邀请链接/二维码、移动网络切换 |
-| Android | `VpnService` | Kotlin service + Go core/JNI | L3、Always-on 兼容 |
-| Windows | Windows Service + Wintun/WireGuard backend | Go service + native helper | L3、开机启动、升级回滚 |
-| Linux | systemd + kernel WG，必要时 userspace | Go daemon + netlink/polkit | L3、route gateway、后续 L2 |
+| macOS | `NEPacketTunnelProvider` | Swift Host + `libXray` | L3、配置、状态、诊断 |
+| iOS | `NEPacketTunnelProvider` | Swift Packet Tunnel + static `libxray.a` | L3、邀请链接/二维码、移动网络切换 |
+| Android | `VpnService` | Kotlin service + `libXray`/JNI | L3、Always-on 兼容 |
+| Windows | Windows Service + Wintun/WireGuard backend | Go service + `libXray` helper | L3、开机启动、升级回滚 |
+| Linux | systemd + kernel WG，必要时 userspace | Go daemon + `libXray`/netlink/polkit | L3、route gateway、后续 L2 |
 
 Apple 平台必须继续使用现有 Packet Tunnel，不引入 sudo 路由修改或第二种系统网络入口。
 
@@ -675,6 +732,7 @@ POST   /api/overlay/v1/policies/{revision}/activate
 | NET-008 | 错误 VLESS credential | 鉴权失败，不泄露服务信息 |
 | NET-009 | MTU 边界 | 大包不黑洞，诊断能发现 MTU 问题 |
 | NET-010 | 双 Gateway 切换 | 配置和路由保持一致，无地址冲突 |
+| NET-011 | 配置声明 `proxy_core != xray` | 客户端和 Gateway 在启动前拒绝，不做其他内核 fallback |
 
 ### 11.6 平台 Cases
 
@@ -684,7 +742,20 @@ POST   /api/overlay/v1/policies/{revision}/activate
 - Linux：systemd、polkit、kernel WG 缺失、nftables rollback、NetworkManager 共存。
 - 所有平台：Join、撤销、配置轮换、过期配置、日志脱敏和诊断包。
 
-### 11.7 测试 Case 模板
+### 11.7 插件组合 Cases
+
+| ID | 场景 | 预期 |
+|---|---|---|
+| PLUG-001 | XConnect-One manifest 与 Host API 兼容 | 注册成功，CLI/UI route 和 profile 可发现 |
+| PLUG-002 | 插件要求不支持的 capability | 激活前拒绝并返回稳定错误，不影响既有连接 |
+| PLUG-003 | 插件签名或来源无效 | 拒绝加载且写入脱敏审计事件 |
+| PLUG-004 | XConnect-One 初始化或运行失败 | 故障隔离，XConnect-APP 其他连接模式仍可使用 |
+| PLUG-005 | CLI 与 GUI 调用同一产品插件 | 同一 fixture 产生相同状态、配置和 ACK |
+| PLUG-006 | 两个产品请求系统 VPN 入口 | Host 仲裁并保持单一入口，不产生路由竞争 |
+| PLUG-007 | 注册 sing-box 或未知代理内核 | v1 Host 拒绝注册，构建产物不包含对应依赖和二进制 |
+| PLUG-008 | 插件升级与回滚 | manifest/schema 迁移可回滚，last-known-good 可恢复 |
+
+### 11.8 测试 Case 模板
 
 ```markdown
 ## CASE-ID 标题
@@ -702,6 +773,28 @@ POST   /api/overlay/v1/policies/{revision}/activate
 ```
 
 ## 12. CI/CD 与发布门禁
+
+### 12.0 分支与分批编码策略
+
+- 本计划文档使用独立文档分支并提交到 `main` 的文档 PR。
+- 产品化编码使用长期特性分支 `codex/xconnect-overlay-productization`，不直接提交到 `main`。
+- 每个 Phase 再按可独立验证的 Batch 建立短期分支，例如：
+
+```text
+codex/xconnect-overlay-productization
+├── codex/xconnect-batch-01-contracts
+├── codex/xconnect-batch-02-cli-join
+├── codex/xconnect-batch-03-gateway-shadow
+├── codex/xconnect-batch-04-dynamic-peers
+├── codex/xconnect-batch-05-acl-compiler
+└── codex/xconnect-batch-06-platform-closure
+```
+
+- Batch 分支只合入产品化特性分支；未经明确指令，不向 `main` 创建编码 PR。
+- 每个 Batch 必须有明确输入、输出、测试 Case、evidence 和 rollback 点，验证通过后才开始下一 Batch。
+- 特性分支持续同步 `main`，但禁止用破坏性 reset 清理用户或其他分支的工作。
+- 文档、OpenAPI、schema、golden 和测试可以随 Batch 一起演进，但每个 Batch 结束时必须保持特性分支可构建、可测试、可恢复。
+- 最终是否拆分为多个 `main` PR 或使用一个汇总 PR，在 GA 前由维护者明确决定。
 
 ### 12.1 Pull Request 门禁
 
@@ -835,14 +928,15 @@ disaster-recovery.md
 
 至少建立：
 
-- ADR-001：复用 xconnect-app，不新建客户端。
+- ADR-001：XConnect-APP 作为共享宿主，XConnect-One 作为内置产品插件，不新建客户端。
 - ADR-002：Go shared core + 平台原生系统 VPN 入口。
 - ADR-003：accounts 是 Overlay 唯一事实来源。
 - ADR-004：Ansible 只做 Gateway bootstrap。
 - ADR-005：Gateway 强制执行 ACL。
 - ADR-006：完整签名 snapshot + generation，而非命令增量。
 - ADR-007：L3 默认，L2 仅 Linux Gateway。
-- ADR-008：Xray VLESS/TLS/XUDP 为首期 transport。
+- ADR-008：Product Plugin API、权限边界和移动端静态集成策略。
+- ADR-009：v1 仅使用 Xray-core/libXray，移除 sing-box runtime 和 fallback。
 
 ADR 模板：
 
@@ -874,6 +968,8 @@ ADR 模板：
 - 固化 SignedConfig 和 GatewaySnapshot JSON Schema。
 - 从当前 group_vars 导出 baseline fixture。
 - 在 xconnect-app 建立 `overlay/` package 和 Runtime SPI。
+- 建立 XConnect-APP Product Plugin API、manifest schema、HostServices fake 和 XConnect-One 内置插件骨架。
+- 清除并禁止 sing-box dependency、adapter、config renderer、artifact 和 CI matrix；增加依赖与发布物扫描门禁。
 - 将 closure 脚本接入 CI 的 check-only 模式。
 
 退出条件：现有生产闭环不回归；OpenAPI 可生成 Go/Dart client；baseline snapshot golden 通过。
@@ -887,6 +983,7 @@ ADR 模板：
 - 本地安全状态和可恢复 Join 状态机。
 - Linux、macOS CLI 首批可用。
 - Flutter UI 调用相同 Join use case。
+- CLI 与 Flutter UI 均通过 XConnect-One 产品插件调用 shared use case，不直接依赖 Overlay 内部 package。
 - 配置签名、generation、last-known-good 和 ACK。
 
 退出条件：Linux/macOS 从干净机器执行一次命令加入；重复 Join 幂等；错误签名和中断恢复通过。
@@ -1019,26 +1116,28 @@ Pull Request checklist：
 ## 19. 首批 Backlog（建议执行顺序）
 
 1. 修复或重新检出 `accounts.svc.plus` 本地工作树，确认原 overlayctl/API 实际源码版本，并建立 `overlayctl → xconnect` 重命名清单。
-2. 创建 Overlay OpenAPI v1 和 SignedConfig/GatewaySnapshot schemas。
-3. 为现有 `group_vars` 和 Xray/WG 模板建立 golden fixtures。
-4. 在 xconnect-app 增加 Runtime SPI 与 fake runtime。
-5. 将原 overlayctl Join 状态机提取为 shared Go package，入口安装为 `xconnect`。
-6. 建立 `xconnect join/status/diagnose` CLI。
-7. 将 Flutter 登录/同步接入相同 use case。
-8. 实现 snapshot signing、generation 和 last-known-good。
-9. 实现 Gateway Agent shadow mode。
-10. 编写 group_vars importer 和 static-vs-projected diff。
-11. 切换到动态 `wg syncconf`。
-12. 实现 ACL schema/compiler 和 gateway nftables backend。
-13. 补齐 Windows、Android、iOS 平台闭环。
-14. 删除静态客户端列表和过渡命令。
+2. 定义 XConnect-APP Product Plugin API、manifest schema、HostServices 权限边界和兼容策略。
+3. 固定 v1 core ID 为 `xray`，移除并用 CI 禁止 sing-box 依赖、适配器、配置和发布物。
+4. 创建 Overlay OpenAPI v1 和 SignedConfig/GatewaySnapshot schemas。
+5. 为现有 `group_vars` 和 Xray/WG 模板建立 golden fixtures。
+6. 在 xconnect-app 增加 XConnect-One 内置插件、Runtime SPI、fake host 和 fake runtime。
+7. 将原 overlayctl Join 状态机提取为 shared Go package，入口安装为 `xconnect`。
+8. 建立 `xconnect join/status/diagnose` CLI。
+9. 将 Flutter 登录/同步通过产品插件接入相同 use case。
+10. 实现 snapshot signing、generation 和 last-known-good。
+11. 实现 Gateway Agent shadow mode。
+12. 编写 group_vars importer 和 static-vs-projected diff。
+13. 切换到动态 `wg syncconf`。
+14. 实现 ACL schema/compiler 和 gateway nftables backend。
+15. 补齐 Windows、Android、iOS 平台闭环。
+16. 删除静态客户端列表和过渡命令。
 
 ## 20. 关键风险和缓解
 
 | 风险 | 缓解 |
 |---|---|
 | accounts 本地源码状态不完整 | Phase 0 首要恢复；以线上契约和 closure evidence 反向验证 |
-| XConnect 当前以通用 Xray Secure Tunnel 为主，未闭环 WG-over-VLESS | 使用独立 Overlay profile，不破坏现有模式；feature flag 灰度 |
+| XConnect-One 当前以通用 Xray Secure Tunnel 为主，未闭环 WG-over-VLESS | 使用独立 Overlay profile，不破坏现有模式；feature flag 灰度 |
 | VLESS/TCP 承载 UDP 的延迟/队头阻塞 | 保留 transport SPI；首期量化 SLO，后续增加直连 UDP/QUIC transport |
 | 动态配置错误清空 Gateway peers | 完整签名 snapshot、last-known-good、空集保护、shadow diff |
 | ACL 只在客户端执行可被绕过 | Gateway 强制执行；客户端策略仅作补充 |
@@ -1049,4 +1148,4 @@ Pull Request checklist：
 
 ---
 
-本计划的核心原则是：保留已经证明可用的数据面，把产品化工作集中到共享 Join use case、版本化契约、动态 Gateway 投影和不可绕过的策略执行。Ansible 继续做它擅长的节点部署，XConnect App 继续做它已经具备的五平台系统 VPN，accounts 控制面成为唯一动态事实来源。
+本计划的核心原则是：保留已经证明可用的数据面，把产品化工作集中到共享 Join use case、版本化契约、动态 Gateway 投影和不可绕过的策略执行。Ansible 继续做它擅长的节点部署，XConnect-One Client 继续做它已经具备的五平台系统 VPN，accounts 控制面成为唯一动态事实来源。
