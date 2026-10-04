@@ -96,7 +96,11 @@ mkdir -p "${work}/rt"
 cat > "${work}/rt/gcloud" <<'FAKE'
 #!/usr/bin/env bash
 state="${FAKE_RT_STATE}"
-if [[ "$*" == *"instances describe"* ]]; then
+if [[ "$*" == *"compute operations list"* ]]; then
+  echo '2026-09-30T13:26:00Z stop DONE'
+elif [[ "$*" == *"lastStopTimestamp"* ]]; then
+  echo '2026-09-30T13:26:30Z'
+elif [[ "$*" == *"instances describe"* ]]; then
   if [[ -f "${state}" ]]; then echo RUNNING; else echo "${FAKE_RT_INITIAL}"; fi
 elif [[ "$*" == *"instances start"* || "$*" == *"instances resume"* ]]; then
   printf '%s\n' "$*" >> "${FAKE_RT_OPERATIONS}"

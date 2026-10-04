@@ -24,6 +24,27 @@ def gcloud(*args: str) -> str:
     return subprocess.check_output(command, text=True, stderr=subprocess.STDOUT).strip()
 
 
+def report_stop(project: str, name: str, zone: str) -> None:
+    # Keep the operator-visible stop time and operation type, never the acting
+    # principal. Failure to list operations must not prevent recovery.
+    timestamp = subprocess.check_output(
+        ["gcloud", "compute", "instances", "describe", name, "--project", project,
+         "--zone", zone, "--format=value(lastStopTimestamp,lastSuspendedTimestamp)"],
+        text=True, stderr=subprocess.STDOUT,
+    ).strip()
+    print(f"GCP VM {name} stop record: {timestamp}")
+    operations = subprocess.run(
+        ["gcloud", "compute", "operations", "list", "--project", project,
+         "--zones", zone, f"--filter=targetLink~/instances/{name}$", "--sort-by=~insertTime",
+         "--limit=5", "--format=value(insertTime,operationType,status)"],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False,
+    )
+    if operations.returncode == 0:
+        print(f"Recent operations on {name}:\n{operations.stdout.strip()}")
+    else:
+        print(f"::warning::Could not list GCP operations for {name}; check Cloud Audit Logs for the stop cause")
+
+
 def instance_specs(manifest: dict) -> list[tuple[str, str]]:
     specs: list[tuple[str, str]] = []
     for key in ("vault_nodes", "spot_vms"):
@@ -47,6 +68,7 @@ def reconcile(project: str, specs: list[tuple[str, str]], timeout: int, interval
         print(f"GCP VM {name} ({zone}) status={status or 'unknown'}")
         if status in {"TERMINATED", "STOPPED", "SUSPENDED"}:
             operation = "resume" if status == "SUSPENDED" else "start"
+            report_stop(project, name, zone)
             print(f"Requesting {operation} for existing GCP VM {name}; no resource creation is requested.")
             subprocess.check_call(
                 ["gcloud", "compute", "instances", operation, name, "--project", project, "--zone", zone, "--quiet"]
