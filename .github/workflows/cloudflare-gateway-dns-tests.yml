@@ -1,0 +1,30 @@
+name: Cloudflare gateway DNS owner tests
+
+on:
+  pull_request:
+    paths:
+      - scripts/pipeline/cloudflare-gateway-dns-upsert.py
+      - scripts/pipeline/tests/test_cloudflare_gateway_dns_upsert.py
+      - .github/workflows/cloudflare-gateway-dns-tests.yml
+  push:
+    branches: [main]
+    paths:
+      - scripts/pipeline/cloudflare-gateway-dns-upsert.py
+      - scripts/pipeline/tests/test_cloudflare_gateway_dns_upsert.py
+      - .github/workflows/cloudflare-gateway-dns-tests.yml
+
+permissions:
+  contents: read
+
+jobs:
+  owner-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run provider contract and failure recovery tests
+        run: python3 -m unittest scripts/pipeline/tests/test_cloudflare_gateway_dns_upsert.py -v
+      - name: Check syntax
+        run: python3 -m py_compile scripts/pipeline/cloudflare-gateway-dns-upsert.py

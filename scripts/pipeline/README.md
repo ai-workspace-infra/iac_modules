@@ -22,6 +22,7 @@ these scripts from the Terraform working directory, so every relative path in th
 | `gcp-temporary-ssh-access.sh open\|close` | short-lived runner SSH access to one OS Login VM: RUNNING reconcile, target facts, one-run OS Login key with TTL, runner-/32 tag-scoped tcp:22 rule; revocation with rollback |
 | `verify-aws-boot-health.sh` | EC2 status-check gate |
 | `cloudflare-dns-record.py` | single A-record cutover/rollback with an environment-bound checkpoint and guarded recovery; see [contract](cloudflare-dns-record.md) |
+| `cloudflare-gateway-dns-upsert.py` | guarded single-A gateway record upsert with exact-zone lookup, conflict rejection, checkpointed recovery and resolver convergence; see [contract](cloudflare-gateway-dns-upsert.md) |
 | `artifact-registry-wait.sh` | bounded wait for an exact image tag or digest in Artifact Registry |
 | `artifact-registry-promote.sh` | idempotent, same-digest image promotion into a target repository |
 
@@ -59,6 +60,7 @@ creating another backup, plus `VULTR_SNAPSHOT_WAIT_ATTEMPTS` and
 `GITHUB_OUTPUT` when present, otherwise stdout. Approval and exact instance
 selection stay with the caller; a failed snapshot stops replacement before
 Terraform runs. The script does not delete snapshots.
+
 | `reconcile-backup-schedules.sh` | provider backup schedule reconcile |
 | `action-runner-iac.sh` | `render` / `terraform-init` / `terraform-action` / `inventory` / `build-matrix` for the runner VM |
 | `multi-cloud-load-aws-config.sh`, `multi-cloud-terraform-cli-args.sh <accounts\|resources>` | multi-cloud matrix backend config |
@@ -67,6 +69,16 @@ Terraform runs. The script does not delete snapshots.
 `lib/require-env.sh` is a byte-identical copy of the one in `playbooks` and in
 `platform-ops-toolkit/.github/scripts/lib/`; each repo keeps its own so a pinned ref
 never depends on another repo's layout.
+
+`cloudflare-gateway-dns-upsert.py` is deliberately narrower than the legacy DNS
+reconcilers: it handles one explicitly supplied public IPv4 A record in one
+explicit environment. It refuses CNAME/non-A conflicts and multiple A records,
+does not discover or delete unrelated records, and writes an environment-bound
+0600 checkpoint before changing the provider. The Toolkit remains responsible
+for target selection, approvals and evidence; this script does not read GitOps,
+write CMDB, access hosts, or restart services. The first caller must be added
+only after the owner contract is merged and its UAT acceptance evidence is
+recorded.
 
 ## Tests
 
