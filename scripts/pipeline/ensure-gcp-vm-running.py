@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -45,9 +46,10 @@ def reconcile(project: str, specs: list[tuple[str, str]], timeout: int, interval
         status = gcloud("compute", "instances", "describe", name, "--project", project, "--zone", zone)
         print(f"GCP VM {name} ({zone}) status={status or 'unknown'}")
         if status in {"TERMINATED", "STOPPED", "SUSPENDED"}:
-            print(f"Starting existing GCP VM {name}; no resource creation is requested.")
+            operation = "resume" if status == "SUSPENDED" else "start"
+            print(f"Requesting {operation} for existing GCP VM {name}; no resource creation is requested.")
             subprocess.check_call(
-                ["gcloud", "compute", "instances", "start", name, "--project", project, "--zone", zone, "--quiet"]
+                ["gcloud", "compute", "instances", operation, name, "--project", project, "--zone", zone, "--quiet"]
             )
             started.append(name)
 
@@ -68,15 +70,25 @@ def reconcile(project: str, specs: list[tuple[str, str]], timeout: int, interval
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--manifest", type=Path, required=True)
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument("--manifest", type=Path)
+    target.add_argument("--instance")
+    parser.add_argument("--zone")
     parser.add_argument("--project", required=True)
     parser.add_argument("--timeout", type=int, default=300)
     parser.add_argument("--interval", type=int, default=5)
     args = parser.parse_args()
     if args.timeout < 1 or args.interval < 1:
         raise SystemExit("timeout and interval must be positive")
-    document = json.loads(args.manifest.read_text(encoding="utf-8"))
-    started = reconcile(args.project, instance_specs(document), args.timeout, args.interval)
+    if args.instance:
+        if not args.zone or not re.fullmatch(r"[a-z][a-z0-9-]{0,62}", args.instance) or not re.fullmatch(r"[a-z][a-z0-9-]{0,62}", args.zone):
+            raise SystemExit("a declared instance and zone are required")
+        specs = [(args.instance, args.zone)]
+    else:
+        if args.zone:
+            raise SystemExit("--zone requires --instance")
+        specs = instance_specs(json.loads(args.manifest.read_text(encoding="utf-8")))
+    started = reconcile(args.project, specs, args.timeout, args.interval)
     # A Spot VM that was stopped when Terraform refreshed has no ephemeral
     # public IP in state; tell the workflow to refresh before the inventory.
     output = os.environ.get("GITHUB_OUTPUT")

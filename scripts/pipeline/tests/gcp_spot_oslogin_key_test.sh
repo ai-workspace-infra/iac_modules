@@ -98,7 +98,8 @@ cat > "${work}/rt/gcloud" <<'FAKE'
 state="${FAKE_RT_STATE}"
 if [[ "$*" == *"instances describe"* ]]; then
   if [[ -f "${state}" ]]; then echo RUNNING; else echo "${FAKE_RT_INITIAL}"; fi
-elif [[ "$*" == *"instances start"* ]]; then
+elif [[ "$*" == *"instances start"* || "$*" == *"instances resume"* ]]; then
+  printf '%s\n' "$*" >> "${FAKE_RT_OPERATIONS}"
   touch "${state}"
 fi
 FAKE
@@ -107,10 +108,30 @@ printf '%s' '{"spot_vms":[{"name":"web-saas-uat","zone":"asia-east1-a"}]}' > "${
 runtime="${root_dir}/scripts/pipeline/ensure-gcp-vm-running.py"
 for initial in TERMINATED RUNNING; do
   rm -f "${work}/rt/state" "${work}/rt/out"
-  PATH="${work}/rt:${PATH}" FAKE_RT_STATE="${work}/rt/state" FAKE_RT_INITIAL="${initial}" GITHUB_OUTPUT="${work}/rt/out" \
+  PATH="${work}/rt:${PATH}" FAKE_RT_STATE="${work}/rt/state" FAKE_RT_INITIAL="${initial}" \
+    FAKE_RT_OPERATIONS="${work}/rt/operations" GITHUB_OUTPUT="${work}/rt/out" \
     python3 "${runtime}" --manifest "${work}/rt/manifest.json" --project p --interval 1 --timeout 5 >/dev/null
   expected=false; [[ "${initial}" == TERMINATED ]] && expected=true
   grep -Fxq "started=${expected}" "${work}/rt/out" || fail "a ${initial} VM must report started=${expected}"
 done
+
+# Shared service nodes resolve one reviewed GitOps identity in the Toolkit
+# caller. The same owner executor must support that exact target and resume a
+# suspended VM instead of attempting an invalid start operation.
+for initial in TERMINATED SUSPENDED RUNNING; do
+  rm -f "${work}/rt/state" "${work}/rt/out" "${work}/rt/operations"
+  PATH="${work}/rt:${PATH}" FAKE_RT_STATE="${work}/rt/state" FAKE_RT_INITIAL="${initial}" \
+    FAKE_RT_OPERATIONS="${work}/rt/operations" GITHUB_OUTPUT="${work}/rt/out" \
+    python3 "${runtime}" --instance observability-shared-0 --zone asia-east1-a \
+      --project p --interval 1 --timeout 5 >/dev/null
+  expected=false; [[ "${initial}" != RUNNING ]] && expected=true
+  grep -Fxq "started=${expected}" "${work}/rt/out" || fail "single ${initial} VM must report started=${expected}"
+  if [[ "${initial}" == SUSPENDED ]]; then
+    grep -Fq 'instances resume observability-shared-0' "${work}/rt/operations" || fail 'suspended VM must resume'
+  fi
+done
+if python3 "${runtime}" --instance 'bad;id' --zone asia-east1-a --project p >/dev/null 2>&1; then
+  fail 'invalid instance identity was accepted'
+fi
 
 echo "GCP Spot OS Login deploy-key tests passed."
