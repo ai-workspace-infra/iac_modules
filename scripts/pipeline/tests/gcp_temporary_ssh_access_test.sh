@@ -68,9 +68,9 @@ reset_state() {
   echo "${1:-RUNNING}" > "${work}/state/status"
   : > "${work}/output"
 }
-run() { # <subcommand> [env...]
+run() { # <subcommand> [env...]; GITHUB_ACTIONS only when a case sets it
   local sub="$1"; shift
-  env PATH="${work}/bin:${PATH}" FAKE_STATE="${work}/state" GITHUB_OUTPUT="${work}/output" \
+  env -u GITHUB_ACTIONS PATH="${work}/bin:${PATH}" FAKE_STATE="${work}/state" GITHUB_OUTPUT="${work}/output" \
     GCP_PROJECT_ID=open-platform-shared-510113 GCP_ZONE=asia-east1-a GCP_INSTANCE=iam-shared-0 \
     GCP_NETWORK=iam ACCESS_RULE_NAME=zitadel-ssh-4242-1 ACCESS_DIR="${work}/access" \
     "$@" bash "${script}" "${sub}" > "${work}/out" 2>&1
@@ -115,6 +115,7 @@ reset_state TERMINATED
 run open GITHUB_ACTIONS=true || { cat "${work}/out" >&2; fail "a stopped VM must be started and opened"; }
 grep -q '^compute instances start iam-shared-0' "${work}/state/gcloud.log" || fail "a stopped VM must be started"
 grep -qx '::add-mask::sa_112233445566778899001' "${work}/out" || fail "the OS Login user must be masked in Actions"
+! grep -v '^::add-mask::' "${work}/out" | grep -q 'sa_112233445566778899001' || fail "the OS Login user may appear only in the mask command"
 run close
 # Explicit tags and source address override discovery.
 reset_state
