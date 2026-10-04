@@ -19,6 +19,7 @@ these scripts from the Terraform working directory, so every relative path in th
 | `adopt-resize-replacement.sh`, `resize-instance-apply-terraform.sh` | guarded resize flow |
 | `vultr-instance-snapshot.sh` | create or resume a Vultr instance snapshot and wait for completion |
 | `ensure-gcp-vm-running.py`, `register-gcp-oslogin-key.sh` | GCP runtime reconcile and OS Login key |
+| `gcp-temporary-ssh-access.sh open\|close` | short-lived runner SSH access to one OS Login VM: RUNNING reconcile, target facts, one-run OS Login key with TTL, runner-/32 tag-scoped tcp:22 rule; revocation with rollback |
 | `verify-aws-boot-health.sh` | EC2 status-check gate |
 | `cloudflare-dns-record.py` | single A-record cutover/rollback with an environment-bound checkpoint and guarded recovery; see [contract](cloudflare-dns-record.md) |
 | `artifact-registry-wait.sh` | bounded wait for an exact image tag or digest in Artifact Registry |
@@ -30,6 +31,20 @@ Promotion also requires a single service entry in a caller-validated UAT
 manifest. An occupied release tag with another digest fails without writes;
 success writes `digest` to `GITHUB_OUTPUT` when available. The control workflow
 owns release provenance checks and decides when to invoke these operations.
+
+`gcp-temporary-ssh-access.sh` takes `GCP_PROJECT_ID`, `GCP_ZONE`,
+`GCP_INSTANCE`, `GCP_NETWORK`, a per-run `ACCESS_RULE_NAME` and a private,
+not-yet-existing `ACCESS_DIR`; optional `OSLOGIN_KEY_TTL` (default `20m`, at
+most `120m`), `TARGET_TAGS` (default: the VM's network tags), `SOURCE_IP`
+(default: the runner's public egress address) and `ENSURE_RUNNING` (default
+`true`). `open` writes `ACCESS_DIR/access.json` (`target_ip`, `target_tags`,
+`ssh_user`, `private_key`, `known_hosts`, `firewall_rule`, `source_range`,
+`oslogin_key_ttl`) and the same facts to `GITHUB_OUTPUT`; the OS Login user is
+masked in Actions. It refuses an existing rule or directory, and a failed open
+removes what it created. `close` takes the same rule name and directory, is
+idempotent, keeps revoking after a failed step and exits non-zero unless the
+rule is confirmed absent and the key revoked. The caller runs `close` on every
+exit path and owns target selection, credentials and what runs over SSH.
 
 AWS boot readiness requires both EC2 checks to be `ok`, then an SSH banner.
 `AWS_BOOT_HEALTH_TIMEOUT_SECONDS` defaults to 600 seconds per instance;
