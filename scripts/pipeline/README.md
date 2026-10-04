@@ -21,6 +21,15 @@ these scripts from the Terraform working directory, so every relative path in th
 | `ensure-gcp-vm-running.py`, `register-gcp-oslogin-key.sh` | GCP runtime reconcile and OS Login key |
 | `verify-aws-boot-health.sh` | EC2 status-check gate |
 | `cloudflare-dns-record.py` | single A-record cutover/rollback with an environment-bound checkpoint and guarded recovery; see [contract](cloudflare-dns-record.md) |
+| `artifact-registry-wait.sh` | bounded wait for an exact image tag or digest in Artifact Registry |
+| `artifact-registry-promote.sh` | idempotent, same-digest image promotion into a target repository |
+
+The Artifact Registry executors use the caller's Google Cloud identity and
+accept the full repository URI, image tag and bounded wait budget as inputs.
+Promotion also requires a single service entry in a caller-validated UAT
+manifest. An occupied release tag with another digest fails without writes;
+success writes `digest` to `GITHUB_OUTPUT` when available. The control workflow
+owns release provenance checks and decides when to invoke these operations.
 
 AWS boot readiness requires both EC2 checks to be `ok`, then an SSH banner.
 `AWS_BOOT_HEALTH_TIMEOUT_SECONDS` defaults to 600 seconds per instance;
