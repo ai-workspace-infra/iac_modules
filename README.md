@@ -8,6 +8,8 @@ with Python + Jinja2, applies it per environment, and emits a CMDB (`cmdb.json`)
 owns compute / network / storage / identity only — software configuration belongs to the playbooks
 repo on the other side of the CMDB contract.
 
+For cross-repository script moves, follow the [execution ownership migration standard](https://github.com/ai-workspace-lab/xworkspace-core-skills/blob/main/skills/engineering-standards/execution-ownership-migration/SKILL.md): this repository owns reusable IaC rendering and provider execution, while GitOps owns environment declarations. Merge and test the owner implementation before switching Toolkit callers; remove the old executor only after verifying the new route.
+
 ## Core paradigm
 
 ```
