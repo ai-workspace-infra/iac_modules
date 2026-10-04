@@ -20,6 +20,7 @@ these scripts from the Terraform working directory, so every relative path in th
 | `vultr-instance-snapshot.sh` | create or resume a Vultr instance snapshot and wait for completion |
 | `ensure-gcp-vm-running.py`, `register-gcp-oslogin-key.sh` | GCP runtime reconcile and OS Login key |
 | `verify-aws-boot-health.sh` | EC2 status-check gate |
+| `cloudflare-dns-record.py` | single A-record cutover/rollback with an environment-bound checkpoint and guarded recovery; see [contract](cloudflare-dns-record.md) |
 
 AWS boot readiness requires both EC2 checks to be `ok`, then an SSH banner.
 `AWS_BOOT_HEALTH_TIMEOUT_SECONDS` defaults to 600 seconds per instance;
