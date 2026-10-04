@@ -9,8 +9,10 @@
       "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
         "StringEquals": {
-          "token.actions.githubusercontent.com:sub": "repo:cloud-neutral-toolkit/Modern-Container-Application-Reference-Architecture:ref:refs/heads/main",
-          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+          "token.actions.githubusercontent.com:aud": "${audience}"
+        },
+        "StringLike": {
+          "token.actions.githubusercontent.com:sub": ${subjects_json}
         }
       }
     }

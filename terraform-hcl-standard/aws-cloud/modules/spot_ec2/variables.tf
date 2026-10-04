@@ -14,6 +14,7 @@ variable "subnet_id" { type = string }
 variable "sg_id" { type = string }
 variable "keypair_name" { type = string }
 variable "tags" { type = map(string) }
+
 variable "user_data" {
   type        = string
   description = "Non-secret cloud-init payload, including the UAT TTL guard"

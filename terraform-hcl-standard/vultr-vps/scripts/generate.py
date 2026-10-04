@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""共享渲染器：资源声明 (config/resources) -> Terraform 资源 / Ansible inventory。
+"""共享渲染器：GitOps 资源声明 -> Terraform 资源 / Ansible inventory。
 
 分层（本脚本不依赖某个具体 env，可被多套资源声明复用）：
-  - 声明:     ../config/resources/<name>-hosts.yaml        （--resources 覆盖）
+  - 声明:     ../../gitops/resources/<project>/<env>/<provider>/<name>.yaml        （--resources 覆盖）
   - 共享模板: ../templates/{provider.tf, variables.tf, cloud-init.yaml,
                             hosts.tf.j2, inventory.ini.j2}
   - 运行目录: ../envs/<name>/  （--workdir 覆盖；渲染产物 + tfstate 落此，均 gitignore）
@@ -35,9 +35,12 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # scripts/ -> vultr-vps 根
 VULTR_VPS_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 TEMPLATE_DIR = os.path.join(VULTR_VPS_ROOT, "templates")
+GITOPS_ROOT = os.environ.get(
+    "GITOPS_ROOT", os.path.abspath(os.path.join(VULTR_VPS_ROOT, "..", "..", "gitops"))
+)
 
 DEFAULT_RESOURCES = os.path.join(
-    VULTR_VPS_ROOT, "config", "resources", "ai-workspace-hosts.yaml"
+    GITOPS_ROOT, "resources", "svc.plus", "uat", "vultr", "ai-workspace.yaml"
 )
 DEFAULT_WORKDIR = os.path.join(VULTR_VPS_ROOT, "envs", "ai-workspace")
 

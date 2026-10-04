@@ -3,7 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SUPABASE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-RESOURCES="${RESOURCES:-${SUPABASE_ROOT}/config/resources/dev/supabase.yaml}"
+GITOPS_ROOT="${GITOPS_ROOT:-$(cd "${SUPABASE_ROOT}/../.." && pwd)/gitops}"
+RESOURCES="${RESOURCES:-${GITOPS_ROOT}/resources/svc.plus/dev/supabase/supabase.yaml}"
 WORKDIR="${WORKDIR:-${SUPABASE_ROOT}/envs/dev}"
 
 command -v terraform >/dev/null 2>&1 || {

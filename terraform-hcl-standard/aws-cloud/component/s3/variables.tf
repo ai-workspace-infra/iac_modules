@@ -1,5 +1,13 @@
-variable "config_root" {
-  description = "Local path to the gitops repository root."
+
+
+variable "account_config_path" {
+  description = "Absolute path to the account declaration in the GitOps repository."
   type        = string
-  default     = null
+  nullable    = false
+}
+
+variable "s3_config_path" {
+  description = "Absolute path to the s3 declaration in the GitOps repository."
+  type        = string
+  nullable    = false
 }

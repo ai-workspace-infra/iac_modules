@@ -2,7 +2,7 @@
 """共享渲染器：GitOps 资源声明 -> Terraform 资源 / Ansible inventory。
 
 分层（本脚本不依赖某个具体 env，可被多套资源声明复用）：
-  - 声明:     ../../gitops/resources/<project>/<env>/<provider>/<name>.yaml        （--resources 覆盖）
+  - 声明:     GitOps resources/<project>/<env>/aws/*.yaml  （--resources 必填）
   - 共享模板: ../templates/{provider.tf, variables.tf, cloud-init.yaml,
                             hosts.tf.j2, inventory.ini.j2}
   - 运行目录: ../envs/<name>/  （--workdir 覆盖；渲染产物 + tfstate 落此，均 gitignore）
@@ -35,13 +35,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # scripts/ -> aws-cloud 根
 AWS_CLOUD_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 TEMPLATE_DIR = os.path.join(AWS_CLOUD_ROOT, "templates")
-GITOPS_ROOT = os.environ.get(
-    "GITOPS_ROOT", os.path.abspath(os.path.join(AWS_CLOUD_ROOT, "..", "..", "gitops"))
-)
 
-DEFAULT_RESOURCES = os.path.join(
-    GITOPS_ROOT, "resources", "svc.plus", "uat", "aws", "ai-workspace.yaml"
-)
 DEFAULT_WORKDIR = os.path.join(AWS_CLOUD_ROOT, "envs", "ai-workspace")
 
 # render 时从 templates/ 拷入运行目录的静态文件（使 workdir 成为独立根模块）。
@@ -50,6 +44,20 @@ COPY_INTO_WORKDIR = ["provider.tf", "variables.tf", "cloud-init.yaml"]
 # 逐主机可选字段的缺省值（集中定义，避免散落的硬编码字面量）。
 DEFAULT_PLAN = "vc2-4c-8gb"
 DEFAULT_ANSIBLE_USER = "root"
+
+# Operator-facing identity is deliberately separate from the Terraform
+# resource name and public FQDN.  Resource names remain state-compatible while
+# CMDB/inventory consumers get short, unambiguous node labels.
+NODE_METADATA_DEFAULTS = {
+    "node_id": "",
+    "short_hostname": "",
+    "display_name": "",
+    "cloud_provider": "aws",
+    "cloud_region": "",
+    "location": "",
+    "node_label": "",
+}
+VALID_AWS_PROVIDER_ALIASES = {"default", "us", "hk"}
 
 
 def _tf_id(value):
@@ -73,8 +81,10 @@ def _jinja():
 # —— 一个看起来像成功、实际错误的主机名。这里显式要求它必须存在。
 REQUIRED_TEMPLATE_ENV = (
     "TARGET_DOMAIN_BASE",
+    "SSH_PUBLIC_DEPLOY_KEY",
     "AI_AGGREGATOR_SSH_CIDR",
     "AI_AGGREGATOR_SOURCE_CIDR",
+    "AI_AGGREGATOR_SSH_PUBLIC_KEY",
 )
 
 
@@ -116,14 +126,32 @@ def cmd_render(args):
     ssh_keys = data.get("ssh_keys", []) or []
     hosts = data.get("hosts", []) or []
 
+    invalid_aliases = sorted(
+        {
+            str(host.get("aws_provider", "default"))
+            for host in hosts
+            if str(host.get("aws_provider", "default")) not in VALID_AWS_PROVIDER_ALIASES
+        }
+    )
+    if invalid_aliases:
+        raise SystemExit(
+            "Unsupported aws_provider alias(es): "
+            + ", ".join(invalid_aliases)
+            + ". Supported aliases: default, us, hk."
+        )
+
     rendered = (
         _jinja()
         .get_template("hosts.tf.j2")
         .render(
             ssh_keys=ssh_keys,
             hosts=hosts,
+            max_host_name_len=max((len(str(host["name"])) for host in hosts), default=0),
             management_cidrs=glob.get("management_cidrs", []),
             public_cidrs=glob.get("public_cidrs", []),
+            restrict_public_ingress=bool(
+                glob.get("management_cidrs") or glob.get("public_cidrs")
+            ),
             true=True,
             false=False,
         )
@@ -146,6 +174,9 @@ def cmd_render(args):
 
     tfvars = {
         "region": glob.get("region", "nrt"),
+        "aws_region": glob.get("aws_region", "ap-northeast-1"),
+        "aws_us_region": glob.get("aws_us_region", "us-east-1"),
+        "aws_hk_region": glob.get("aws_hk_region", "ap-east-1"),
         "name_prefix": glob.get("name_prefix", "ai-workspace"),
         "user_data_file": glob.get("user_data_file", "cloud-init.yaml"),
     }
@@ -170,6 +201,7 @@ def cmd_inventory(args):
     glob = data.get("global", {}) or {}
     hosts = data.get("hosts", []) or []
     default_region = glob.get("region", "nrt")
+    default_aws_region = glob.get("aws_region", "ap-northeast-1")
 
     try:
         runtime = _terraform_output(workdir, "cmdb_runtime")
@@ -188,8 +220,27 @@ def cmd_inventory(args):
         host_vars = dict(host.get("host_vars", {}) or {})
         host_vars.setdefault("os_name", host.get("os_name", ""))
         host_vars.setdefault("plan", host.get("plan", DEFAULT_PLAN))
-        host_vars.setdefault("region", host.get("region") or default_region)
-        host_vars.setdefault("private_ip", rt.get("private_ip") or "")
+        host_vars.setdefault(
+            "region", host.get("aws_region") or host.get("region") or default_aws_region
+        )
+        for key, default in NODE_METADATA_DEFAULTS.items():
+            value = host.get(key, default)
+            if key == "node_id" and not value:
+                value = name
+            if key == "short_hostname" and not value:
+                value = host_vars["node_id"]
+            if key == "display_name" and not value:
+                value = host_vars["short_hostname"]
+            if key == "cloud_region" and not value:
+                value = host.get("aws_region") or default_aws_region
+            # These fields are canonical resource metadata.  Assign rather
+            # than setdefault so an old host_vars entry cannot shadow the
+            # current node declaration.
+            host_vars[key] = value
+        host_vars["billing_mode"] = host.get("billing_mode", "on_demand")
+        host_vars["spot_instance"] = host.get("spot_instance", False)
+        host_vars["max_runtime_minutes"] = host.get("max_runtime_minutes", 0)
+        host_vars["ansible_port"] = host.get("ssh_port", 22)
 
         # inventory_hostname = service_domains 的首个 FQDN（动态取自资源声明 yaml）；
         # 无 service_domains 时回退到 name。CMDB / inventory / 分组均以此为键。
@@ -207,8 +258,19 @@ def cmd_inventory(args):
             "os_id": rt.get("os_id"),
             "os_name": host.get("os_name", ""),
             "plan": host.get("plan", DEFAULT_PLAN),
-            "region": host.get("region") or default_region,
+            "region": host.get("aws_region") or host.get("region") or default_aws_region,
+            "node_id": host_vars["node_id"],
+            "short_hostname": host_vars["short_hostname"],
+            "display_name": host_vars["display_name"],
+            "cloud_provider": host_vars["cloud_provider"],
+            "cloud_region": host_vars["cloud_region"],
+            "location": host_vars["location"],
+            "node_label": host_vars["node_label"],
+            "billing_mode": host_vars["billing_mode"],
+            "spot_instance": host_vars["spot_instance"],
+            "max_runtime_minutes": host_vars["max_runtime_minutes"],
             "ansible_user": host.get("ansible_user", DEFAULT_ANSIBLE_USER),
+            "ansible_port": host.get("ssh_port", 22),
             "groups": host.get("groups", []) or [],
             "tags": host.get("tags", []) or [],
             "host_vars": host_vars,
@@ -266,7 +328,7 @@ def cmd_inventory(args):
 
 
 def _add_common(p):
-    p.add_argument("--resources", default=DEFAULT_RESOURCES, help="资源声明 YAML 路径")
+    p.add_argument("--resources", required=True, help="GitOps 资源声明 YAML 路径")
     p.add_argument("--workdir", default=DEFAULT_WORKDIR, help="terraform 运行目录")
 
 

@@ -1,6 +1,17 @@
 # GCP Cloud Terraform Standard
 
-该目录提供与 `aws-cloud` 模板一一对应的 GCP 版本，用于在 GCP 上快速引导基础设施。结构与 AWS 目录保持一致，包括引导阶段 (bootstrap)、实例示例 (instance) 与模块库 (modules)。
+落地顺序、项目边界、OIDC/JWT 与 UAT→PROD 门禁见
+[`docs/gcp-landing-plan.md`](docs/gcp-landing-plan.md)。
+
+当前已落地 Terraform 核心模块：`project`（项目/API）、`network`（VPC/NAT）、
+`identity`（Service Account/WIF/IAM）、`vault_vm`（私有 Vault VM）、
+`artifact_registry` 和 `cloud_run`。UAT/PROD 由
+GitOps 仓库 `resources/xworktech.com/<env>/gcp/open-platform-*.yaml` 声明，使用
+`scripts/generate.py` 渲染为
+显式 Terraform 块；Vault KV v2 路径契约见
+[`docs/vault-kv-paths.md`](docs/vault-kv-paths.md)。
+
+该目录提供与 `aws-cloud` 模板一一对应的 GCP 版本，用于在 GCP 上快速引导基础设施。结构与 AWS 目录保持一致，包括引导阶段 (bootstrap)、实例示例 (instance) 与模块库 (modules)。运行 root 使用组织统一的 S3-compatible state backend，而不是 GCS backend；key 与 Vault 契约见 [`../../docs/howto/unified-iac-state-contract.md`](../../docs/howto/unified-iac-state-contract.md)。
 
 ## 模板映射
 - **bootstrap/identity → IAM**：创建基础服务账号与自定义角色，替代 AWS IAM 角色与策略。
@@ -20,12 +31,156 @@
   - `sg`：映射到 VPC 防火墙规则。
 
 ## 使用方式
-1. 在 `templates/backend.tf` 中配置远端状态（GCS 存储桶）。
-2. 在 `templates/provider.tf` 中设置 `project`、`region`、`credentials` 等参数。
-3. 按需修改 `instance` 下的实例示例，执行：
+1. 先在 GitOps 的 `resources/xworktech.com/<env>/gcp/` 修改环境资源清单，不把机密写入 YAML。
+2. 设置 `TF_VAR_billing_account_id`，渲染目标环境：
    ```bash
-   terraform -chdir=instance/vpc init
-   terraform -chdir=instance/vpc apply
+   python3 scripts/generate.py render \
+     --resources ../../../gitops/resources/xworktech.com/uat/gcp/open-platform-uat.yaml \
+     --workdir envs/uat
+   terraform -chdir=envs/uat init
+   terraform -chdir=envs/uat plan
    ```
+3. UAT 通过验证并获得发布审批后，再对 `open-platform-prod.yaml` 重复渲染和计划。
 
 本目录仅新增 GCP 代码，不改动现有 AWS 模板。
+
+## AI Aggregator UAT Spot
+
+The five-node UAT declaration lives in GitOps at
+`resources/xworktech.com/uat/gcp/ai-aggregator-vps-uat.yaml`. Render it with
+the shared `scripts/generate.py` into `envs/ai-aggregator-uat`. The existing
+`modules/spot_vm` provides the reusable Spot instance; the shared renderer
+expands each declared host into an explicit Terraform module and emits the
+CMDB and Ansible inventory from Terraform runtime outputs. This profile uses
+private VMs with IAP and OS Login, avoiding an external-IP policy exception.
+The gateway-to-CPA service ports are restricted by declared network tags.
+All five VMs have a 3600-second maximum runtime. Vault and Ansible own the
+service credentials and OAuth material.
+
+`bootstrap/identity` 已先创建 WIF Pool、Provider 和环境 deploy Service Account；
+平台运行目录默认 `create_project = false`，读取已存在的目标项目，并通过运行时
+Vault JWT -> Google STS/WIF 注入 `deploy_service_account` 和
+`workload_identity_provider`。这样平台 apply 不会再次创建身份资源，也不会要求
+使用 Service Account JSON key。
+
+渲染器同时写入 `templates/backend.tf`，统一使用组织 S3-compatible state backend；
+endpoint、bucket、key、access key、secret key 和 region 只由 workflow 从 Vault
+`CICD` 记录注入。
+
+UAT OIDC 验证可以在 GitOps manifest 的 `spot_vms` 列表声明最小 Compute Engine
+Spot VM。该模块复用已创建的 deploy Service Account，不创建新的长期密钥；资源
+完成验证后必须执行 Terraform destroy。
+
+## Workload namespace manifests
+
+`kind: GCPWorkloadNamespace` is the parameter-driven contract for independently
+managed GCP workload states. The manifest declares the project, account,
+region, workspace, state key, network inputs, and resource list; this renderer
+turns the declaration into Terraform modules. Each namespace state may declare
+`resources.spot_vms`, `resources.cloud_run_services`, and/or `resources.vault_nodes`.
+Vault nodes default to exactly one `xconnect_role: gateway` and any number of
+`xconnect_role: one` members, plus an SSH `/32` allowlist in
+`spec.ssh_source_ranges`. A state that owns only XConnect One members may set
+`spec.xconnect_mode: member`; it must then contain one or more `one` nodes and
+no gateway. Spot VMs require
+`name`, `zone`, and `machine_type`; `image` defaults to Debian 12 and
+`max_run_duration_seconds` defaults to 3600. Cloud Run entries require `name`
+and `image`, and may override `region`.
+
+The optional `spec.state_project` is the logical project segment used by the
+organization-wide state contract. When present, the state key must be
+`terraform/<environment>/<state_project>/gcp-cloud/<gcp_account_id>/<namespace>/terraform.tfstate`;
+the real `spec.project_id` remains the Google Cloud project that owns the
+resources. Omitting `state_project` preserves the legacy project-based key.
+
+`spec.enable_cloud_nat` defaults to `true`; set it to `false` for short-lived
+validation VMs that do not need outbound internet, avoiding an otherwise
+billable Cloud NAT gateway.
+
+Vault node manifests may set `enable_cloud_nat: false` and declare
+`ssh_source_ranges` as explicit IPv4 CIDRs. Vault VMs receive their own static
+external IPv4 address by default. Public service nodes with an external IP
+receive TCP 443 for their Caddy service entrypoint, regardless of whether the
+state owns the XConnect Gateway or only One/member nodes. Raft port 8200/8201
+remains private, and TCP 22 is limited to the declared SSH allowlist; do not
+use `0.0.0.0/0` for SSH. The current operator/proxy egress CIDR must be
+provided in GitOps before a plan can pass validation.
+
+For a shared Vault rollout, set `spec.ssh_access_mode: bootstrap-public` with
+the operator's exact public `/32` while installing the services. Only after
+XConnect Zero has enrolled the Gateway, One nodes, and operator Mac, and their
+assigned overlay IPs/internal names have been verified, switch to
+`ssh_access_mode: xconnect-zero` and an empty `ssh_source_ranges` list. The
+renderer then removes the GCP public TCP/22 firewall rule. Both modes keep IAP
+disabled. The Raft cluster always uses private VPC IPs, independent of the
+SSH connection address.
+
+When `enable_oslogin` is false (the default), an optional
+`TF_VAR_ssh_public_key` is installed as an instance-scoped metadata SSH key for
+each declared Vault VM; `TF_VAR_ssh_username` defaults to `github-actions`.
+Metadata-managed SSH keys grant sudo on the VM. For GitHub Actions, prefer
+`enable_oslogin: true` and an ephemeral SSH key uploaded to the OS Login profile
+using the run's Google WIF identity; the pipeline should delete the key and
+local private material after Ansible completes. This does not require IAP and
+retains the declared SSH `/32` firewall allowlist.
+
+For `spot_vms`, `enable_oslogin: true` writes `enable-oslogin=TRUE` and omits
+metadata `ssh-keys`. When false, the module omits the `enable-oslogin` key
+entirely so a project-level `compute.requireOsLogin` policy is never overridden
+with `FALSE`; callers in such projects must explicitly enable OS Login and
+provide a matching deployment SSH path. A successful VM plan alone does not
+prove that Ansible can sign in.
+
+A public Spot VM that serves traffic (for example a regional Agent Proxy)
+declares it on the VM:
+
+```yaml
+spot_vms:
+  - name: agent-proxy-us-uat
+    public_ip: true
+    network_tags: [agent-proxy-us]
+    public_tcp_ports: [80, 443]        # own firewall rule; 22 stays on spot_ssh
+    inventory_groups: [xconnect, agent_proxy]
+    host_vars:
+      service_domains: [us-xconnect.svc.plus]
+```
+
+`public_tcp_ports` renders one `0.0.0.0/0` firewall rule for the VM's
+`network_tags` and requires `public_ip: true`. When `host_vars.service_domains`
+is set, the CMDB and inventory key is the first service domain rather than the
+VM name — the same contract as the AWS and Akamai adapters, because the deploy
+jobs use that key as the node's public hostname — and `host_vars` are written
+as inline inventory variables. A VM that declares neither keeps its VM-name
+key and its plain inventory line. In a project with a
+`compute.vmExternalIpAccess` allowlist, the VM must also be listed in
+`external_ip_allowed_instances` of the namespace that owns the policy.
+
+For Vault Raft HA, the renderer also permits TCP 8200 (API/peer traffic) and
+8201 (Raft forwarding) only from the declared VPC subnet to Vault nodes. These
+ports are never exposed to the internet; configure Vault listener and cluster
+addresses to use the nodes' private IPs.
+
+`spec.enable_iap_ssh` remains a separate opt-in network path. It defaults to
+`false`. When enabled, the renderer permits TCP 22 from Google's IAP TCP
+forwarding range `35.235.240.0/20` and creates IAP tunnel IAM bindings.
+`spec.enable_oslogin` controls IAM-based SSH identity independently and can be
+used with direct SSH from the approved operator egress CIDR; only the declared
+Vault instances receive the OS Admin Login binding. For this path, the runtime
+WIF deploy service account needs permission to create an ephemeral OS Login key
+and to act as the three VM runtime service accounts. Do not enable IAP unless
+the network path is explicitly selected.
+
+The existing `global.cloud_run_service_name` / `cloud_run_image` form remains
+supported and keeps the original Terraform address (`module.cloud_run`) for
+state compatibility. `spot_vms` at the manifest root also remains supported.
+Namespace `state.key` must equal
+`terraform/<environment>/<project>/gcp-cloud/<account>/<workspace>/terraform.tfstate`.
+
+Terraform 只负责 GCP 基础资源；Vault secret value、Vault policy 和 Ansible 服务配置
+由对应运维链路管理。XConnect Zero 的 `net_security_vault`、`net_uat` 和
+`net_prod_dedicated` 网络事实必须来自 GitOps；existing Gateway 不进入 GCP
+Terraform state，只有 GitOps 明确选择 GCP 的 Terraform-managed Gateway 时才允许
+渲染资源。三网络职责契约见
+[`../../docs/howto/xconnect-zero-three-network-boundaries.md`](../../docs/howto/xconnect-zero-three-network-boundaries.md)。
+
+本目录保留既有 AWS/GCP 示例模块，不在新环境中使用 HCL 循环。

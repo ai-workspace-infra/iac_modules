@@ -1,6 +1,0 @@
-project_id: "modern-app-dev"
-topic: "dev-orders"
-subscription: "dev-orders-sub"
-
-message_retention_days: 7
-push_endpoint: "https://example.dev.internal/events"

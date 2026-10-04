@@ -1,7 +1,10 @@
 terraform {
   required_version = ">= 1.5.0"
   required_providers {
-    google = { source = "hashicorp/google" version = ">= 5.0" }
+    google = {
+      source  = "hashicorp/google"
+      version = ">= 5.0"
+    }
   }
 }
 
@@ -15,7 +18,7 @@ provider "google" {
 module "landingzone" {
   source     = "../../modules/landingzone"
   project_id = var.project_id
-  services   = [
+  services = [
     "compute.googleapis.com",
     "pubsub.googleapis.com",
     "sqladmin.googleapis.com",

@@ -2,9 +2,8 @@ SHELL := /bin/bash
 
 TF=terraform
 
-CONFIG_ROOT ?= ../../../../../gitops
-CONFIG_DIR ?= $(CONFIG_ROOT)/config
-export TF_VAR_config_root ?= $(CONFIG_ROOT)
+GITOPS_ROOT ?= ../../../../gitops
+CONFIG_DIR ?= $(GITOPS_ROOT)/resources/svc.plus/uat/aws
 
 render:
 	python ../../../utils/render_provider_backend.py \

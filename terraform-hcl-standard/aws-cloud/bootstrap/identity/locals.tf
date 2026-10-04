@@ -1,9 +1,7 @@
 locals {
   bootstrap_config_path = abspath(var.bootstrap_config_path)
-  config_root           = dirname(dirname(dirname(local.bootstrap_config_path)))
   bootstrap = yamldecode(file(local.bootstrap_config_path))
 
-  config_account_name   = local.bootstrap.account_name
   config_region         = local.bootstrap.region
   config_role_name      = local.bootstrap.iam.role_name
   config_terraform_user = local.bootstrap.iam.terraform_user_name
@@ -25,8 +23,7 @@ locals {
 }
 
 locals {
-  account_file_path = "${local.config_root}/config/accounts/${local.config_account_name}.yaml"
-  account = fileexists(local.account_file_path) ? yamldecode(file(local.account_file_path)) : {
+  account = {
     account_id  = local.bootstrap.account_id
     environment = local.environment
     tags        = local.extra_tags

@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.5"
+  required_version = ">= 1.10"
 
   required_providers {
     vultr = {
@@ -10,7 +10,7 @@ terraform {
 }
 
 provider "vultr" {
-  api_key = var.vultr_api_key
+  api_key    = var.vultr_api_key
   rate_limit = 700
 }
 

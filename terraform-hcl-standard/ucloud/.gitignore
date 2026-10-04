@@ -1,0 +1,4 @@
+# GitOps renders are disposable Terraform roots; keep only the dev example tracked.
+envs/sit/
+envs/uat/
+envs/prod/

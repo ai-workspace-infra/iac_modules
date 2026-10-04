@@ -1,0 +1,28 @@
+apiVersion: gitops.svc.plus/v1alpha1
+kind: GCPWorkloadNamespace
+metadata:
+  name: vault-shared
+  environment: shared
+  provider: gcp
+spec:
+  gcp_account_id: open-platform-prod
+  project_id: open-platform-prod
+  project_name: Shared Vault test fixture
+  organization_id: "744119519286"
+  region: asia-east1
+  workspace: vault-shared
+  state_namespace: vault-shared
+  network_name: vault-shared
+  subnet_cidr: 10.81.0.0/20
+  enable_cloud_nat: false
+  enable_iap_ssh: true
+  ssh_source_ranges: []
+  state:
+    key: terraform/shared/open-platform-prod/gcp-cloud/open-platform-prod/vault-shared/terraform.tfstate
+  resources:
+    vault_nodes:
+      - name: vault-prod-0
+        zone: asia-east1-a
+        machine_type: e2-highcpu-2
+        xconnect_role: gateway
+        public_ip: true

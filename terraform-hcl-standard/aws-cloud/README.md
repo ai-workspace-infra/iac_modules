@@ -17,18 +17,28 @@ Both modules can be run independently.
 
 ## Config Source of Truth (GitOps)
 
-All AWS config YAML now lives in the external GitOps repo:
+Environment and account declarations live in the external GitOps repository. This
+repository contains reusable Terraform modules, templates, renderers, and run
+directories only.
 
 ```
-https://github.com/cloud-neutral-workshop/gitops.git
+https://github.com/ai-workspace-infra/gitops.git
 ```
 
-Clone it next to this repo (default path used in Terraform), or override with
-`TF_VAR_config_root`:
+Clone it next to this repo and export `GITOPS_ROOT` for scripts that consume declarations:
 
 ```
-git clone https://github.com/cloud-neutral-workshop/gitops.git ../gitops
-export TF_VAR_config_root="$(cd ../gitops && pwd)"
+git clone https://github.com/ai-workspace-infra/gitops.git ../gitops
+export GITOPS_ROOT="$(cd ../gitops && pwd)"
+```
+
+Pass the declaration file explicitly to `scripts/generate.py`; the renderer
+does not fall back to an iac_modules-local config directory:
+
+```bash
+python3 scripts/generate.py render \
+  --resources "$GITOPS_ROOT/resources/svc.plus/uat/aws/ai-aggregator.yaml" \
+  --workdir envs/ai-aggregator-uat
 ```
 
 ## 1. AWS Credentials Setup
@@ -139,7 +149,39 @@ Then run:
 
 terraform init -migrate-state
 
-5. Security Notes
+## Multi-region production Agent Proxy
+
+The production Agent Proxy declaration keeps the stable Tokyo node on the
+default `aws` provider and declares the ephemeral US node with the explicit
+`aws.us` provider alias. Both hosts use `t4g.micro` (2 vCPU / 1 GiB); Tokyo is
+on-demand and continuously running with its existing EIP, while US is a
+one-time Spot request with a 60-minute self-termination timer and no EIP.
+
+The regional topology is declared in
+`$GITOPS_ROOT/resources/svc.plus/prod/aws/agent-proxy.yaml`. `generate.py` renders one explicit
+provider-scoped data/resource/module set per host, then `generate.py inventory`
+publishes both hosts to the CMDB. The deployment workflow uses each CMDB host
+key as `AGENT_PROXY_DOMAIN`, so Caddy and Xray do not share a hard-coded
+hostname across regional nodes. The public names are
+`agent-proxy-selfhost-prod-jp.<zone>` and `agent-proxy-selfhost-prod-us.<zone>`;
+the Tokyo resource and its existing EIP remain unchanged.
+
+### Short node identity
+
+Each Agent Proxy declaration also carries a compact operator-facing identity:
+
+| Node | `node_id` / `short_hostname` | `node_label` | Region | Billing |
+| --- | --- | --- | --- | --- |
+| Tokyo primary | `ap-prod-tky` | `tky-on-demand` | `ap-northeast-1` | on-demand |
+| US edge | `ap-prod-us` | `us-spot` | `us-east-1` | Spot, 60 min |
+
+`display_name` is emitted to CMDB as the concise form (for example,
+`ap-prod-us (us-spot)`). These fields are also exposed through Ansible
+hostvars. The public service FQDNs remain unchanged so existing subscriptions
+and DNS records are not invalidated; the compact names are for AWS console,
+CMDB, dashboards, and operator lists.
+
+## Security Notes
 
 Never store AWS credentials in Terraform variables
 Never commit credentials to Git
@@ -159,10 +201,10 @@ To remove bootstrap resources:
 
 terraform destroy
 
-Resource names (bucket, DynamoDB table, IAM role/user) are defined in the GitOps repo at `config/accounts/bootstrap.yaml`. When tearing down the S3 backend, empty the configured bucket with AWS CLI first:
+Resource names (bucket, DynamoDB table, IAM role/user) are defined in the GitOps bootstrap declaration at `$GITOPS_ROOT/resources/svc.plus/prod/aws/bootstrap-identity.yaml`. Set `CONFIG_PATH` to that file before tearing down the S3 backend:
 
 ```
-aws s3 rb "s3://$(python -c "import os,yaml;root=os.environ.get('TF_VAR_config_root','../gitops');print(yaml.safe_load(open(f'{root}/config/accounts/bootstrap.yaml'))['state']['bucket_name'])")" --force
+aws s3 rb "s3://$(python -c "import os,yaml;print(yaml.safe_load(open(os.environ['CONFIG_PATH']))['state']['bucket_name'])")" --force
 ```
 
 

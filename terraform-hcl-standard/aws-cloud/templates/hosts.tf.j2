@@ -6,35 +6,76 @@
 # 每台主机、每个 SSH key 都渲染成独立的显式 module/resource/data 块。
 # =============================================================================
 
-data "aws_vpc" "default" {
-  default = true
-}
-
-data "aws_subnets" "default" {
-  filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.default.id]
-  }
-}
-
-{% for key in ssh_keys -%}
+{# Keep the historical default-provider key-pair addresses stable. A state
+   migration must not destroy an existing AWS key pair merely because a new
+   regional provider was added. #}
+{% for key in ssh_keys %}
 resource "aws_key_pair" "{{ key.name | tf_id }}" {
   key_name   = "{{ key.name }}"
   public_key = "{{ key.public }}"
 }
+{% endfor %}
 
-{% endfor -%}
-{% for host in hosts -%}
-{%- set hid = host.name | tf_id -%}
-{%- set ephemeral = host.get('lifecycle', 'persistent') == 'ephemeral' or host.get('spot_instance', false) -%}
-# ami filter for Debian 12 ARM64
+{% for host in hosts %}
+{% set hid = host.name | tf_id %}
+{% set provider_alias = host.get('aws_provider', 'default') %}
+{% set provider_ref = 'aws.' ~ provider_alias if provider_alias != 'default' else 'aws' %}
+{% set base_key_id = ssh_keys[0].name | tf_id %}
+{% set host_key_id = 'key_' ~ hid ~ '_' ~ base_key_id %}
+{% set short_name = host.get('short_hostname', host.name) %}
+{% set ai_spot = restrict_public_ingress and host.get('role') in ['gateway', 'cpa'] and host.get('lifecycle') == 'ephemeral' %}
+{% set ami_id = host.get('ami_id') %}
+{% set ami_name_patterns = host.get('ami_name_patterns', ['debian-13-arm64-*', 'debian-12-arm64-*']) %}
+{% set ami_expression = '"' ~ ami_id ~ '"' if ami_id else 'data.aws_ami.debian_' ~ hid ~ '.id' %}
+{% if provider_alias != 'default' %}
+resource "aws_key_pair" "{{ host_key_id }}" {
+  provider   = {{ provider_ref }}
+  key_name   = "{{ ssh_keys[0].name }}"
+  public_key = "{{ ssh_keys[0].public }}"
+}
+{% endif %}
+data "aws_vpc" "default_{{ hid }}" {
+  provider = {{ provider_ref }}
+  default  = true
+}
+
+data "aws_subnets" "default_{{ hid }}" {
+  provider = {{ provider_ref }}
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.default_{{ hid }}.id]
+  }
+}
+
+{% if host.get('availability_zone') %}
+data "aws_subnet" "selected_{{ hid }}" {
+  provider = {{ provider_ref }}
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.default_{{ hid }}.id]
+  }
+  filter {
+    name   = "availability-zone"
+    values = ["{{ host.get('availability_zone') }}"]
+  }
+}
+{% endif %}
+
+{% if ami_id -%}
+# This host is intentionally pinned to an immutable AMI.  Production hosts
+# with deletion protection must not be replaced merely because an upstream
+# "most recent" image query starts returning a newer image.
+{% else -%}
+# Prefer the newest Debian 13 ARM64 image; retain Debian 12 ARM64 as a
+# compatibility candidate while regions finish publishing Debian 13 images.
 data "aws_ami" "debian_{{ hid }}" {
+  provider    = {{ provider_ref }}
   most_recent = true
   owners      = ["136693071363"] # Debian
 
   filter {
     name   = "name"
-    values = ["debian-12-arm64-*"]
+    values = {{ ami_name_patterns | tojson }}
   }
 
   filter {
@@ -42,20 +83,22 @@ data "aws_ami" "debian_{{ hid }}" {
     values = ["hvm"]
   }
 }
+{% endif %}
 
 resource "aws_security_group" "sg_{{ hid }}" {
+  provider    = {{ provider_ref }}
   name_prefix = "{{ host.name }}-sg"
-  vpc_id      = data.aws_vpc.default.id
+  vpc_id      = data.aws_vpc.default_{{ hid }}.id
 
+{% if restrict_public_ingress %}
 {% for cidr in management_cidrs %}
   ingress {
-    from_port   = 22
-    to_port     = 22
+    from_port   = {{ host.get('ssh_port', 22) }}
+    to_port     = {{ host.get('ssh_port', 22) }}
     protocol    = "tcp"
     cidr_blocks = ["{{ cidr }}"]
   }
 {% endfor %}
-
 {% if host.get('role') == 'gateway' %}
 {% for cidr in public_cidrs %}
   ingress {
@@ -66,7 +109,6 @@ resource "aws_security_group" "sg_{{ hid }}" {
   }
 {% endfor %}
 {% endif %}
-
 {% if host.get('role') == 'cpa' and host.get('service_port') %}
   ingress {
     from_port       = {{ host.service_port }}
@@ -75,6 +117,37 @@ resource "aws_security_group" "sg_{{ hid }}" {
     security_groups = [aws_security_group.sg_{{ (hosts | selectattr('role', 'equalto', 'gateway') | map(attribute='name') | first) | tf_id }}.id]
   }
 {% endif %}
+{% else %}
+  ingress {
+    from_port   = {{ host.get('ssh_port', 22) }}
+    to_port     = {{ host.get('ssh_port', 22) }}
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+{% endif %}
+
+{% for rule in host.get('security_group_ingress', []) %}
+  ingress {
+    from_port   = {{ rule.port }}
+    to_port     = {{ rule.port }}
+    protocol    = "{{ rule.protocol }}"
+    cidr_blocks = ["{{ rule.cidr }}"]
+  }
+{% endfor %}
 
   egress {
     from_port   = 0
@@ -85,64 +158,82 @@ resource "aws_security_group" "sg_{{ hid }}" {
 }
 
 module "compute_{{ hid }}" {
-{% if ephemeral %}
+{% if ai_spot %}
   source = "../../modules/spot_ec2"
 {% else %}
   source = "../../modules/ec2"
 {% endif %}
-
-  name_prefix = var.name_prefix != "" ? "${var.name_prefix}-{{ host.name }}" : "{{ host.name }}"
-  
-  instance = {
-    type = "{{ host.plan | default('t4g.small') }}"
-    ami  = data.aws_ami.debian_{{ hid }}.id
+  providers = {
+    aws = {{ provider_ref }}
   }
 
-  subnet_id = data.aws_subnets.default.ids[0]
-  sg_id     = aws_security_group.sg_{{ hid }}.id
-  keypair_name = aws_key_pair.{{ ssh_keys[0].name | tf_id }}.key_name
-{% if not ephemeral %}
-  elastic_ip = {{ host.get('elastic_ip', false) | tojson }}
-  deletion_protection = {{ host.get('deletion_protection', false) | tojson }}
+  # Keep the AWS console Name tag concise; the Terraform module/resource
+  # address still uses `hid` and therefore remains state-compatible.
+  name_prefix = var.name_prefix != "" ? "${var.name_prefix}-{{ short_name }}" : "{{ short_name }}"
+
+  instance = {
+    type = "{{ host.plan | default('t4g.small') }}"
+    ami  = {{ ami_expression }}
+  }
+
+{% if host.get('availability_zone') %}
+  subnet_id           = data.aws_subnet.selected_{{ hid }}.id
+{% else %}
+  # No subnet/AZ is forced by default. AWS chooses an available AZ in the
+  # default VPC, avoiding capacity failure caused by pinning to the first
+  # subnet returned by the API.
+  subnet_id           = null
 {% endif %}
-{% if ephemeral %}
+  sg_id               = aws_security_group.sg_{{ hid }}.id
+  keypair_name        = aws_key_pair.{{ host_key_id if provider_alias != 'default' else base_key_id }}.key_name
+{% if ai_spot %}
   user_data = <<-EOT
-#cloud-config
-package_update: false
-runcmd:
-  - [ bash, -lc, "systemd-run --unit=ai-aggregator-ttl --on-active={{ host.get('max_runtime_minutes', 60) }}m --property=NoNewPrivileges=true /sbin/shutdown -h now" ]
+#!/bin/sh
+set -eu
+(
+  sleep {{ host.get('max_runtime_minutes', 60) * 60 }}
+  /sbin/shutdown -h now
+) >/var/log/ai-aggregator-ttl.log 2>&1 &
 EOT
+{% else %}
+  ssh_port            = {{ host.get('ssh_port', 22) }}
+  elastic_ip          = {{ host.get('elastic_ip', false) | tojson }}
+  deletion_protection = {{ host.get('deletion_protection', false) | tojson }}
+  spot_instance       = {{ host.get('spot_instance', false) | tojson }}
+  max_runtime_minutes = {{ host.get('max_runtime_minutes', 0) }}
 {% endif %}
-  
+
   tags = merge(
     { for t in concat([var.name_prefix], {{ host.get('tags', []) | tojson }}) : "Tag_${t}" => "true" if t != "" },
     { Name = var.name_prefix != "" ? "${var.name_prefix}-{{ host.name }}" : "{{ host.name }}" }
   )
 }
 
-{% endfor -%}
+{% endfor %}
 
 output "cmdb_runtime" {
   description = "name -> {ip, instance_id, os_id}"
   value = {
-{% for host in hosts -%}
-{%- set hid = host.name | tf_id %}
+{% for host in hosts %}
+{% set hid = host.name | tf_id %}
+{% set ami_id = host.get('ami_id') %}
+{% set ami_expression = '"' ~ ami_id ~ '"' if ami_id else 'data.aws_ami.debian_' ~ hid ~ '.id' %}
     "{{ host.name }}" = {
       ip          = module.compute_{{ hid }}.public_ip
       private_ip  = module.compute_{{ hid }}.private_ip
       instance_id = module.compute_{{ hid }}.instance_id
-      os_id       = data.aws_ami.debian_{{ hid }}.id
+      os_id       = {{ ami_expression }}
     }
-{% endfor -%}
+{% endfor %}
   }
 }
 
 output "hosts_summary" {
   description = "name -> public_ip"
   value = {
-{% for host in hosts -%}
-{%- set hid = host.name | tf_id %}
-    "{{ host.name }}" = module.compute_{{ hid }}.public_ip
-{% endfor -%}
+{% for host in hosts %}
+{% set hid = host.name | tf_id %}
+    "{{ host.name }}"{{ ' ' * ((max_host_name_len | default(host.name | length)) - (host.name | length) + 1) }}= module.compute_{{ hid }}.public_ip
+{% endfor %}
   }
 }
