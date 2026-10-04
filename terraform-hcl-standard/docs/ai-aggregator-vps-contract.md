@@ -9,6 +9,12 @@ providers:
 - `cpa-claude-01`
 - `cpa-grok-01`
 
+Environment and provider declarations are maintained in GitOps:
+`resources/svc.plus/uat/aws/ai-aggregator.yaml`,
+`resources/xworktech.com/uat/gcp/ai-aggregator-vps-uat.yaml`, and
+`resources/svc.plus/prod/vultr/ai-aggregator-vps-prod.yaml`. IaC owns the
+provider modules, shared renderers, and Terraform execution adapters.
+
 Each provider adapter exposes the same runtime facts to CMDB:
 `provider`, `environment`, `role`, `lifecycle`, `instance_id`, `public_ip`,
 `private_ip`, `region_or_zone`, `os`, `architecture`, and `expires_at` for
