@@ -3,6 +3,12 @@
 The logical node IDs are defined by GitOps and must remain stable across
 providers:
 
+Environment and provider declarations are maintained in the GitOps repository:
+`resources/svc.plus/uat/aws/ai-aggregator.yaml`,
+`resources/xworktech.com/uat/gcp/ai-aggregator-vps-uat.yaml`, and
+`resources/svc.plus/prod/vultr/ai-aggregator-vps-prod.yaml`. IaC keeps the
+provider modules, shared renderers, and Terraform execution adapters.
+
 - `gateway-01`
 - `cpa-codex-01`
 - `cpa-codex-02`
