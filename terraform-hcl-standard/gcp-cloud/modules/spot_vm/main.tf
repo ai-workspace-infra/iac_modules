@@ -78,6 +78,35 @@ variable "max_run_duration_seconds" {
   }
 }
 
+variable "provisioning_model" {
+  description = "SPOT for legacy disposable VMs; STANDARD for durable service hosts."
+  type        = string
+  default     = "SPOT"
+
+  validation {
+    condition     = contains(["SPOT", "STANDARD"], var.provisioning_model)
+    error_message = "provisioning_model must be SPOT or STANDARD."
+  }
+}
+
+variable "deletion_protection" {
+  description = "Protect a durable service host against accidental API deletion."
+  type        = bool
+  default     = false
+}
+
+variable "data_disk_id" {
+  description = "Optional independently managed persistent data disk."
+  type        = string
+  default     = ""
+}
+
+variable "data_disk_device_name" {
+  description = "Stable Linux /dev/disk/by-id/google-* name for the data disk."
+  type        = string
+  default     = "web-saas-data"
+}
+
 resource "google_compute_instance" "this" {
   project                   = var.project_id
   name                      = var.name
@@ -86,6 +115,7 @@ resource "google_compute_instance" "this" {
   allow_stopping_for_update = true
   labels                    = var.labels
   tags                      = var.network_tags
+  deletion_protection       = var.deletion_protection
   # Never write enable-oslogin=FALSE: projects under the requireOsLogin
   # organization policy reject it (HTTP 412). OS Login VMs take SSH keys from
   # the deploy principal's OS Login profile, so they carry no metadata keys.
@@ -101,13 +131,31 @@ resource "google_compute_instance" "this" {
       condition     = !var.public_ip || var.enable_oslogin || trimspace(var.ssh_public_key) != ""
       error_message = "A public Spot VM requires OS Login or an SSH public key from the deploy environment."
     }
+    precondition {
+      condition     = var.provisioning_model != "STANDARD" || (var.deletion_protection && var.data_disk_id != "")
+      error_message = "A STANDARD service host requires deletion protection and an independent data disk."
+    }
+    precondition {
+      condition     = var.provisioning_model != "STANDARD" || var.max_run_duration_seconds == null
+      error_message = "A STANDARD service host must not have a maximum run duration."
+    }
   }
 
   boot_disk {
+    auto_delete = var.provisioning_model == "SPOT"
     initialize_params {
       image = var.image
       size  = 20
       type  = "pd-balanced"
+    }
+  }
+
+  dynamic "attached_disk" {
+    for_each = var.data_disk_id == "" ? [] : [var.data_disk_id]
+    content {
+      source      = attached_disk.value
+      device_name = var.data_disk_device_name
+      mode        = "READ_WRITE"
     }
   }
 
@@ -121,11 +169,11 @@ resource "google_compute_instance" "this" {
   }
 
   scheduling {
-    automatic_restart           = false
-    on_host_maintenance         = "TERMINATE"
-    preemptible                 = true
-    provisioning_model          = "SPOT"
-    instance_termination_action = "STOP"
+    automatic_restart           = var.provisioning_model == "STANDARD"
+    on_host_maintenance         = var.provisioning_model == "STANDARD" ? "MIGRATE" : "TERMINATE"
+    preemptible                 = var.provisioning_model == "SPOT"
+    provisioning_model          = var.provisioning_model
+    instance_termination_action = var.provisioning_model == "SPOT" ? "STOP" : null
 
     dynamic "max_run_duration" {
       for_each = var.max_run_duration_seconds == null ? [] : [var.max_run_duration_seconds]

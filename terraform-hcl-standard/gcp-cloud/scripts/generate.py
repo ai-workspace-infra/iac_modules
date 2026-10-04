@@ -53,7 +53,7 @@ def normalize_resources(document):
         return (
             global_config,
             list(document.get("vault_nodes", [])),
-            list(document.get("spot_vms", [])),
+            [*document.get("spot_vms", []), *document.get("service_vms", [])],
             cloud_run_services,
             legacy_cloud_run,
         )
@@ -142,7 +142,9 @@ def normalize_resources(document):
     for service in cloud_run_services:
         service.setdefault("region", global_config.get("region"))
         service["module_name"] = f"cloud_run_{tf_id(service['name'])}"
-    spot_vms = [dict(item) for item in resources.get("spot_vms", [])]
+    # Retain legacy spot_* Terraform addresses while accepting durable service
+    # VMs in the same renderer. Renaming module addresses would replace hosts.
+    spot_vms = [dict(item) for item in [*resources.get("spot_vms", []), *resources.get("service_vms", [])]]
     vault_nodes = [dict(item) for item in resources.get("vault_nodes", [])]
     if not spot_vms and not cloud_run_services and not vault_nodes:
         raise SystemExit("GCPWorkloadNamespace must declare at least one supported resource")
@@ -191,6 +193,29 @@ def normalize_resources(document):
             vm["max_run_duration_seconds"] = duration
         if not isinstance(vm.get("enable_oslogin", False), bool):
             raise SystemExit("Spot VM enable_oslogin must be a boolean")
+        model = vm.get("provisioning_model", "SPOT")
+        if model not in {"SPOT", "STANDARD"}:
+            raise SystemExit("VM provisioning_model must be SPOT or STANDARD")
+        if not isinstance(vm.get("deletion_protection", False), bool):
+            raise SystemExit("VM deletion_protection must be a boolean")
+        data_disk = vm.get("data_disk")
+        if data_disk is not None:
+            if not isinstance(data_disk, dict):
+                raise SystemExit("VM data_disk must be an object")
+            if not re.fullmatch(r"[a-z][a-z0-9-]{0,61}[a-z0-9]", str(data_disk.get("name", ""))):
+                raise SystemExit("VM data_disk.name must be a GCP disk name")
+            if type(data_disk.get("size_gb")) is not int or data_disk["size_gb"] < 50:
+                raise SystemExit("VM data_disk.size_gb must be at least 50")
+            if data_disk.get("type", "pd-balanced") not in {"pd-balanced", "pd-ssd", "pd-standard"}:
+                raise SystemExit("VM data_disk.type must be a persistent disk type")
+            if data_disk.get("mount_path") != "/data":
+                raise SystemExit("VM data_disk.mount_path must be /data")
+            if not re.fullmatch(r"[a-z][a-z0-9-]{0,61}[a-z0-9]", str(data_disk.get("device_name", ""))):
+                raise SystemExit("VM data_disk.device_name must be a stable GCP device name")
+        if model == "STANDARD" and (not vm.get("deletion_protection") or data_disk is None):
+            raise SystemExit("STANDARD service VMs require deletion_protection and data_disk")
+        if model == "STANDARD" and "max_run_duration_seconds" in vm:
+            raise SystemExit("STANDARD service VMs must not have max_run_duration_seconds")
         if vm.get("public_ip") and not global_config.get("spot_ssh_source_ranges"):
             raise SystemExit("public Spot VMs require spot_ssh_source_ranges")
         if not isinstance(vm.get("inventory_groups", []), list) or any(
@@ -199,6 +224,12 @@ def normalize_resources(document):
         ):
             raise SystemExit("Spot VM inventory_groups must contain Ansible group names")
         validate_spot_service_declaration(vm)
+    if resources.get("service_vms") and any(
+        vm.get("provisioning_model") != "STANDARD" for vm in resources["service_vms"]
+    ):
+        raise SystemExit("service_vms must explicitly use STANDARD provisioning")
+    if spec.get("resource", {}).get("lifecycle") == "persistent" and not resources.get("service_vms"):
+        raise SystemExit("persistent workload namespaces require service_vms")
     return (
         global_config,
         vault_nodes,
@@ -510,6 +541,15 @@ def inventory(args):
             "tags": vm.get("tags", []) or [],
             "host_vars": host_vars if vm.get("host_vars") else {},
         }
+        if vm.get("data_disk"):
+            disk_id = facts.get("data_disk_id")
+            if not disk_id:
+                raise SystemExit(f"VM {vm['name']} has no provisioned data disk in Terraform output")
+            cmdb[inventory_name]["data_disk"] = {
+                "id": disk_id,
+                "device_name": facts.get("data_disk_device_name"),
+                "mount_path": vm["data_disk"]["mount_path"],
+            }
     (workdir / "cmdb.json").write_text(json.dumps(cmdb, indent=2) + "\n", encoding="utf-8")
     lines = ["[vault]"]
     lines.extend(
