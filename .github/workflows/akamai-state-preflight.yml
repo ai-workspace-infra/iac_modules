@@ -1,0 +1,130 @@
+name: Akamai state preflight
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: Target environment (only uat is supported)
+        required: true
+        type: string
+      account:
+        description: Akamai account identifier used in Vault role and state keys
+        required: true
+        type: string
+      gitops_ref:
+        description: GitOps revision containing Akamai manifests
+        required: false
+        default: main
+        type: string
+      correlation_id:
+        description: Caller-provided identifier recorded in the sanitized receipt
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: akamai-state-preflight-${{ inputs.environment }}-${{ inputs.account }}
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    name: Read-only UAT state and Linode inventory
+    runs-on: ubuntu-latest
+    environment:
+      name: uat
+    env:
+      VAULT_ADDR: https://vault.svc.plus
+      AKAMAI_ACCOUNT: ${{ inputs.account }}
+      TF_IN_AUTOMATION: "1"
+      CHECKPOINT_DISABLE: "1"
+    steps:
+      - name: Enforce UAT-only scope
+        env:
+          PREFLIGHT_ENVIRONMENT: ${{ inputs.environment }}
+          PREFLIGHT_ACCOUNT: ${{ inputs.account }}
+          PREFLIGHT_CORRELATION_ID: ${{ inputs.correlation_id }}
+        run: |
+          set -euo pipefail
+          test "$PREFLIGHT_ENVIRONMENT" = uat
+          [[ "$PREFLIGHT_ACCOUNT" =~ ^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$ ]]
+          [[ "$PREFLIGHT_CORRELATION_ID" =~ ^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$ ]]
+
+      - name: Checkout IaC preflight implementation
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: iac_modules
+          persist-credentials: false
+
+      - name: Checkout GitOps manifests
+        uses: actions/checkout@v4
+        with:
+          repository: ai-workspace-infra/gitops
+          ref: ${{ inputs.gitops_ref }}
+          path: gitops
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install manifest parser dependencies
+        run: python -m pip install --disable-pip-version-check PyYAML==6.0.2 Jinja2==3.1.6
+
+      - name: Load UAT Akamai and state read credentials from Vault
+        id: vault
+        uses: hashicorp/vault-action@v4
+        with:
+          url: https://vault.svc.plus
+          method: jwt
+          role: github-actions-platform-ops-toolkit-uat-akamai-oidc-bootstrap-${{ inputs.account }}
+          jwtGithubAudience: vault
+          exportToken: false
+          secrets: |
+            kv/data/CICD/uat/akamai-cloud/${{ inputs.account }} LINODE_TOKEN | LINODE_TOKEN ;
+            kv/data/CICD/uat/iac_state TF_STATE_ENDPOINT | TF_STATE_ENDPOINT ;
+            kv/data/CICD/uat/iac_state TF_STATE_BUCKET | TF_STATE_BUCKET ;
+            kv/data/CICD/uat/iac_state TF_STATE_ACCESS_KEY | TF_STATE_ACCESS_KEY ;
+            kv/data/CICD/uat/iac_state TF_STATE_SECRET_KEY | TF_STATE_SECRET_KEY ;
+            kv/data/CICD/uat/iac_state TF_STATE_REGION | TF_STATE_REGION
+
+      - name: Set up Terraform CLI
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+
+      - name: Inspect legacy and namespace states (read-only)
+        env:
+          LINODE_TOKEN: ${{ steps.vault.outputs.LINODE_TOKEN }}
+          TF_STATE_ENDPOINT: ${{ steps.vault.outputs.TF_STATE_ENDPOINT }}
+          TF_STATE_BUCKET: ${{ steps.vault.outputs.TF_STATE_BUCKET }}
+          TF_STATE_ACCESS_KEY: ${{ steps.vault.outputs.TF_STATE_ACCESS_KEY }}
+          TF_STATE_SECRET_KEY: ${{ steps.vault.outputs.TF_STATE_SECRET_KEY }}
+          TF_STATE_REGION: ${{ steps.vault.outputs.TF_STATE_REGION }}
+          PREFLIGHT_JSON_PATH: ${{ runner.temp }}/akamai-state-preflight.json
+          PREFLIGHT_ACCOUNT: ${{ inputs.account }}
+          PREFLIGHT_ENVIRONMENT: ${{ inputs.environment }}
+          PREFLIGHT_CORRELATION_ID: ${{ inputs.correlation_id }}
+        run: |
+          set -euo pipefail
+          python "$GITHUB_WORKSPACE/iac_modules/scripts/akamai_state_preflight.py" \
+            --gitops-root "$GITHUB_WORKSPACE/gitops" \
+            --iac-root "$GITHUB_WORKSPACE/iac_modules" \
+            --environment "$PREFLIGHT_ENVIRONMENT" \
+            --account "$PREFLIGHT_ACCOUNT" \
+            --correlation-id "$PREFLIGHT_CORRELATION_ID" \
+            --output "$PREFLIGHT_JSON_PATH"
+
+      - name: Upload sanitized preflight receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: akamai-state-preflight
+          path: ${{ runner.temp }}/akamai-state-preflight.json
+          if-no-files-found: ignore
+          retention-days: 7
