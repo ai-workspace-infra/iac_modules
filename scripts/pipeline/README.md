@@ -22,6 +22,7 @@ these scripts from the Terraform working directory, so every relative path in th
 | `gcp-temporary-ssh-access.sh open\|close` | short-lived runner SSH access to one OS Login VM: RUNNING reconcile, target facts, one-run OS Login key with TTL, runner-/32 tag-scoped tcp:22 rule; revocation with rollback |
 | `verify-aws-boot-health.sh` | EC2 status-check gate |
 | `cloudflare-dns-record.py` | single A-record cutover/rollback with an environment-bound checkpoint and guarded recovery; see [contract](cloudflare-dns-record.md) |
+| `dns-reconcile.py plan\|apply\|restore` | UAT gateway single-A upsert with explicit account/zone/record identity, checkpoint recovery and exact resolver verification; see [contract](dns-reconcile.md) |
 | `artifact-registry-wait.sh` | bounded wait for an exact image tag or digest in Artifact Registry |
 | `artifact-registry-promote.sh` | idempotent, same-digest image promotion into a target repository |
 
