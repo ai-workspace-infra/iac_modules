@@ -61,16 +61,16 @@ export GITHUB_OUTPUT="${work}/outputs"
 "${promoter}" > /dev/null
 [[ "$(cat "${FAKE_TARGET_DIGEST}")" == "${digest}" ]]
 [[ "$(cat "${GITHUB_OUTPUT}")" == "digest=${digest}" ]]
-[[ "$(rg -c 'container images add-tag' "${FAKE_GCLOUD_LOG}")" == 1 ]]
+[[ "$(grep -c 'container images add-tag' "${FAKE_GCLOUD_LOG}")" == 1 ]]
 
 : > "${FAKE_GCLOUD_LOG}"
 "${promoter}" > /dev/null
-! rg -q 'add-tag' "${FAKE_GCLOUD_LOG}"
+! grep -q 'add-tag' "${FAKE_GCLOUD_LOG}"
 
 printf '%s\n' "${other}" > "${FAKE_TARGET_DIGEST}"
 : > "${FAKE_GCLOUD_LOG}"
 ! "${promoter}" > /dev/null 2>&1
-! rg -q 'add-tag' "${FAKE_GCLOUD_LOG}"
+! grep -q 'add-tag' "${FAKE_GCLOUD_LOG}"
 
 rm "${FAKE_TARGET_DIGEST}"
 export FAKE_COPY_DIGEST="${other}"
@@ -81,6 +81,6 @@ PROMOTION_MANIFEST="$(jq -nc --arg d "${digest}" --arg i "${ARTIFACT_IMAGE_REPOS
   '{images:[{service:"accounts", image:$i, digest:$d},{service:"accounts", image:$i, digest:$d}]}' )"
 : > "${FAKE_GCLOUD_LOG}"
 ! "${promoter}" > /dev/null 2>&1
-! rg -q 'add-tag' "${FAKE_GCLOUD_LOG}"
+! grep -q 'add-tag' "${FAKE_GCLOUD_LOG}"
 
 echo 'artifact_registry_release_test: PASS'
