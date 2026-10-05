@@ -254,6 +254,11 @@ def normalize_resources(document):
             raise SystemExit(
                 f"persistent data disk {name} must target a declared VM with the same zone"
             )
+        target_vm = next(vm for vm in spot_vms if vm["name"] == instance and vm["zone"] == zone)
+        if target_vm.get("data_disk") is not None:
+            raise SystemExit(
+                f"VM {instance} cannot use both legacy data_disk and persistent_data_disks"
+            )
         if not zone.startswith(f"{global_config['region']}-"):
             raise SystemExit(f"persistent data disk zone {zone} must belong to region {global_config['region']}")
         disk_names.append(tf_id(name))
@@ -617,6 +622,31 @@ def inventory(args):
                 "device_name": facts.get("data_disk_device_name"),
                 "mount_path": vm["data_disk"]["mount_path"],
             }
+        declared_persistent_disks = [
+            disk for disk in global_config.get("persistent_data_disks", [])
+            if disk["instance"] == vm["name"]
+        ]
+        if declared_persistent_disks:
+            runtime_disks = facts.get("persistent_data_disks", [])
+            runtime_by_name = {disk.get("name"): disk for disk in runtime_disks}
+            expected_names = {disk["name"] for disk in declared_persistent_disks}
+            if set(runtime_by_name) != expected_names:
+                raise SystemExit(
+                    f"VM {vm['name']} Terraform output does not match declared persistent data disks"
+                )
+            cmdb[inventory_name]["persistent_data_disks"] = []
+            for disk in declared_persistent_disks:
+                facts_disk = runtime_by_name[disk["name"]]
+                if not facts_disk.get("id"):
+                    raise SystemExit(f"Persistent data disk {disk['name']} has no Terraform ID")
+                cmdb[inventory_name]["persistent_data_disks"].append({
+                    "name": disk["name"],
+                    "id": facts_disk["id"],
+                    "zone": disk["zone"],
+                    "device_name": disk["device_name"],
+                    "mount_path": disk["mount_path"],
+                    "management": "google_compute_attached_disk",
+                })
     (workdir / "cmdb.json").write_text(json.dumps(cmdb, indent=2) + "\n", encoding="utf-8")
     lines = ["[vault]"]
     lines.extend(

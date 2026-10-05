@@ -185,9 +185,10 @@ module "retained_data_disk_{{ disk.name | tf_id }}" {
 # Keep attachment lifecycle separate from the existing VM resource. This lets
 # Terraform add the independent disk without changing the VM module arguments.
 resource "google_compute_attached_disk" "retained_data_disk_{{ disk.name | tf_id }}" {
+  depends_on  = [module.spot_{{ disk.instance | tf_id }}]
   project     = module.project.project_id
   zone        = {{ disk.zone | tojson }}
-  instance    = {{ disk.instance | tojson }}
+  instance    = module.spot_{{ disk.instance | tf_id }}.self_link
   disk        = module.retained_data_disk_{{ disk.name | tf_id }}.id
   device_name = {{ disk.device_name | tojson }}
   mode        = "READ_WRITE"
@@ -341,6 +342,7 @@ output "platform_runtime" {
     }
     spot_instances = {
 {% for vm in spot_vms %}
+{% set vm_persistent_disks = persistent_data_disks | selectattr('instance', 'equalto', vm.name) | list %}
       {{ vm.name | tojson }} = {
         name              = module.spot_{{ vm.name | tf_id }}.name
         public_ip         = module.spot_{{ vm.name | tf_id }}.public_ip
@@ -353,6 +355,19 @@ output "platform_runtime" {
         data_disk_id = module.data_disk_{{ vm.name | tf_id }}.id
         data_disk_device_name = {{ vm.data_disk.device_name | tojson }}
         data_mount_path = {{ vm.data_disk.mount_path | tojson }}
+{% endif %}
+{% if vm_persistent_disks %}
+        persistent_data_disks = [
+{% for disk in vm_persistent_disks %}
+          {
+            name = module.retained_data_disk_{{ disk.name | tf_id }}.name
+            id = module.retained_data_disk_{{ disk.name | tf_id }}.id
+            zone = {{ disk.zone | tojson }}
+            device_name = {{ disk.device_name | tojson }}
+            mount_path = {{ disk.mount_path | tojson }}
+          },
+{% endfor %}
+        ]
 {% endif %}
       }
 {% endfor %}
