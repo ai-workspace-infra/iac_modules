@@ -168,6 +168,73 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             generator.normalize_resources(manifest)
 
+    def test_retained_data_disk_attaches_to_declared_vm_without_changing_vm_module(self):
+        spec = importlib.util.spec_from_file_location("gcp_generate", ROOT / "scripts" / "generate.py")
+        generator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generator)
+        vm = {
+            "name": "web-saas-uat", "zone": "asia-east1-a", "machine_type": "e2-medium",
+            "enable_oslogin": True, "public_ip": True, "network_tags": ["web-saas-ssh"],
+            "inventory_groups": ["web_saas"],
+        }
+        manifest = {
+            "kind": "GCPWorkloadNamespace",
+            "metadata": {"name": "web-saas", "environment": "uat", "provider": "gcp"},
+            "spec": {
+                "gcp_account_id": "xworktech", "project_id": "open-platform-uat",
+                "state_project": "svc.plus", "organization_id": "744119519286",
+                "region": "asia-east1", "workspace": "web-saas", "state_namespace": "web-saas",
+                "network_name": "web-saas-uat-gcp", "subnet_cidr": "10.63.0.0/24",
+                "spot_ssh_source_ranges": ["203.0.113.1/32"],
+                "spot_network_tags": ["web-saas-ssh"],
+                "state": {"key": "terraform/uat/svc.plus/gcp-cloud/xworktech/web-saas/terraform.tfstate"},
+                "resources": {
+                    "spot_vms": [vm],
+                    "persistent_data_disks": [{
+                        "name": "web-saas-uat-data", "zone": "asia-east1-a", "size_gb": 100,
+                        "type": "pd-balanced", "instance": "web-saas-uat",
+                        "device_name": "web-saas-data", "mount_path": "/data",
+                    }],
+                },
+            },
+        }
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(generator, "load_resources", return_value=manifest):
+            generator.render(SimpleNamespace(resources="ignored", workdir=tempdir))
+            rendered = (Path(tempdir) / "generated_platform.tf").read_text(encoding="utf-8")
+
+        self.assertIn('module "retained_data_disk_web_saas_uat_data"', rendered)
+        self.assertIn('resource "google_compute_attached_disk" "retained_data_disk_web_saas_uat_data"', rendered)
+        self.assertIn('instance    = "web-saas-uat"', rendered)
+        self.assertIn('device_name = "web-saas-data"', rendered)
+        vm_module = rendered.split('module "spot_web_saas_uat" {', 1)[1].split("\n}", 1)[0]
+        self.assertNotIn("data_disk_id", vm_module)
+        self.assertNotIn("attached_disk", vm_module)
+
+    def test_retained_data_disk_rejects_unmatched_vm_identity(self):
+        spec = importlib.util.spec_from_file_location("gcp_generate", ROOT / "scripts" / "generate.py")
+        generator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generator)
+        manifest = {
+            "kind": "GCPWorkloadNamespace",
+            "metadata": {"name": "web-saas", "environment": "uat", "provider": "gcp"},
+            "spec": {
+                "gcp_account_id": "xworktech", "project_id": "open-platform-uat",
+                "state_project": "svc.plus", "organization_id": "744119519286",
+                "region": "asia-east1", "workspace": "web-saas", "state_namespace": "web-saas",
+                "network_name": "web-saas-uat-gcp", "subnet_cidr": "10.63.0.0/24",
+                "state": {"key": "terraform/uat/svc.plus/gcp-cloud/xworktech/web-saas/terraform.tfstate"},
+                "resources": {
+                    "spot_vms": [{"name": "web-saas-uat", "zone": "asia-east1-a", "machine_type": "e2-medium"}],
+                    "persistent_data_disks": [{
+                        "name": "web-saas-uat-data", "zone": "asia-east1-b", "size_gb": 100,
+                        "instance": "web-saas-uat", "device_name": "web-saas-data", "mount_path": "/data",
+                    }],
+                },
+            },
+        }
+        with self.assertRaisesRegex(SystemExit, "declared VM with the same zone"):
+            generator.normalize_resources(manifest)
+
     def test_public_spot_instance_reaches_deploy_matrix(self):
         spec = importlib.util.spec_from_file_location("gcp_generate", ROOT / "scripts" / "generate.py")
         generator = importlib.util.module_from_spec(spec)

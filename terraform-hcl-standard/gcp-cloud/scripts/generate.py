@@ -69,6 +69,7 @@ def normalize_resources(document):
         raise SystemExit("metadata.provider must be gcp")
 
     resources = spec.get("resources", {})
+    persistent_data_disks = resources.get("persistent_data_disks", [])
     global_config = {
         "environment": environment,
         "bootstrap_project_id": spec.get("bootstrap_project_id", ""),
@@ -91,6 +92,7 @@ def normalize_resources(document):
         "ssh_username": spec.get("ssh_username", "github-actions"),
         "artifact_registry_location": spec.get("artifact_registry_location"),
         "artifact_registry_id": spec.get("artifact_registry_id"),
+        "persistent_data_disks": persistent_data_disks,
     }
     required_spec = (
         "gcp_account_id",
@@ -224,6 +226,42 @@ def normalize_resources(document):
         ):
             raise SystemExit("Spot VM inventory_groups must contain Ansible group names")
         validate_spot_service_declaration(vm)
+
+    persistent_data_disks = global_config["persistent_data_disks"]
+    if not isinstance(persistent_data_disks, list):
+        raise SystemExit("persistent_data_disks must be a list")
+    disk_names = []
+    attachment_devices = []
+    declared_instances = {(vm["name"], vm["zone"]) for vm in spot_vms}
+    for disk in persistent_data_disks:
+        if not isinstance(disk, dict):
+            raise SystemExit("each persistent_data_disks item must be an object")
+        name = str(disk.get("name", ""))
+        instance = str(disk.get("instance", ""))
+        zone = str(disk.get("zone", ""))
+        device_name = str(disk.get("device_name", ""))
+        if not re.fullmatch(r"[a-z][a-z0-9-]{0,61}[a-z0-9]", name):
+            raise SystemExit("persistent data disk name must be a GCP disk name")
+        if type(disk.get("size_gb")) is not int or disk["size_gb"] < 50:
+            raise SystemExit("persistent data disk size_gb must be at least 50")
+        if disk.get("type", "pd-balanced") not in {"pd-balanced", "pd-ssd", "pd-standard"}:
+            raise SystemExit("persistent data disk type must be a supported persistent disk type")
+        if disk.get("mount_path") != "/data":
+            raise SystemExit("persistent data disk mount_path must be /data")
+        if not re.fullmatch(r"[a-z][a-z0-9-]{0,61}[a-z0-9]", device_name):
+            raise SystemExit("persistent data disk device_name must be a stable GCP device name")
+        if (instance, zone) not in declared_instances:
+            raise SystemExit(
+                f"persistent data disk {name} must target a declared VM with the same zone"
+            )
+        if not zone.startswith(f"{global_config['region']}-"):
+            raise SystemExit(f"persistent data disk zone {zone} must belong to region {global_config['region']}")
+        disk_names.append(tf_id(name))
+        attachment_devices.append((instance, device_name))
+    if len(set(disk_names)) != len(disk_names):
+        raise SystemExit("persistent data disk names must render to unique Terraform identifiers")
+    if len(set(attachment_devices)) != len(attachment_devices):
+        raise SystemExit("persistent data disks must use unique device_name values per VM")
     if resources.get("service_vms") and any(
         vm.get("provisioning_model") != "STANDARD" for vm in resources["service_vms"]
     ):
@@ -324,6 +362,7 @@ def validate_spot_service_declaration(vm):
 def render(args):
     document = load_resources(args.resources)
     global_config, declared_nodes, spot_vms, cloud_run_services, legacy_cloud_run = normalize_resources(document)
+    persistent_data_disks = global_config.get("persistent_data_disks", [])
     nodes = []
     for node in declared_nodes:
         item = dict(node)
@@ -412,6 +451,7 @@ def render(args):
         external_ip_allowed_instances=global_config.get("external_ip_allowed_instances", []),
         manage_external_ip_policy=global_config.get("manage_external_ip_policy", True),
         spot_vms=spot_vms,
+        persistent_data_disks=persistent_data_disks,
         cloud_run_services=cloud_run_services,
         vault_machine_type=global_config.get("vault_machine_type", ""),
         vault_image=global_config.get("vault_image", ""),
