@@ -174,7 +174,7 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
         spec.loader.exec_module(generator)
         vm = {
             "name": "web-saas-uat", "zone": "asia-east1-a", "machine_type": "e2-medium",
-            "enable_oslogin": True, "public_ip": True, "network_tags": ["web-saas-ssh"],
+            "enable_oslogin": False, "public_ip": True, "network_tags": ["web-saas-ssh"],
             "inventory_groups": ["web_saas"],
         }
         manifest = {
@@ -204,11 +204,40 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
 
         self.assertIn('module "retained_data_disk_web_saas_uat_data"', rendered)
         self.assertIn('resource "google_compute_attached_disk" "retained_data_disk_web_saas_uat_data"', rendered)
-        self.assertIn('instance    = "web-saas-uat"', rendered)
+        self.assertIn('depends_on  = [module.spot_web_saas_uat]', rendered)
+        self.assertIn('instance    = module.spot_web_saas_uat.self_link', rendered)
         self.assertIn('device_name = "web-saas-data"', rendered)
         vm_module = rendered.split('module "spot_web_saas_uat" {', 1)[1].split("\n}", 1)[0]
         self.assertNotIn("data_disk_id", vm_module)
         self.assertNotIn("attached_disk", vm_module)
+        spot_vm_module = (ROOT / "modules" / "spot_vm" / "main.tf").read_text(encoding="utf-8")
+        self.assertIn("ignore_changes = [attached_disk]", spot_vm_module)
+        self.assertIn("persistent_data_disks = [", rendered)
+
+        runtime = {
+            "project_id": "open-platform-uat",
+            "spot_instances": {
+                "web-saas-uat": {
+                    "public_ip": "35.187.147.104", "private_ip": "10.63.0.9",
+                    "zone": "asia-east1-a", "provisioning_model": "SPOT",
+                    "persistent_data_disks": [{
+                        "name": "web-saas-uat-data", "id": "disk-resource-id",
+                    }],
+                },
+            },
+        }
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(
+            generator, "load_resources", return_value=manifest
+        ), patch.object(generator.subprocess, "check_output", return_value=json.dumps(runtime)):
+            generator.inventory(SimpleNamespace(resources="ignored", workdir=tempdir))
+            cmdb = json.loads((Path(tempdir) / "cmdb.json").read_text(encoding="utf-8"))
+        host = cmdb["web-saas-uat"]
+        self.assertNotIn("data_disk", host)
+        self.assertEqual(host["persistent_data_disks"], [{
+            "name": "web-saas-uat-data", "id": "disk-resource-id", "zone": "asia-east1-a",
+            "device_name": "web-saas-data", "mount_path": "/data",
+            "management": "google_compute_attached_disk",
+        }])
 
     def test_retained_data_disk_rejects_unmatched_vm_identity(self):
         spec = importlib.util.spec_from_file_location("gcp_generate", ROOT / "scripts" / "generate.py")
@@ -233,6 +262,13 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
             },
         }
         with self.assertRaisesRegex(SystemExit, "declared VM with the same zone"):
+            generator.normalize_resources(manifest)
+        manifest["spec"]["resources"]["persistent_data_disks"][0]["zone"] = "asia-east1-a"
+        manifest["spec"]["resources"]["spot_vms"][0]["data_disk"] = {
+            "name": "legacy-data", "size_gb": 100, "device_name": "legacy-data",
+            "mount_path": "/data",
+        }
+        with self.assertRaisesRegex(SystemExit, "both legacy data_disk and persistent_data_disks"):
             generator.normalize_resources(manifest)
 
     def test_public_spot_instance_reaches_deploy_matrix(self):
