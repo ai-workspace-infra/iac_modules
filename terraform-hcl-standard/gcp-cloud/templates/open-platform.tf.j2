@@ -172,6 +172,28 @@ resource "google_compute_firewall" "vault_raft_internal" {
 }
 {% endif %}
 
+{% for disk in persistent_data_disks %}
+module "retained_data_disk_{{ disk.name | tf_id }}" {
+  source     = "../../modules/persistent_data_disk"
+  project_id = module.project.project_id
+  name       = {{ disk.name | tojson }}
+  zone       = {{ disk.zone | tojson }}
+  size_gb    = {{ disk.size_gb }}
+  disk_type  = {{ disk.type | default('pd-balanced') | tojson }}
+}
+
+# Keep attachment lifecycle separate from the existing VM resource. This lets
+# Terraform add the independent disk without changing the VM module arguments.
+resource "google_compute_attached_disk" "retained_data_disk_{{ disk.name | tf_id }}" {
+  project     = module.project.project_id
+  zone        = {{ disk.zone | tojson }}
+  instance    = {{ disk.instance | tojson }}
+  disk        = module.retained_data_disk_{{ disk.name | tf_id }}.id
+  device_name = {{ disk.device_name | tojson }}
+  mode        = "READ_WRITE"
+}
+{% endfor %}
+
 {% for vm in spot_vms %}
 {% if vm.data_disk is defined %}
 module "data_disk_{{ vm.name | tf_id }}" {
