@@ -94,6 +94,7 @@ variable "deploy_service_account_roles" {
     "roles/iap.admin",
     "roles/iam.serviceAccountAdmin",
     "roles/iam.serviceAccountUser",
+    "roles/orgpolicy.policyViewer",
     "roles/run.admin",
     "roles/serviceusage.serviceUsageConsumer",
   ]
