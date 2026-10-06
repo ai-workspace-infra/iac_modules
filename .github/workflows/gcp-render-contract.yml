@@ -4,11 +4,13 @@ on:
   pull_request:
     paths:
       - terraform-hcl-standard/gcp-cloud/**
+      - scripts/pipeline/initialize-gcp-oslogin-profile.sh
       - .github/workflows/gcp-render-contract.yml
   push:
     branches: [main]
     paths:
       - terraform-hcl-standard/gcp-cloud/**
+      - scripts/pipeline/initialize-gcp-oslogin-profile.sh
       - .github/workflows/gcp-render-contract.yml
 
 permissions:
@@ -32,3 +34,4 @@ jobs:
         run: |
           python3 -m unittest discover -s terraform-hcl-standard/gcp-cloud/tests -p 'test_spot_vm_deployment_contract.py' -v
           bash terraform-hcl-standard/gcp-cloud/tests/test_prod_selfhost_bootstrap.sh
+          bash terraform-hcl-standard/gcp-cloud/tests/test_oslogin_profile_initialization.sh
