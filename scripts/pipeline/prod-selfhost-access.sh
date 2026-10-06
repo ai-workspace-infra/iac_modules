@@ -40,6 +40,16 @@ export ACCESS_RULE_NAME="web-saas-prod-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [[ "$phase" == open ]]; then
+  firewall="$(gcloud compute firewall-rules describe web-saas-prod-gcp-spot-ssh --project="$GCP_PROJECT_ID" --format=json)"
+  jq -e '
+    .name == "web-saas-prod-gcp-spot-ssh" and .direction == "INGRESS" and (.disabled // false) == false and
+    .network == "https://www.googleapis.com/compute/v1/projects/open-platform-prod/global/networks/web-saas-prod-gcp" and
+    (.sourceRanges | sort) == (["10.73.0.0/25", "10.73.0.128/25"] | sort) and
+    .targetTags == ["web-saas-ssh"] and
+    (.allowed | length == 1) and .allowed[0].IPProtocol == "tcp" and .allowed[0].ports == ["22"] and
+    ((.sourceTags // []) | length == 0) and ((.sourceServiceAccounts // []) | length == 0)
+  ' <<< "$firewall" >/dev/null || { echo 'Permanent PROD SSH firewall is not private; refusing CI access.' >&2; exit 1; }
+  echo 'Verified live permanent SSH source ranges equal the declared private subnet; no public default remains.'
   # Read live cloud facts before granting one-run access. Never start or recreate
   # an instance on the strength of a stale artifact.
   facts="$(gcloud compute instances describe "$GCP_INSTANCE" --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" --format=json)"
