@@ -159,6 +159,7 @@ variable "platform_services" {
     "iap.googleapis.com",
     "logging.googleapis.com",
     "monitoring.googleapis.com",
+    "orgpolicy.googleapis.com",
     "run.googleapis.com",
     "secretmanager.googleapis.com",
   ]

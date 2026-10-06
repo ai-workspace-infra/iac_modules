@@ -11,6 +11,34 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class SpotVMDeploymentContractTest(unittest.TestCase):
+    def test_org_policy_api_belongs_to_bootstrap_without_org_admin_runtime_role(self):
+        bootstrap = (ROOT / "bootstrap" / "identity" / "main.tf").read_text()
+        self.assertIn('"orgpolicy.googleapis.com"', bootstrap)
+        self.assertIn('"roles/compute.securityAdmin"', bootstrap)
+        self.assertNotIn('"roles/orgpolicy.policyAdmin"', bootstrap)
+
+    def test_service_vm_depends_on_policy_only_when_policy_is_managed(self):
+        spec = importlib.util.spec_from_file_location("gcp_generate", ROOT / "scripts" / "generate.py")
+        generator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generator)
+        manifest = {
+            "global": {"environment": "prod", "project_id": "open-platform-prod",
+                       "region": "asia-east1", "network_name": "web-saas-prod-gcp", "subnet_cidr": "10.73.0.0/24",
+                       "spot_ssh_source_ranges": ["203.0.113.1/32"], "spot_network_tags": ["web-saas-ssh"],
+                       "external_ip_allowed_instances": [{"name": "web-saas-prod", "zone": "asia-east1-a"}]},
+            "spot_vms": [{"name": "web-saas-prod", "zone": "asia-east1-a", "machine_type": "e2-medium", "public_ip": True, "network_tags": ["web-saas-ssh"]}],
+        }
+        for managed in (True, False):
+            manifest["global"]["manage_external_ip_policy"] = managed
+            with tempfile.TemporaryDirectory() as tempdir, patch.object(generator, "load_resources", return_value=manifest):
+                generator.render(SimpleNamespace(resources="ignored", workdir=tempdir))
+                rendered = (Path(tempdir) / "generated_platform.tf").read_text()
+            vm = rendered.split('module "spot_web_saas_prod" {', 1)[1].split("\n}", 1)[0]
+            if managed:
+                self.assertIn('google_org_policy_policy.vm_external_ip_access', vm)
+            else:
+                self.assertNotIn('google_org_policy_policy.vm_external_ip_access', vm)
+
     def test_public_vault_node_inventory_uses_terraform_address(self):
         spec = importlib.util.spec_from_file_location("gcp_generate", ROOT / "scripts" / "generate.py")
         generator = importlib.util.module_from_spec(spec)
