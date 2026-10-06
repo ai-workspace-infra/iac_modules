@@ -1,0 +1,77 @@
+name: Cloudflare Serverless domains owner
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: Explicit sit, uat, or prod target.
+        required: true
+        type: string
+      dns_mode:
+        description: none, uat-records, or prod-cutover; GTM API aliases are excluded.
+        required: true
+        type: string
+      gitops_ref:
+        description: Exact GitOps commit selected by the caller preflight.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: public-dns-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Checkout fixed IaC execution owner
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+      - name: Checkout exact GitOps declaration
+        uses: actions/checkout@v4
+        with:
+          repository: ai-workspace-infra/gitops
+          ref: ${{ inputs.gitops_ref }}
+          fetch-depth: 0
+          path: gitops
+          persist-credentials: false
+      - name: Render declaration and validate caller before Vault
+        env:
+          REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
+          SERVERLESS_DNS_MODE: ${{ inputs.dns_mode }}
+          GITOPS_REF: ${{ inputs.gitops_ref }}
+          GITOPS_DIR: ${{ github.workspace }}/gitops
+          CLOUDFLARE_BOUNDARY_CONFIG: ${{ runner.temp }}/edge-routing.json
+        run: |
+          case "$REQUESTED_ENVIRONMENT" in sit|uat|prod) ;; *) exit 2 ;; esac
+          ruby -ryaml -rjson -e 'doc = YAML.safe_load(File.read(ARGV[0]), aliases: false); File.write(ARGV[1], JSON.pretty_generate(doc))' \
+            "gitops/topology/${REQUESTED_ENVIRONMENT}/serverless/runtime-topology.yaml" "$CLOUDFLARE_BOUNDARY_CONFIG"
+          python3 scripts/pipeline/validate-serverless-domains-request.py
+      - name: Authenticate using caller environment OIDC
+        id: vault
+        uses: hashicorp/vault-action@v4
+        with:
+          url: ${{ vars.VAULT_ADDR || 'https://vault.svc.plus' }}
+          method: jwt
+          role: github-actions-platform-ops-toolkit-${{ inputs.environment }}
+          jwtGithubAudience: vault
+          exportToken: false
+          secrets: |
+            kv/data/${{ inputs.environment }}/serverless/cloudflare CLOUDFLARE_ACCOUNT_ID | CLOUDFLARE_ACCOUNT_ID ;
+            kv/data/${{ inputs.environment }}/serverless/cloudflare CLOUDFLARE_API_TOKEN | CLOUDFLARE_API_TOKEN
+      - name: Reconcile qualified domains and frontend entries in IaC
+        uses: ./.github/actions/cloudflare-serverless-domains
+        with:
+          config_file: ${{ runner.temp }}/edge-routing.json
+          dns_mode: ${{ inputs.dns_mode }}
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ steps.vault.outputs.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ steps.vault.outputs.CLOUDFLARE_API_TOKEN }}
