@@ -4,7 +4,12 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 reconciler="${repo_root}/scripts/pipeline/cloudflare-serverless-domains-reconcile.sh"
 test_dir="$(mktemp -d)"
-trap 'rc=$?; rm -rf "${test_dir}"; exit ${rc}' EXIT
+cleanup() {
+  local task_status=$?
+  rm -rf "${test_dir}"
+  exit "${task_status}"
+}
+trap cleanup EXIT
 
 mkdir -p "${test_dir}/bin"
 cat >"${test_dir}/routing.json" <<'EOF'
