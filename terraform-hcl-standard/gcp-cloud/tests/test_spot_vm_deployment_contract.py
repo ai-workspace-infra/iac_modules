@@ -572,6 +572,14 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
         self.assertEqual(request.get_header("Authorization"), "Bearer fixture-access-token")
         self.assertEqual(api.call_args.kwargs["timeout"], 15)
 
+    def test_profile_api_errors_report_only_bounded_status_metadata(self):
+        generator = self.load_generator()
+        with patch.dict(generator.os.environ, {}, clear=True), patch.object(
+            generator, "get_oslogin_profile", side_effect=generator.urllib.error.HTTPError("private-url",403,"private-message",{},None)
+        ):
+            with self.assertRaisesRegex(SystemExit,"^OS Login profile API request failed: HTTP 403$"):
+                generator.oslogin_username("test-project","github-actions-prod@test-project.iam.gserviceaccount.com")
+
     def test_inventory_refuses_a_foreign_runtime_project_before_profile_lookup(self):
         generator = self.load_generator()
         with tempfile.TemporaryDirectory() as tempdir, patch.object(
