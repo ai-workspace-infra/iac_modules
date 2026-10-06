@@ -86,6 +86,7 @@ def normalize_resources(document):
         "xconnect_mode": spec.get("xconnect_mode", "gateway"),
         "ssh_source_ranges": spec.get("ssh_source_ranges", []),
         "external_ip_allowed_instances": spec.get("external_ip_allowed_instances", []),
+        "external_ip_policy_parent_identity": spec.get("external_ip_policy_parent_identity", "project_id"),
         "manage_external_ip_policy": spec.get("manage_external_ip_policy", True),
         "spot_ssh_source_ranges": spec.get("spot_ssh_source_ranges", []),
         "spot_network_tags": spec.get("spot_network_tags", []),
@@ -450,11 +451,15 @@ def render(args):
         keep_trailing_newline=True,
     )
     env.filters["tf_id"] = tf_id
+    policy_parent_identity = global_config.get("external_ip_policy_parent_identity", "project_id")
+    if policy_parent_identity not in {"project_id", "project_number"}:
+        raise SystemExit("external_ip_policy_parent_identity must be project_id or project_number")
     content = env.get_template("open-platform.tf.j2").render(
         environment=global_config["environment"],
         vault_nodes=nodes,
         external_ip_allowed_instances=global_config.get("external_ip_allowed_instances", []),
         manage_external_ip_policy=global_config.get("manage_external_ip_policy", True),
+        external_ip_policy_parent_identity=policy_parent_identity,
         spot_vms=spot_vms,
         persistent_data_disks=persistent_data_disks,
         cloud_run_services=cloud_run_services,

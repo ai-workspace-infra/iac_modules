@@ -93,6 +93,18 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
         self.assertIn('name   = "projects/${module.project.project_number}/policies/compute.vmExternalIpAccess"', rendered)
         self.assertIn('parent = "projects/${module.project.project_id}"', rendered)
         self.assertIn('ignore_changes = [name]', rendered)
+        # Imported PROD V2 policy parents use a project number. Selecting this
+        # explicitly must not change the default of other existing namespaces.
+        manifest["spec"]["external_ip_policy_parent_identity"] = "project_number"
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(generator, "load_resources", return_value=manifest):
+            generator.render(SimpleNamespace(resources="ignored", workdir=tempdir))
+            numeric = (Path(tempdir) / "generated_platform.tf").read_text(encoding="utf-8")
+        self.assertIn('parent = "projects/${module.project.project_number}"', numeric)
+        self.assertNotIn('parent = "projects/${module.project.project_id}"', numeric)
+        manifest["spec"]["external_ip_policy_parent_identity"] = "invalid"
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(generator, "load_resources", return_value=manifest):
+            with self.assertRaises(SystemExit):
+                generator.render(SimpleNamespace(resources="ignored", workdir=tempdir))
         for name in ("vault-shared-0", "observability-shared-0", "iam-shared-0"):
             self.assertIn(f"instances/{name}", rendered)
         self.assertIn("google_org_policy_policy.vm_external_ip_access", rendered)
