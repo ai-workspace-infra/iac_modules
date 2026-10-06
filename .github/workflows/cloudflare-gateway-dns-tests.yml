@@ -8,6 +8,10 @@ on:
       - scripts/pipeline/cloudflare-api-aliases.py
       - scripts/pipeline/tests/test_cloudflare_api_aliases.py
       - .github/actions/cloudflare-api-aliases/**
+      - .github/actions/cloudflare-serverless-domains/**
+      - .github/workflows/cloudflare-serverless-domains.yml
+      - scripts/pipeline/validate-serverless-domains-request.py
+      - scripts/pipeline/tests/test_serverless_domains_request.py
       - .github/workflows/cloudflare-gateway-dns-tests.yml
   push:
     branches: [main]
@@ -17,6 +21,10 @@ on:
       - scripts/pipeline/cloudflare-api-aliases.py
       - scripts/pipeline/tests/test_cloudflare_api_aliases.py
       - .github/actions/cloudflare-api-aliases/**
+      - .github/actions/cloudflare-serverless-domains/**
+      - .github/workflows/cloudflare-serverless-domains.yml
+      - scripts/pipeline/validate-serverless-domains-request.py
+      - scripts/pipeline/tests/test_serverless_domains_request.py
       - .github/workflows/cloudflare-gateway-dns-tests.yml
 
 permissions:
@@ -31,6 +39,6 @@ jobs:
         with:
           python-version: '3.12'
       - name: Run provider contract and failure recovery tests
-        run: python3 -m unittest scripts/pipeline/tests/test_cloudflare_gateway_dns_upsert.py scripts/pipeline/tests/test_cloudflare_api_aliases.py -v
+        run: python3 -m unittest scripts/pipeline/tests/test_cloudflare_gateway_dns_upsert.py scripts/pipeline/tests/test_cloudflare_api_aliases.py scripts/pipeline/tests/test_serverless_domains_request.py -v
       - name: Check syntax
         run: python3 -m py_compile scripts/pipeline/cloudflare-gateway-dns-upsert.py
