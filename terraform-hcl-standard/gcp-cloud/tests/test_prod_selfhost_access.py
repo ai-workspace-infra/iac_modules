@@ -24,6 +24,7 @@ with (p/'calls').open('a') as f: f.write(args+'\\n')
 if 'auth login' in args: pass
 elif 'auth print-access-token' in args: print('fictional-runtime-token')
 elif 'instances describe' in args: print((p/'facts.json').read_text())
+elif 'firewall-rules describe' in args: print((p/'firewall.json').read_text())
 elif 'firewall-rules list' in args:
  if (p/'rule').exists(): print(os.environ['FAKE_RULE'])
 elif 'firewall-rules create' in args: (p/'rule').write_text('fixture')
@@ -64,6 +65,11 @@ print(json.dumps({'posixAccounts':[{'operatingSystemType':'LINUX','username':os.
                  'disks': [{'deviceName': 'web-saas-prod-data', 'autoDelete': False,
                            'source': 'https://www.googleapis.com/compute/v1/' + disk}]}
         (p / 'facts.json').write_text(json.dumps(facts))
+        firewall = {'name': 'web-saas-prod-gcp-spot-ssh', 'direction': 'INGRESS', 'disabled': False,
+          'network': 'https://www.googleapis.com/compute/v1/projects/open-platform-prod/global/networks/web-saas-prod-gcp',
+          'sourceRanges': ['10.73.0.0/25', '10.73.0.128/25'], 'targetTags': ['web-saas-ssh'],
+          'allowed': [{'IPProtocol': 'tcp', 'ports': ['22']}]}
+        (p / 'firewall.json').write_text(json.dumps(firewall))
         return dict(os.environ, PATH=str(binary) + ':' + os.environ['PATH'], FAKE_CLOUD_DIR=str(p),
           FAKE_RULE='web-saas-prod-ci-123-1', CMDB_FILE=str(path),
           EXPECTED_CMDB_SHA256=hashlib.sha256(path.read_bytes()).hexdigest(),
@@ -103,6 +109,19 @@ print(json.dumps({'posixAccounts':[{'operatingSystemType':'LINUX','username':os.
             self.assertFalse(Path(env['ACCESS_DIR']).exists())
             self.assertFalse((Path(d) / 'rule').exists())
             self.assertIn('ssh-keys remove', (Path(d) / 'calls').read_text())
+
+    def test_public_or_additional_permanent_sources_refuse_before_access(self):
+        for sources in [['0.0.0.0/0'], ['0.0.0.0/0', '10.73.0.0/25', '10.73.0.128/25']]:
+            with tempfile.TemporaryDirectory() as d:
+                env = self.fixture(d)
+                path = Path(d) / 'firewall.json'
+                facts = json.loads(path.read_text())
+                facts['sourceRanges'] = sources
+                path.write_text(json.dumps(facts))
+                self.assertNotEqual(self.execute('open', env).returncode, 0)
+                calls = (Path(d) / 'calls').read_text()
+                self.assertNotIn('ssh-keys add', calls)
+                self.assertNotIn('firewall-rules create', calls)
 
     def test_bad_artifact_or_directory_refuses_before_cloud_commands(self):
         for key, value in [('EXPECTED_CMDB_SHA256', '0' * 64), ('ACCESS_DIR', '/tmp/unowned')]:
