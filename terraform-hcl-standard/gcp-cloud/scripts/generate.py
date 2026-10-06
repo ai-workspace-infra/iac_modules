@@ -7,6 +7,8 @@ import json
 import os
 import re
 import subprocess
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 import yaml
@@ -527,6 +529,28 @@ def render(args):
     print(f"rendered {args.resources} -> {workdir}")
 
 
+def get_oslogin_profile(project_id, deploy_account):
+    """Read the project-scoped API profile using this run's WIF token only.
+
+    gcloud describe-profile calls GetLoginProfile without projectId even when
+    --project is set. A new principal can therefore return no POSIX accounts.
+    Use the API's explicit projectId instead of guessing a username or adding
+    an SSH key just to obtain inventory metadata.
+    """
+    token = subprocess.check_output(
+        ["gcloud", "auth", "print-access-token", f"--account={deploy_account}"],
+        text=True, stderr=subprocess.DEVNULL, timeout=60,
+    ).strip()
+    if not token or re.search(r"\s", token):
+        raise ValueError("invalid runtime token")
+    url = ("https://oslogin.googleapis.com/v1/users/"
+           + urllib.parse.quote(deploy_account, safe="") + "/loginProfile?"
+           + urllib.parse.urlencode({"projectId": project_id}))
+    request = urllib.request.Request(url, headers={"Authorization": "Bearer " + token}, method="GET")
+    with urllib.request.urlopen(request, timeout=15) as response:
+        return json.load(response)
+
+
 def oslogin_username(project_id=None, deploy_account=None):
     """Resolve the WIF deployer's POSIX user without registering an SSH key.
 
@@ -564,12 +588,7 @@ def oslogin_username(project_id=None, deploy_account=None):
             except (OSError, subprocess.SubprocessError, ValueError, TypeError):
                 raise SystemExit("Cannot activate the exact runtime service account's GitHub WIF credential") from None
         try:
-            raw = subprocess.check_output(
-                ["gcloud", "compute", "os-login", "describe-profile",
-                 f"--project={project_id}", f"--account={deploy_account}", "--format=json"],
-                text=True, stderr=subprocess.DEVNULL, timeout=60,
-            )
-            profile = json.loads(raw)
+            profile = get_oslogin_profile(project_id, deploy_account)
             if not isinstance(profile, dict) or not isinstance(profile.get("posixAccounts"), list):
                 raise ValueError("invalid profile")
             names = {
