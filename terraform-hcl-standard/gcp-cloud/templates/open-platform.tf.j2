@@ -209,7 +209,7 @@ module "data_disk_{{ vm.name | tf_id }}" {
 {% endif %}
 module "spot_{{ vm.name | tf_id }}" {
   source          = "../../modules/spot_vm"
-  depends_on      = [module.project, module.network]
+  depends_on      = [module.project, module.network{% if external_ip_allowed_instances and manage_external_ip_policy %}, google_org_policy_policy.vm_external_ip_access{% endif %}]
   project_id      = module.project.project_id
   name            = {{ vm.name | tojson }}
   zone            = {{ vm.zone | tojson }}

@@ -1,0 +1,32 @@
+name: GCP renderer contract
+
+on:
+  pull_request:
+    paths:
+      - terraform-hcl-standard/gcp-cloud/**
+      - .github/workflows/gcp-render-contract.yml
+  push:
+    branches: [main]
+    paths:
+      - terraform-hcl-standard/gcp-cloud/**
+      - .github/workflows/gcp-render-contract.yml
+
+permissions:
+  contents: read
+
+jobs:
+  declaration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install renderer dependencies
+        run: python3 -m pip install PyYAML==6.0.2 Jinja2==3.1.6
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.5
+          terraform_wrapper: false
+      - name: Verify bootstrap and service VM resource contracts
+        run: python3 -m unittest discover -s terraform-hcl-standard/gcp-cloud/tests -p 'test_spot_vm_deployment_contract.py' -v
