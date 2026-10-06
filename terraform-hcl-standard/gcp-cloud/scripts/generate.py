@@ -9,6 +9,7 @@ import re
 import subprocess
 import urllib.parse
 import urllib.request
+import urllib.error
 from pathlib import Path
 
 import yaml
@@ -590,20 +591,27 @@ def oslogin_username(project_id=None, deploy_account=None):
         try:
             profile = get_oslogin_profile(project_id, deploy_account)
             if not isinstance(profile, dict) or not isinstance(profile.get("posixAccounts"), list):
-                raise ValueError("invalid profile")
+                raise SystemExit("Cannot resolve unique Linux OS Login username: profile has no POSIX account list")
             names = {
                 item.get("username") for item in profile["posixAccounts"]
                 if isinstance(item, dict) and item.get("operatingSystemType") == "LINUX"
                 and isinstance(item.get("username"), str)
             }
             if len(names) != 1:
-                raise ValueError("missing or ambiguous Linux account")
+                raise SystemExit(
+                    "Cannot resolve unique Linux OS Login username: "
+                    f"linux_account_count={len(names)} total_account_count={len(profile['posixAccounts'])}"
+                )
             username = names.pop()
             if not re.fullmatch(r"sa_[0-9]+", username):
-                raise ValueError("service account profile required")
+                raise SystemExit("Cannot resolve unique Linux OS Login username: service-account username format differs")
+        except urllib.error.HTTPError as exc:
+            raise SystemExit(f"OS Login profile API request failed: HTTP {exc.code}") from None
         except subprocess.SubprocessError:
             raise SystemExit("OS Login profile query failed for the exact authenticated runtime service account") from None
-        except (OSError, ValueError, TypeError):
+        except OSError as exc:
+            raise SystemExit(f"OS Login profile transport failed: {type(exc).__name__}") from None
+        except (ValueError, TypeError):
             raise SystemExit("Cannot resolve the runtime service account's unique Linux OS Login username") from None
     username = username.strip()
     if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", username):
