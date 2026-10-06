@@ -1,5 +1,6 @@
 import unittest
 import importlib.util
+import io
 import json
 import tempfile
 from pathlib import Path
@@ -478,17 +479,12 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tempdir, patch.object(
             generator, "load_resources", return_value=self.oslogin_manifest()
         ), patch.dict(generator.os.environ, {}, clear=True), patch.object(
-            generator.subprocess, "check_output", side_effect=[json.dumps(runtime), json.dumps(profile)]
-        ) as command:
+            generator.subprocess, "check_output", return_value=json.dumps(runtime)
+        ), patch.object(generator, "get_oslogin_profile", return_value=profile) as lookup:
             generator.inventory(SimpleNamespace(resources="ignored", workdir=tempdir))
             cmdb = json.loads((Path(tempdir) / "cmdb.json").read_text())
         self.assertEqual(cmdb["sample-vm"]["ansible_user"], "sa_123")
-        self.assertEqual(command.call_args.args[0], [
-            "gcloud", "compute", "os-login", "describe-profile", "--project=test-project",
-            f"--account={account}", "--format=json",
-        ])
-        self.assertEqual(command.call_args.kwargs["timeout"], 60)
-        self.assertEqual(command.call_args.kwargs["stderr"], generator.subprocess.DEVNULL)
+        lookup.assert_called_once_with("test-project", account)
 
     def test_profile_resolution_refuses_missing_ambiguous_personal_and_invalid_users(self):
         generator = self.load_generator()
@@ -500,7 +496,7 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
         ]
         for profile in profiles:
             with self.subTest(profile=profile), patch.dict(generator.os.environ, {}, clear=True), patch.object(
-                generator.subprocess, "check_output", return_value=json.dumps(profile)
+                generator, "get_oslogin_profile", return_value=profile
             ):
                 with self.assertRaisesRegex(SystemExit, "unique Linux OS Login"):
                     generator.oslogin_username("test-project", "github-actions-prod@test-project.iam.gserviceaccount.com")
@@ -526,7 +522,7 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
             path.write_text(json.dumps(credential))
             with patch.dict(generator.os.environ, {"GOOGLE_GHA_CREDS_PATH": str(path)}, clear=True), patch.object(
                 generator.subprocess, "run"
-            ) as activate, patch.object(generator.subprocess, "check_output", return_value=json.dumps(profile)):
+            ) as activate, patch.object(generator, "get_oslogin_profile", return_value=profile):
                 self.assertEqual(generator.oslogin_username("test-project", account), "sa_123")
                 self.assertEqual(activate.call_args.args[0], ["gcloud", "--quiet", "auth", "login", f"--cred-file={path}"])
                 self.assertTrue(activate.call_args.kwargs["check"])
@@ -557,6 +553,24 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
         ):
             with self.assertRaisesRegex(SystemExit, "^OS Login profile query failed for the exact authenticated runtime service account$"):
                 generator.oslogin_username("test-project", "github-actions-prod@test-project.iam.gserviceaccount.com")
+
+    def test_profile_api_explicitly_binds_project_and_runtime_principal(self):
+        generator = self.load_generator()
+        profile = {"posixAccounts": [{"operatingSystemType": "LINUX", "username": "sa_123"}]}
+        with patch.object(generator.subprocess, "check_output", return_value="fixture-access-token\n") as token, patch.object(
+            generator.urllib.request, "urlopen"
+        ) as api:
+            api.return_value.__enter__.return_value = io.StringIO(json.dumps(profile))
+            self.assertEqual(generator.get_oslogin_profile("test-project", "github-actions-prod@test-project.iam.gserviceaccount.com"), profile)
+        token.assert_called_once_with(
+            ["gcloud", "auth", "print-access-token", "--account=github-actions-prod@test-project.iam.gserviceaccount.com"],
+            text=True, stderr=generator.subprocess.DEVNULL, timeout=60,
+        )
+        request = api.call_args.args[0]
+        self.assertEqual(request.full_url, "https://oslogin.googleapis.com/v1/users/github-actions-prod%40test-project.iam.gserviceaccount.com/loginProfile?projectId=test-project")
+        self.assertEqual(request.get_method(), "GET")
+        self.assertEqual(request.get_header("Authorization"), "Bearer fixture-access-token")
+        self.assertEqual(api.call_args.kwargs["timeout"], 15)
 
     def test_inventory_refuses_a_foreign_runtime_project_before_profile_lookup(self):
         generator = self.load_generator()
