@@ -1,0 +1,33 @@
+name: Reconcile Serverless domains
+description: IaC provider owner migrated from the frozen Toolkit publisher.
+inputs:
+  config_file:
+    description: Absolute rendered GitOps Serverless config path.
+    required: true
+  dns_mode:
+    description: none, uat-records, or prod-cutover.
+    required: true
+  gateway_revision:
+    description: Exact deployed Edge Gateway SHA; required for explicit API alias migration.
+    required: false
+    default: ''
+  checkpoint_path:
+    description: Private API checkpoint path; required for explicit API alias migration.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Reconcile Pages and qualified Worker domains in the IaC owner
+      shell: bash
+      env:
+        CLOUDFLARE_BOUNDARY_CONFIG: ${{ inputs.config_file }}
+        SERVERLESS_DNS_MODE: ${{ inputs.dns_mode }}
+      run: bash "${{ github.action_path }}/../../../scripts/pipeline/cloudflare-serverless-domains-reconcile.sh"
+    - name: Reconcile stable API CNAME only for an explicit DNS publication
+      if: inputs.dns_mode != 'none'
+      shell: bash
+      env:
+        EDGE_GATEWAY_CONFIG_FILE: ${{ inputs.config_file }}
+        GATEWAY_REVISION: ${{ inputs.gateway_revision }}
+        API_ALIAS_CHECKPOINT: ${{ inputs.checkpoint_path }}
+      run: python3 "${{ github.action_path }}/../../../scripts/pipeline/cloudflare-api-aliases.py"

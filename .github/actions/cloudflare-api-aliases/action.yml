@@ -1,0 +1,22 @@
+name: Reconcile API aliases
+description: IaC owner for only Accounts/Billing CNAME and qualified Worker domains.
+inputs:
+  config_file:
+    description: Absolute path to the approved rendered GitOps routing plan.
+    required: true
+  gateway_revision:
+    description: Exact deployed Edge Gateway commit SHA.
+    required: true
+  checkpoint_path:
+    description: New private checkpoint path for recovery.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Apply declared API aliases after Worker provider preflight
+      shell: bash
+      env:
+        EDGE_GATEWAY_CONFIG_FILE: ${{ inputs.config_file }}
+        GATEWAY_REVISION: ${{ inputs.gateway_revision }}
+        API_ALIAS_CHECKPOINT: ${{ inputs.checkpoint_path }}
+      run: python3 "${{ github.action_path }}/../../../scripts/pipeline/cloudflare-api-aliases.py"
