@@ -527,14 +527,42 @@ def render(args):
     print(f"rendered {args.resources} -> {workdir}")
 
 
-def oslogin_username():
-    """Return the deploy principal's OS Login POSIX user from the environment.
+def oslogin_username(project_id=None, deploy_account=None):
+    """Resolve the WIF deployer's POSIX user without registering an SSH key.
 
-    The deployer registers its SSH key in its own OS Login profile before
-    rendering the inventory and exports the resolved username; Terraform
-    state does not know it.
+    Host deployment may supply its previously verified username. Resource-only
+    callers instead query the exact runtime service account's OS Login profile;
+    they never select a personal account or mint another credential.
     """
-    username = os.environ.get("GCP_OSLOGIN_USERNAME", "").strip()
+    username = os.environ.get("GCP_OSLOGIN_USERNAME")
+    if username is None:
+        if not re.fullmatch(r"[a-z][a-z0-9-]{4,28}[a-z0-9]", str(project_id)) or not re.fullmatch(
+            r"[a-z][a-z0-9-]{4,28}[a-z0-9]@" + re.escape(str(project_id)) + r"\.iam\.gserviceaccount\.com",
+            str(deploy_account),
+        ):
+            raise SystemExit("OS Login inventory requires a verified runtime project and deploy service account")
+        try:
+            raw = subprocess.check_output(
+                ["gcloud", "compute", "os-login", "describe-profile",
+                 f"--project={project_id}", f"--account={deploy_account}", "--format=json"],
+                text=True, stderr=subprocess.DEVNULL, timeout=60,
+            )
+            profile = json.loads(raw)
+            if not isinstance(profile, dict) or not isinstance(profile.get("posixAccounts"), list):
+                raise ValueError("invalid profile")
+            names = {
+                item.get("username") for item in profile["posixAccounts"]
+                if isinstance(item, dict) and item.get("operatingSystemType") == "LINUX"
+                and isinstance(item.get("username"), str)
+            }
+            if len(names) != 1:
+                raise ValueError("missing or ambiguous Linux account")
+            username = names.pop()
+            if not re.fullmatch(r"sa_[0-9]+", username):
+                raise ValueError("service account profile required")
+        except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+            raise SystemExit("Cannot resolve the runtime service account's unique Linux OS Login username") from None
+    username = username.strip()
     if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", username):
         raise SystemExit("OS Login Spot VMs require GCP_OSLOGIN_USERNAME from the deploy principal's profile")
     return username
@@ -549,6 +577,8 @@ def inventory(args):
         text=True,
     )
     runtime = json.loads(raw)
+    if runtime.get("project_id") != global_config["project_id"]:
+        raise SystemExit("Terraform runtime project differs from the resource declaration")
     environment = global_config["environment"]
     cmdb = {
         "environment": environment,
@@ -605,7 +635,7 @@ def inventory(args):
             "public_ip": public_ip,
             "zone": facts.get("zone", vm["zone"]),
             "ansible_user": (
-                oslogin_username()
+                oslogin_username(runtime.get("project_id"), runtime.get("deploy_account"))
                 if vm.get("enable_oslogin")
                 else global_config.get("ssh_username", "github-actions")
             ),

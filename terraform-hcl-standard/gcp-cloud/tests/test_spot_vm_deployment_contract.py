@@ -454,7 +454,7 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
 
     def test_oslogin_spot_vm_inventory_refuses_a_missing_or_invalid_username(self):
         generator = self.load_generator()
-        runtime = {"spot_instances": {
+        runtime = {"project_id": "test-project", "spot_instances": {
             "sample-vm": {"public_ip": "198.51.100.10"},
             "legacy-vm": {"public_ip": "198.51.100.11"},
         }}
@@ -466,6 +466,64 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(SystemExit, "GCP_OSLOGIN_USERNAME"):
                     generator.inventory(SimpleNamespace(resources="ignored", workdir=tempdir))
+
+    def test_resource_inventory_resolves_the_exact_wif_service_account_profile(self):
+        generator = self.load_generator()
+        account = "github-actions-prod@test-project.iam.gserviceaccount.com"
+        runtime = {"project_id": "test-project", "deploy_account": account, "spot_instances": {
+            "sample-vm": {"public_ip": "198.51.100.10", "provisioning_model": "STANDARD"},
+            "legacy-vm": {"public_ip": "198.51.100.11", "provisioning_model": "STANDARD"},
+        }}
+        profile = {"posixAccounts": [{"operatingSystemType": "LINUX", "username": "sa_123"}]}
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(
+            generator, "load_resources", return_value=self.oslogin_manifest()
+        ), patch.dict(generator.os.environ, {}, clear=True), patch.object(
+            generator.subprocess, "check_output", side_effect=[json.dumps(runtime), json.dumps(profile)]
+        ) as command:
+            generator.inventory(SimpleNamespace(resources="ignored", workdir=tempdir))
+            cmdb = json.loads((Path(tempdir) / "cmdb.json").read_text())
+        self.assertEqual(cmdb["sample-vm"]["ansible_user"], "sa_123")
+        self.assertEqual(command.call_args.args[0], [
+            "gcloud", "compute", "os-login", "describe-profile", "--project=test-project",
+            f"--account={account}", "--format=json",
+        ])
+        self.assertEqual(command.call_args.kwargs["timeout"], 60)
+        self.assertEqual(command.call_args.kwargs["stderr"], generator.subprocess.DEVNULL)
+
+    def test_profile_resolution_refuses_missing_ambiguous_personal_and_invalid_users(self):
+        generator = self.load_generator()
+        profiles = [
+            {}, {"posixAccounts": []},
+            {"posixAccounts": [{"operatingSystemType": "LINUX", "username": "personal"}]},
+            {"posixAccounts": [{"operatingSystemType": "LINUX", "username": "sa_1;id"}]},
+            {"posixAccounts": [{"operatingSystemType": "LINUX", "username": f"sa_{i}"} for i in (1, 2)]},
+        ]
+        for profile in profiles:
+            with self.subTest(profile=profile), patch.dict(generator.os.environ, {}, clear=True), patch.object(
+                generator.subprocess, "check_output", return_value=json.dumps(profile)
+            ):
+                with self.assertRaisesRegex(SystemExit, "unique Linux OS Login"):
+                    generator.oslogin_username("test-project", "github-actions-prod@test-project.iam.gserviceaccount.com")
+
+    def test_profile_resolution_refuses_foreign_or_personal_principal_before_cloud_access(self):
+        generator = self.load_generator()
+        for account in (None, "personal@example.com", "github-actions-prod@other-project.iam.gserviceaccount.com"):
+            with self.subTest(account=account), patch.dict(generator.os.environ, {}, clear=True), patch.object(
+                generator.subprocess, "check_output"
+            ) as command:
+                with self.assertRaisesRegex(SystemExit, "verified runtime project"):
+                    generator.oslogin_username("test-project", account)
+                command.assert_not_called()
+
+    def test_inventory_refuses_a_foreign_runtime_project_before_profile_lookup(self):
+        generator = self.load_generator()
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(
+            generator, "load_resources", return_value=self.oslogin_manifest()
+        ), patch.object(generator.subprocess, "check_output", return_value='{"project_id":"other-project"}') as command:
+            with self.assertRaisesRegex(SystemExit, "runtime project differs"):
+                generator.inventory(SimpleNamespace(resources="ignored", workdir=tempdir))
+            self.assertEqual(command.call_count, 1)
+            self.assertFalse((Path(tempdir) / "cmdb.json").exists())
 
     def test_spot_vm_enable_oslogin_must_be_boolean(self):
         generator = self.load_generator()
