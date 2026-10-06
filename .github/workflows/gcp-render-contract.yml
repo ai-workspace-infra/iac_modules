@@ -31,4 +31,4 @@ jobs:
       - name: Verify bootstrap and service VM resource contracts
         run: |
           python3 -m unittest discover -s terraform-hcl-standard/gcp-cloud/tests -p 'test_spot_vm_deployment_contract.py' -v
-          python3 -m unittest discover -s terraform-hcl-standard/gcp-cloud/tests -p 'test_prod_selfhost_bootstrap.py' -v
+          bash terraform-hcl-standard/gcp-cloud/tests/test_prod_selfhost_bootstrap.sh
