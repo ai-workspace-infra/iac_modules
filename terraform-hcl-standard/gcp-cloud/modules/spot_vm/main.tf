@@ -127,6 +127,11 @@ resource "google_compute_instance" "this" {
   )
 
   lifecycle {
+    # google_compute_attached_disk owns attachments declared outside this
+    # module. Ignoring the instance's read-back prevents the two Terraform
+    # resources from detaching or replacing one another's disks.
+    ignore_changes = [attached_disk]
+
     precondition {
       condition     = !var.public_ip || var.enable_oslogin || trimspace(var.ssh_public_key) != ""
       error_message = "A public Spot VM requires OS Login or an SSH public key from the deploy environment."

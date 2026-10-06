@@ -69,6 +69,7 @@ def normalize_resources(document):
         raise SystemExit("metadata.provider must be gcp")
 
     resources = spec.get("resources", {})
+    persistent_data_disks = resources.get("persistent_data_disks", [])
     global_config = {
         "environment": environment,
         "bootstrap_project_id": spec.get("bootstrap_project_id", ""),
@@ -91,6 +92,7 @@ def normalize_resources(document):
         "ssh_username": spec.get("ssh_username", "github-actions"),
         "artifact_registry_location": spec.get("artifact_registry_location"),
         "artifact_registry_id": spec.get("artifact_registry_id"),
+        "persistent_data_disks": persistent_data_disks,
     }
     required_spec = (
         "gcp_account_id",
@@ -224,6 +226,47 @@ def normalize_resources(document):
         ):
             raise SystemExit("Spot VM inventory_groups must contain Ansible group names")
         validate_spot_service_declaration(vm)
+
+    persistent_data_disks = global_config["persistent_data_disks"]
+    if not isinstance(persistent_data_disks, list):
+        raise SystemExit("persistent_data_disks must be a list")
+    disk_names = []
+    attachment_devices = []
+    declared_instances = {(vm["name"], vm["zone"]) for vm in spot_vms}
+    for disk in persistent_data_disks:
+        if not isinstance(disk, dict):
+            raise SystemExit("each persistent_data_disks item must be an object")
+        name = str(disk.get("name", ""))
+        instance = str(disk.get("instance", ""))
+        zone = str(disk.get("zone", ""))
+        device_name = str(disk.get("device_name", ""))
+        if not re.fullmatch(r"[a-z][a-z0-9-]{0,61}[a-z0-9]", name):
+            raise SystemExit("persistent data disk name must be a GCP disk name")
+        if type(disk.get("size_gb")) is not int or disk["size_gb"] < 50:
+            raise SystemExit("persistent data disk size_gb must be at least 50")
+        if disk.get("type", "pd-balanced") not in {"pd-balanced", "pd-ssd", "pd-standard"}:
+            raise SystemExit("persistent data disk type must be a supported persistent disk type")
+        if disk.get("mount_path") != "/data":
+            raise SystemExit("persistent data disk mount_path must be /data")
+        if not re.fullmatch(r"[a-z][a-z0-9-]{0,61}[a-z0-9]", device_name):
+            raise SystemExit("persistent data disk device_name must be a stable GCP device name")
+        if (instance, zone) not in declared_instances:
+            raise SystemExit(
+                f"persistent data disk {name} must target a declared VM with the same zone"
+            )
+        target_vm = next(vm for vm in spot_vms if vm["name"] == instance and vm["zone"] == zone)
+        if target_vm.get("data_disk") is not None:
+            raise SystemExit(
+                f"VM {instance} cannot use both legacy data_disk and persistent_data_disks"
+            )
+        if not zone.startswith(f"{global_config['region']}-"):
+            raise SystemExit(f"persistent data disk zone {zone} must belong to region {global_config['region']}")
+        disk_names.append(tf_id(name))
+        attachment_devices.append((instance, device_name))
+    if len(set(disk_names)) != len(disk_names):
+        raise SystemExit("persistent data disk names must render to unique Terraform identifiers")
+    if len(set(attachment_devices)) != len(attachment_devices):
+        raise SystemExit("persistent data disks must use unique device_name values per VM")
     if resources.get("service_vms") and any(
         vm.get("provisioning_model") != "STANDARD" for vm in resources["service_vms"]
     ):
@@ -324,6 +367,7 @@ def validate_spot_service_declaration(vm):
 def render(args):
     document = load_resources(args.resources)
     global_config, declared_nodes, spot_vms, cloud_run_services, legacy_cloud_run = normalize_resources(document)
+    persistent_data_disks = global_config.get("persistent_data_disks", [])
     nodes = []
     for node in declared_nodes:
         item = dict(node)
@@ -412,6 +456,7 @@ def render(args):
         external_ip_allowed_instances=global_config.get("external_ip_allowed_instances", []),
         manage_external_ip_policy=global_config.get("manage_external_ip_policy", True),
         spot_vms=spot_vms,
+        persistent_data_disks=persistent_data_disks,
         cloud_run_services=cloud_run_services,
         vault_machine_type=global_config.get("vault_machine_type", ""),
         vault_image=global_config.get("vault_image", ""),
@@ -577,6 +622,31 @@ def inventory(args):
                 "device_name": facts.get("data_disk_device_name"),
                 "mount_path": vm["data_disk"]["mount_path"],
             }
+        declared_persistent_disks = [
+            disk for disk in global_config.get("persistent_data_disks", [])
+            if disk["instance"] == vm["name"]
+        ]
+        if declared_persistent_disks:
+            runtime_disks = facts.get("persistent_data_disks", [])
+            runtime_by_name = {disk.get("name"): disk for disk in runtime_disks}
+            expected_names = {disk["name"] for disk in declared_persistent_disks}
+            if set(runtime_by_name) != expected_names:
+                raise SystemExit(
+                    f"VM {vm['name']} Terraform output does not match declared persistent data disks"
+                )
+            cmdb[inventory_name]["persistent_data_disks"] = []
+            for disk in declared_persistent_disks:
+                facts_disk = runtime_by_name[disk["name"]]
+                if not facts_disk.get("id"):
+                    raise SystemExit(f"Persistent data disk {disk['name']} has no Terraform ID")
+                cmdb[inventory_name]["persistent_data_disks"].append({
+                    "name": disk["name"],
+                    "id": facts_disk["id"],
+                    "zone": disk["zone"],
+                    "device_name": disk["device_name"],
+                    "mount_path": disk["mount_path"],
+                    "management": "google_compute_attached_disk",
+                })
     (workdir / "cmdb.json").write_text(json.dumps(cmdb, indent=2) + "\n", encoding="utf-8")
     lines = ["[vault]"]
     lines.extend(
