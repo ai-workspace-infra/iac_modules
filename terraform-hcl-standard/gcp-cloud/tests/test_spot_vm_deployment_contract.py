@@ -515,6 +515,49 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
                     generator.oslogin_username("test-project", account)
                 command.assert_not_called()
 
+    def test_profile_lookup_activates_only_the_exact_github_wif_credential(self):
+        generator = self.load_generator()
+        account = "github-actions-prod@test-project.iam.gserviceaccount.com"
+        credential = {"type": "external_account", "service_account_impersonation_url":
+                      f"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{account}:generateAccessToken"}
+        profile = {"posixAccounts": [{"operatingSystemType": "LINUX", "username": "sa_123"}]}
+        with tempfile.TemporaryDirectory() as tempdir:
+            path = Path(tempdir) / "github-wif.json"
+            path.write_text(json.dumps(credential))
+            with patch.dict(generator.os.environ, {"GOOGLE_GHA_CREDS_PATH": str(path)}, clear=True), patch.object(
+                generator.subprocess, "run"
+            ) as activate, patch.object(generator.subprocess, "check_output", return_value=json.dumps(profile)):
+                self.assertEqual(generator.oslogin_username("test-project", account), "sa_123")
+                self.assertEqual(activate.call_args.args[0], ["gcloud", "--quiet", "auth", "login", f"--cred-file={path}"])
+                self.assertTrue(activate.call_args.kwargs["check"])
+                self.assertEqual(activate.call_args.kwargs["timeout"], 60)
+
+    def test_profile_lookup_refuses_other_credential_types_or_wif_principals(self):
+        generator = self.load_generator()
+        credentials = [
+            {"type": "authorized_user"}, {"type": "service_account"},
+            {"type": "external_account", "service_account_impersonation_url": "https://other.example.com"},
+        ]
+        for credential in credentials:
+            with self.subTest(type=credential["type"]), tempfile.TemporaryDirectory() as tempdir:
+                path = Path(tempdir) / "wrong-credential.json"
+                path.write_text(json.dumps(credential))
+                with patch.dict(generator.os.environ, {"GOOGLE_GHA_CREDS_PATH": str(path)}, clear=True), patch.object(
+                    generator.subprocess, "run"
+                ) as activate, patch.object(generator.subprocess, "check_output") as lookup:
+                    with self.assertRaisesRegex(SystemExit, "Cannot activate the exact runtime"):
+                        generator.oslogin_username("test-project", "github-actions-prod@test-project.iam.gserviceaccount.com")
+                    activate.assert_not_called()
+                    lookup.assert_not_called()
+
+    def test_profile_lookup_failure_does_not_expose_cloud_errors(self):
+        generator = self.load_generator()
+        with patch.dict(generator.os.environ, {}, clear=True), patch.object(
+            generator.subprocess, "check_output", side_effect=generator.subprocess.CalledProcessError(1, [], stderr="private details")
+        ):
+            with self.assertRaisesRegex(SystemExit, "^OS Login profile query failed for the exact authenticated runtime service account$"):
+                generator.oslogin_username("test-project", "github-actions-prod@test-project.iam.gserviceaccount.com")
+
     def test_inventory_refuses_a_foreign_runtime_project_before_profile_lookup(self):
         generator = self.load_generator()
         with tempfile.TemporaryDirectory() as tempdir, patch.object(
