@@ -30,7 +30,7 @@ persistent mount, database initialization, business copying, or DB cutover.
 ## Bounded administrator repair entry
 
 The Toolkit controller lives under `scripts/cloud/bootstrap/gcp/`; its fixed
-IaC owner is `terraform-hcl-standard/gcp-cloud/scripts/bootstrap_prod_selfhost.py`.
+IaC owner is `terraform-hcl-standard/gcp-cloud/scripts/bootstrap_prod_selfhost.sh`.
 It supports two separately reviewed stages:
 
 | Stage | Allowed write | Existing state |
@@ -60,7 +60,27 @@ existing Vault `TF_STATE_*` environment contract. The owner uses
 token tfvars, credential files, CLI arguments or raw plan artifacts. Temporary
 workspaces are mode 0700 and are removed on success/failure. Arbitrary provider
 diagnostics are withheld because they can contain secrets. There is no
-automatic fallback to a personal login or runtime identity.
+automatic fallback to a personal login or runtime identity. The explicit
+`--bootstrap-account EMAIL` option may acquire a short-lived token from that
+already authorized local account for this one-time repair. Login renewal is
+performed by the user, never automatically by the owner. This option is not
+available in daily deployment workflows.
+
+## Shell integration
+
+Toolkit and the provider repair owner now use Bash with jq guards, replacing
+both custom Python bootstrap programs. Toolkit prepares clean, pinned source
+checkouts automatically; manual `/path/to/pinned-*` directories are unnecessary.
+The existing Vault auth/identity/state scripts retain their separate contracts;
+the shared-policy seeder is not used to write the PROD policy outside Terraform.
+
+`identity` needs Bash, Git, jq, Ruby (safe YAML decoding), shasum and Terraform
+1.10+. `external-ip` also needs curl and the existing shared IaC renderer's
+Python/PyYAML 6.0.2/Jinja2 3.1.6 runtime. `IAC_RENDER_PYTHON` may select an
+already prepared interpreter. The renderer is required by the repository's
+Terraform YAML rendering standard; it is not a second bootstrap controller.
+No inline Python, Python wrapper, alternate HCL renderer, or new state owner
+is introduced. Raw diagnostics and state remain private and are removed.
 
 The administrator needs project IAM/API enablement permissions for `identity`
 and existing organization policy administration for `external-ip`. Do not
