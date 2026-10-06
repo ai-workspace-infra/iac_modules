@@ -528,6 +528,41 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
                 self.assertTrue(activate.call_args.kwargs["check"])
                 self.assertEqual(activate.call_args.kwargs["timeout"], 60)
 
+    def test_first_profile_initialization_requires_exact_wif_and_requeries_after_revocation(self):
+        generator = self.load_generator()
+        account = "github-actions-prod@test-project.iam.gserviceaccount.com"
+        credential = {"type": "external_account", "service_account_impersonation_url":
+                      f"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{account}:generateAccessToken"}
+        profile = {"posixAccounts": [{"operatingSystemType": "LINUX", "username": "sa_123"}]}
+        with tempfile.TemporaryDirectory() as tempdir:
+            path = Path(tempdir) / "github-wif.json"
+            path.write_text(json.dumps(credential))
+            with patch.dict(generator.os.environ, {"GOOGLE_GHA_CREDS_PATH": str(path)}, clear=True), patch.object(
+                generator.subprocess, "run"
+            ) as commands, patch.object(generator, "get_oslogin_profile", side_effect=[{}, profile]) as query:
+                self.assertEqual(generator.oslogin_username("test-project", account), "sa_123")
+                self.assertEqual(commands.call_count, 2)
+                initialize = commands.call_args_list[1]
+                self.assertEqual(initialize.args[0], ["bash", str(generator.ROOT.parents[1] / "scripts/pipeline/initialize-gcp-oslogin-profile.sh"), "test-project", account])
+                self.assertTrue(initialize.kwargs["check"])
+                self.assertEqual(initialize.kwargs["timeout"], 75)
+                self.assertEqual(query.call_count, 2)
+
+    def test_first_profile_failed_cleanup_refuses_inventory(self):
+        generator = self.load_generator()
+        account = "github-actions-prod@test-project.iam.gserviceaccount.com"
+        credential = {"type": "external_account", "service_account_impersonation_url":
+                      f"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{account}:generateAccessToken"}
+        with tempfile.TemporaryDirectory() as tempdir:
+            path = Path(tempdir) / "github-wif.json"
+            path.write_text(json.dumps(credential))
+            with patch.dict(generator.os.environ, {"GOOGLE_GHA_CREDS_PATH": str(path)}, clear=True), patch.object(
+                generator.subprocess, "run", side_effect=[None, generator.subprocess.CalledProcessError(1, [])]
+            ), patch.object(generator, "get_oslogin_profile", return_value={}) as query:
+                with self.assertRaisesRegex(SystemExit, "initialization or temporary key revocation failed"):
+                    generator.oslogin_username("test-project", account)
+                self.assertEqual(query.call_count, 1)
+
     def test_profile_lookup_refuses_other_credential_types_or_wif_principals(self):
         generator = self.load_generator()
         credentials = [

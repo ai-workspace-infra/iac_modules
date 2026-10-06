@@ -535,8 +535,9 @@ def get_oslogin_profile(project_id, deploy_account):
 
     gcloud describe-profile calls GetLoginProfile without projectId even when
     --project is set. A new principal can therefore return no POSIX accounts.
-    Use the API's explicit projectId instead of guessing a username or adding
-    an SSH key just to obtain inventory metadata.
+    Use the API's explicit projectId instead of guessing a username. A missing
+    first-time profile is initialized separately with an unused one-minute
+    public key, revoked before inventory can be accepted.
     """
     token = subprocess.check_output(
         ["gcloud", "auth", "print-access-token", f"--account={deploy_account}"],
@@ -553,7 +554,7 @@ def get_oslogin_profile(project_id, deploy_account):
 
 
 def oslogin_username(project_id=None, deploy_account=None):
-    """Resolve the WIF deployer's POSIX user without registering an SSH key.
+    """Resolve the WIF deployer's POSIX user, initializing a missing profile.
 
     Host deployment may supply its previously verified username. Resource-only
     callers instead query the exact runtime service account's OS Login profile;
@@ -590,6 +591,22 @@ def oslogin_username(project_id=None, deploy_account=None):
                 raise SystemExit("Cannot activate the exact runtime service account's GitHub WIF credential") from None
         try:
             profile = get_oslogin_profile(project_id, deploy_account)
+            # A first-time service account has no POSIX profile until import.
+            # Only initialize an absent account list, under the exact WIF
+            # contract already verified above. Existing/ambiguous profiles and
+            # HTTP failures must never trigger registration or permission changes.
+            if isinstance(profile, dict) and (
+                "posixAccounts" not in profile or profile.get("posixAccounts") == []
+            ) and credential_file:
+                try:
+                    subprocess.run(
+                        ["bash", str(ROOT.parents[1] / "scripts/pipeline/initialize-gcp-oslogin-profile.sh"),
+                         project_id, deploy_account],
+                        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=75,
+                    )
+                except (OSError, subprocess.SubprocessError):
+                    raise SystemExit("Bounded runtime OS Login profile initialization or temporary key revocation failed") from None
+                profile = get_oslogin_profile(project_id, deploy_account)
             if not isinstance(profile, dict) or not isinstance(profile.get("posixAccounts"), list):
                 raise SystemExit("Cannot resolve unique Linux OS Login username: profile has no POSIX account list")
             names = {
