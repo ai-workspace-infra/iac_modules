@@ -541,6 +541,28 @@ def oslogin_username(project_id=None, deploy_account=None):
             str(deploy_account),
         ):
             raise SystemExit("OS Login inventory requires a verified runtime project and deploy service account")
+        # google-github-actions/auth supplies ADC and a credential-file override,
+        # but does not necessarily register a gcloud account. OS Login addresses
+        # a user's profile and therefore needs that same WIF account activated,
+        # as the existing register-gcp-oslogin-key.sh owner already does.
+        credential_file = os.environ.get("GOOGLE_GHA_CREDS_PATH", "")
+        if credential_file:
+            try:
+                credential = json.loads(Path(credential_file).read_text())
+                expected_url = (
+                    "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/"
+                    + deploy_account + ":generateAccessToken"
+                )
+                if not isinstance(credential, dict) or credential.get("type") != "external_account" or (
+                    credential.get("service_account_impersonation_url") != expected_url
+                ):
+                    raise ValueError("WIF principal differs")
+                subprocess.run(
+                    ["gcloud", "--quiet", "auth", "login", f"--cred-file={credential_file}"],
+                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60,
+                )
+            except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+                raise SystemExit("Cannot activate the exact runtime service account's GitHub WIF credential") from None
         try:
             raw = subprocess.check_output(
                 ["gcloud", "compute", "os-login", "describe-profile",
@@ -560,7 +582,9 @@ def oslogin_username(project_id=None, deploy_account=None):
             username = names.pop()
             if not re.fullmatch(r"sa_[0-9]+", username):
                 raise ValueError("service account profile required")
-        except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+        except subprocess.SubprocessError:
+            raise SystemExit("OS Login profile query failed for the exact authenticated runtime service account") from None
+        except (OSError, ValueError, TypeError):
             raise SystemExit("Cannot resolve the runtime service account's unique Linux OS Login username") from None
     username = username.strip()
     if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", username):
