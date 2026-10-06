@@ -16,8 +16,8 @@ jq -n -L "$ROOT/scripts/lib" 'include "prod-bootstrap";
 jq -n -L "$ROOT/scripts/lib" 'include "prod-bootstrap";
   {resource_changes:[{address:targets("external-ip")[0],mode:"managed",type:"google_org_policy_policy",
     change:{actions:["create"],before:null,after_unknown:{spec:[{etag:true,update_time:true}]},after:{
-      name:"projects/986070475391/policies/compute.vmExternalIpAccess",parent:"projects/open-platform-prod",
-      spec:[{rules:[{allow_all:null,deny_all:null,condition:[],values:[{allowed_values:[instance],denied_values:null}]}]}]}}}]}' >"$PRIVATE/policy.json"
+      name:"projects/986070475391/policies/compute.vmExternalIpAccess",parent:"projects/986070475391",
+      spec:[{rules:[{allow_all:null,deny_all:null,condition:[],values:[{allowed_values:allowed_instances,denied_values:null}]}]}]}}}]}' >"$PRIVATE/policy.json"
 accept() { "${JQ[@]}" --arg stage "$2" 'include "prod-bootstrap"; plan_targets($stage)' "$1" >/dev/null; }
 reject() {
   local file=$1 stage=$2 transform=$3
@@ -26,6 +26,15 @@ reject() {
 }
 accept "$PRIVATE/identity.json" identity
 accept "$PRIVATE/policy.json" external-ip
+jq '.resource_changes[0].change.before=.resource_changes[0].change.after |
+  .resource_changes[0].change.before.spec[0].rules[0].allow_all="" |
+  .resource_changes[0].change.before.spec[0].rules[0].deny_all="" |
+  .resource_changes[0].change.before.spec[0].rules[0].values[0].allowed_values |= [.[0]]' \
+  "$PRIVATE/policy.json" >"$PRIVATE/adoption.json"
+accept "$PRIVATE/adoption.json" external-ip
+reject "$PRIVATE/adoption.json" external-ip '.resource_changes[0].change.after.spec[0].rules[0].values[0].allowed_values |= [.[1]]'
+reject "$PRIVATE/policy.json" external-ip '.resource_changes[0].change.actions=["delete","create"] | .resource_changes[0].change.replace_paths=[["parent"]]'
+if bash "$ROOT/scripts/bootstrap_prod_selfhost.sh" --action apply --diagnostic-plan >"$PRIVATE/private.out" 2>"$PRIVATE/private.err"; then exit 1; fi
 for action in '["delete"]' '["delete","create"]' '["create","delete"]' '[]'; do
   reject "$PRIVATE/identity.json" identity ".resource_changes[0].change.actions=$action"
 done

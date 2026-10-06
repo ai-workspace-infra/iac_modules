@@ -3,6 +3,7 @@ def ensure($ok; $message): if $ok then . else error($message) end;
 def project: "open-platform-prod";
 def member: "serviceAccount:github-actions-prod@open-platform-prod.iam.gserviceaccount.com";
 def instance: "projects/open-platform-prod/zones/asia-east1-a/instances/web-saas-prod";
+def allowed_instances: ["projects/open-platform-prod/zones/asia-east1-a/instances/open-platform-prod",instance];
 def targets($stage): if $stage == "identity" then
   ["google_project_iam_member.deploy[\"roles/compute.securityAdmin\"]",
    "google_project_iam_member.deploy[\"roles/orgpolicy.policyViewer\"]",
@@ -31,16 +32,21 @@ def declarations:
   | ensure($r.metadata.name == "web-saas" and $r.spec.workspace == "web-saas" and
       $r.spec.state_namespace == "web-saas" and $r.spec.state_project == "svc.plus" and
       ($r.spec|if has("manage_external_ip_policy") then .manage_external_ip_policy == true else true end) and
-      $r.spec.external_ip_allowed_instances == [{name:"web-saas-prod",zone:"asia-east1-a"}];
+      $r.spec.external_ip_policy_parent_identity == "project_number" and
+      $r.spec.external_ip_allowed_instances == [{name:"open-platform-prod",zone:"asia-east1-a"},{name:"web-saas-prod",zone:"asia-east1-a"}];
       "resource namespace or policy allowance mismatch");
-def permitted_flag: . == null or . == false or . == "FALSE";
+def permitted_flag: . == null or . == false or . == "FALSE" or . == "";
 def plan_targets($stage):
   ensure(.errored != true and ((.deferred_changes // [])|length) == 0 and
     (.resource_changes|type) == "array"; "invalid or deferred Terraform plan")
   | [ .resource_changes[]
     | . as $item | .change as $c | ($c.after // {}) as $a
     | ensure(([ ["no-op"],["read"],["create"],["update"] ]|any(.[]; . == $c.actions));
-        "delete replace or unknown action rejected")
+        if .address == "google_org_policy_policy.vm_external_ip_access" and
+          (($c.replace_paths // [])|any(.[]; . == ["parent"])) then "policy parent replacement rejected"
+        elif .address == "google_org_policy_policy.vm_external_ip_access" and
+          (($c.replace_paths // [])|any(.[]; . == ["name"])) then "policy name replacement rejected"
+        else "delete replace or unknown action rejected" end)
     | if .mode == "data" then
         ensure($stage == "external-ip" and .address == "module.project.data.google_project.existing[0]";
           "unexpected data dependency") | empty
@@ -63,21 +69,21 @@ def plan_targets($stage):
           else
             ensure(.type == "google_org_policy_policy" and
               (["projects/986070475391/policies/compute.vmExternalIpAccess","compute.vmExternalIpAccess"]|index($a.name)) != null and
-              $a.parent == "projects/open-platform-prod" and ($a.spec|length) == 1 and
+              $a.parent == "projects/986070475391" and ($a.spec|length) == 1 and
               ($a.spec[0].inherit_from_parent|not) and ($a.spec[0].reset|not) and
               ($a.spec[0].rules|length) == 1; "policy identity or local rule mismatch")
             | $a.spec[0].rules[0] as $rule
             | ensure((($rule.condition // [])|length) == 0 and ($rule.allow_all|permitted_flag) and
                 ($rule.deny_all|permitted_flag) and ($rule.values|length) == 1 and
-                $rule.values[0].allowed_values == [instance] and
+                $rule.values[0].allowed_values == allowed_instances and
                 (($rule.values[0].denied_values // [])|length) == 0; "broad conditional or incorrect policy")
             | ensure(all(($c.before.spec // [])[]; all((.rules // [])[];
                 ((.condition // [])|length) == 0 and (.allow_all|permitted_flag) and
-                all((.values // [])[]; all((.allowed_values // [])[]; . == instance))));
+                all((.values // [])[]; all((.allowed_values // [])[]; . as $value | (allowed_instances|index($value)) != null))));
                 "existing policy requires separate review")
           end
         | {address, actions:$c.actions, contract:($a|with_entries(select(.key|IN("project","role","member","service","parent"))))}
-          + (if $stage == "external-ip" then {contract:(($a|{parent}) + {allowed_instances:[instance]})} else {} end)
+          + (if $stage == "external-ip" then {contract:(($a|{parent}) + {allowed_instances:allowed_instances})} else {} end)
           + {_change:$c}
       end ]
   | ensure((map(.address)|sort) == (targets($stage)|sort); "duplicate or omitted bootstrap target")

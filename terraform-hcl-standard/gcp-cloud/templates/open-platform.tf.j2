@@ -10,7 +10,11 @@ module "project" {
 {% if external_ip_allowed_instances and manage_external_ip_policy %}
 resource "google_org_policy_policy" "vm_external_ip_access" {
   name   = "projects/${module.project.project_number}/policies/compute.vmExternalIpAccess"
+{% if external_ip_policy_parent_identity == 'project_number' %}
+  parent = "projects/${module.project.project_number}"
+{% else %}
   parent = "projects/${module.project.project_id}"
+{% endif %}
 
   # The Google provider currently normalizes imported policy names to the
   # short constraint name in state. Ignore only that import representation

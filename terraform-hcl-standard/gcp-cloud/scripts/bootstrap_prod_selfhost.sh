@@ -7,7 +7,7 @@ umask 077
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 REPO=$(cd -- "$ROOT/../.." && pwd)
 LIB="$ROOT/scripts/lib"
-STAGE=identity ACTION=plan GITOPS_DIR= GITOPS_REF= IAC_REF= APPROVED= ACCOUNT= WORKDIR=
+STAGE=identity ACTION=plan GITOPS_DIR= GITOPS_REF= IAC_REF= APPROVED= ACCOUNT= WORKDIR= DIAGNOSTIC=false
 stop() { echo "bootstrap stopped: $1" >&2; exit 1; }
 cleanup() { if [[ -n "$WORKDIR" ]]; then rm -rf -- "$WORKDIR"; fi; }
 trap cleanup EXIT
@@ -18,14 +18,18 @@ usage() {
 Usage: bootstrap_prod_selfhost.sh --gitops-dir DIR --gitops-ref SHA --iac-ref SHA
        [--stage identity|external-ip] [--action plan|apply]
        [--approved-plan-sha256 SHA256] [--bootstrap-account EMAIL]
+       [--diagnostic-plan]
 Prefer the Toolkit Shell entry: it prepares the fixed source checkouts.
 --bootstrap-account explicitly selects a previously authorized local login for
 this ONE-TIME repair only. There is no automatic account or credential fallback.
+--diagnostic-plan is plan-only and prints a bounded nonsecret plan shape. It
+never applies and never issues a convergence or database cutover receipt.
 EOF
 }
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h) usage; exit 0 ;;
+    --diagnostic-plan) DIAGNOSTIC=true; shift ;;
     --gitops-dir|--gitops-ref|--iac-ref|--stage|--action|--approved-plan-sha256|--bootstrap-account)
       [[ $# -ge 2 && -n "$2" ]] || stop 'missing option value'
       case "$1" in
@@ -39,6 +43,7 @@ while [[ $# -gt 0 ]]; do
 done
 [[ "$STAGE" == identity || "$STAGE" == external-ip ]] || stop 'invalid stage'
 [[ "$ACTION" == plan || "$ACTION" == apply ]] || stop 'invalid action'
+[[ "$DIAGNOSTIC" != true || "$ACTION" == plan ]] || stop 'diagnostic mode is plan only'
 [[ "$ACTION" != apply || "$APPROVED" =~ ^[0-9a-f]{64}$ ]] || stop 'apply requires reviewed plan digest'
 for dependency in git jq ruby shasum terraform; do command -v "$dependency" >/dev/null || stop "missing dependency $dependency"; done
 verify_checkout() {
@@ -61,8 +66,24 @@ ruby -ryaml -rjson -e '
 ' "$GITOPS_DIR/resources/xworktech.com/prod/gcp/github-actions-oidc.yaml" \
   "$GITOPS_DIR/resources/svc.plus/prod/gcp/web-saas.yaml" >"$WORKDIR/declarations.json" 2>"$WORKDIR/private.log" || stop 'invalid YAML declaration'
 guard() {
-  # Guard/provider/parser details are private; emit only a static reason.
-  jq -L "$LIB" -e "$@" 2>"$WORKDIR/private.log" || stop 'declaration plan or state guard rejected input'
+  # Only the module's fixed guard reasons may leave the private workspace.
+  # jq parser diagnostics and provider/input values are never echoed.
+  local reason
+  if jq -L "$LIB" -e "$@" 2>"$WORKDIR/private.log"; then return; fi
+  reason=$(sed -n 's/^jq: error (at .*): //p' "$WORKDIR/private.log")
+  case "$reason" in
+    'declaration kind mismatch'|'PROD declaration identity mismatch'|'WIF identity or subjects mismatch'|\
+    'existing state key mismatch'|'resource namespace or policy allowance mismatch'|\
+    'invalid or deferred Terraform plan'|'delete replace or unknown action rejected'|\
+    'policy parent replacement rejected'|'policy name replacement rejected'|\
+    'unexpected data dependency'|'write outside bootstrap targets'|'unknown target contract'|\
+    'IAM API project mismatch'|'IAM grant mismatch'|'API enablement mismatch'|\
+    'policy identity or local rule mismatch'|'broad conditional or incorrect policy'|\
+    'existing policy requires separate review'|'duplicate or omitted bootstrap target'|\
+    'existing state lineage serial required'|'existing protected state missing do not create second state')
+      stop "$reason" ;;
+    *) stop 'declaration plan or state guard rejected input' ;;
+  esac
 }
 guard 'include "prod-bootstrap"; declarations' "$WORKDIR/declarations.json" >/dev/null
 
@@ -158,9 +179,17 @@ while IFS= read -r target; do TARGET_ARGS+=("-target=$target"); done < <(
 plan() {
   tf plan -input=false -no-color -lock-timeout=120s "-out=$WORKDIR/bootstrap.tfplan" "${TARGET_ARGS[@]}" >"$WORKDIR/plan.log"
   tf show -json "$WORKDIR/bootstrap.tfplan" >"$WORKDIR/plan.json"
+  if [[ "$DIAGNOSTIC" == true ]]; then
+    jq '{schema:"prod-selfhost-bootstrap-diagnostic/v1",diagnostic_only:true,database_cutover_approved:false,
+      resources:[.resource_changes[]|{address,mode,actions:.change.actions,replace_paths:.change.replace_paths,
+      policy:(if .type == "google_org_policy_policy" then
+        {before:(.change.before|{name,parent,spec}),after:(.change.after|{name,parent,spec}),after_unknown:.change.after_unknown}
+        else null end)}]}' "$WORKDIR/plan.json"
+  fi
   guard --arg stage "$STAGE" 'include "prod-bootstrap"; plan_targets($stage)' "$WORKDIR/plan.json" >"$WORKDIR/targets.raw.json"
 }
 plan
+if [[ "$DIAGNOSTIC" == true ]]; then exit 0; fi
 printf '[]\n' >"$WORKDIR/targets.json"
 while IFS= read -r item; do
   digest=$(jq '._change' <<<"$item" | hash_json)
