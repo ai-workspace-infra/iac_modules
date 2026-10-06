@@ -70,6 +70,7 @@ guard() {
     'declaration kind mismatch'|'PROD declaration identity mismatch'|'WIF identity or subjects mismatch'|\
     'existing state key mismatch'|'resource namespace or policy allowance mismatch'|\
     'invalid or deferred Terraform plan'|'delete replace or unknown action rejected'|\
+    'policy parent replacement rejected'|'policy name replacement rejected'|\
     'unexpected data dependency'|'write outside bootstrap targets'|'unknown target contract'|\
     'IAM API project mismatch'|'IAM grant mismatch'|'API enablement mismatch'|\
     'policy identity or local rule mismatch'|'broad conditional or incorrect policy'|\

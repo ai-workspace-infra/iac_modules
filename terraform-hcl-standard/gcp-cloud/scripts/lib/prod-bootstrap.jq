@@ -40,7 +40,11 @@ def plan_targets($stage):
   | [ .resource_changes[]
     | . as $item | .change as $c | ($c.after // {}) as $a
     | ensure(([ ["no-op"],["read"],["create"],["update"] ]|any(.[]; . == $c.actions));
-        "delete replace or unknown action rejected")
+        if .address == "google_org_policy_policy.vm_external_ip_access" and
+          (($c.replace_paths // [])|any(.[]; . == ["parent"])) then "policy parent replacement rejected"
+        elif .address == "google_org_policy_policy.vm_external_ip_access" and
+          (($c.replace_paths // [])|any(.[]; . == ["name"])) then "policy name replacement rejected"
+        else "delete replace or unknown action rejected" end)
     | if .mode == "data" then
         ensure($stage == "external-ip" and .address == "module.project.data.google_project.existing[0]";
           "unexpected data dependency") | empty
