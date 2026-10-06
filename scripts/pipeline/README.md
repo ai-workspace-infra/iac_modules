@@ -109,3 +109,22 @@ direct entry points executable (`100755`).
 toolkit. Keep the copy local to this repository; do not source a helper through a sibling
 checkout. Release and branch rules are maintained in
 [`skills/release-branch-policy/SKILL.md`](../../skills/release-branch-policy/SKILL.md).
+# Canonical PROD Selfhost access
+
+`.github/actions/prod-selfhost-access` calls the IaC-owned
+`prod-selfhost-access.sh open|close` adapter. Its caller must first verify the
+successful resource workflow and original artifact provenance, then supply the
+approved CMDB checksum and the exact GitHub WIF deploy account. The adapter
+checks live VM/network/OS Login/protected disk facts without starting the VM.
+It reuses the temporary-access owner for a 45-minute OS Login key and a
+runner-only `/32` SSH rule; project-scoped OS Login uses an explicit `projectId`
+API request rather than guessing the service account's Linux username.
+
+The access directory is bound to this runner, run ID and attempt. It is private
+runtime state and must never be uploaded or substituted for CMDB. The caller
+must run `close` with `always()` even when opening access or host execution fails.
+Cleanup verifies firewall deletion, revokes the key and removes private files;
+failure must fail the workflow. The adapter executes no host or database commands.
+An ephemeral rule does not supersede any broader permanent firewall rule:
+public SSH isolation also requires the canonical GitOps declaration to remove
+the public catch-all rule through the normal audited IaC plan/apply path.

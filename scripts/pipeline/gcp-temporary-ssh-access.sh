@@ -118,8 +118,22 @@ PY
   ssh-keygen -q -t ed25519 -N '' -C "ci-${ACCESS_RULE_NAME}" -f "${ACCESS_DIR}/id_ed25519"
   gcloud compute os-login ssh-keys add --project="${GCP_PROJECT_ID}" \
     --key-file="${ACCESS_DIR}/id_ed25519.pub" --ttl="${ttl}" >/dev/null
-  local profile ssh_user
-  profile="$(gcloud compute os-login describe-profile --project="${GCP_PROJECT_ID}" --format=json)"
+  local profile ssh_user token profile_url
+  if [[ -n "${GCP_OSLOGIN_DEPLOY_ACCOUNT:-}" ]]; then
+    # --project does not scope gcloud's GetLoginProfile request. A fixed WIF
+    # caller must query the explicit projectId API, just as CMDB generation does.
+    [[ "${GCP_OSLOGIN_DEPLOY_ACCOUNT}" =~ ^[a-z][a-z0-9-]+@${GCP_PROJECT_ID}\.iam\.gserviceaccount\.com$ ]] || {
+      echo '::error::Project-scoped OS Login principal differs.' >&2; exit 2;
+    }
+    token="$(gcloud auth print-access-token --account="${GCP_OSLOGIN_DEPLOY_ACCOUNT}" 2>/dev/null)"
+    [[ -n "$token" && "$token" != *[[:space:]]* ]] || { echo '::error::WIF token is unavailable.' >&2; exit 1; }
+    profile_url="https://oslogin.googleapis.com/v1/users/${GCP_OSLOGIN_DEPLOY_ACCOUNT/@/%40}/loginProfile?projectId=${GCP_PROJECT_ID}"
+    profile="$(curl --fail --silent --show-error --connect-timeout 5 --max-time 15 \
+      --header "Authorization: Bearer ${token}" "$profile_url")"
+    unset token
+  else
+    profile="$(gcloud compute os-login describe-profile --project="${GCP_PROJECT_ID}" --format=json)"
+  fi
   ssh_user="$(jq -r '[.posixAccounts[]? | select(.operatingSystemType == "LINUX") | .username] | first // empty' <<<"${profile}")"
   [[ "${ssh_user}" =~ ^[a-z_][a-z0-9_-]{0,31}\$?$ ]] || { echo '::error::OS Login returned no valid Linux user.' >&2; exit 1; }
   [[ -z "${GITHUB_ACTIONS:-}" ]] || echo "::add-mask::${ssh_user}"

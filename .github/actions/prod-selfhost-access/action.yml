@@ -1,0 +1,22 @@
+name: Canonical PROD Selfhost ephemeral access
+description: IaC-owned cloud access only; caller verifies successful resource artifact provenance.
+inputs:
+  phase: {required: true, description: 'open or close'}
+  cmdb_file: {required: true, description: 'Verified immutable resource artifact file'}
+  cmdb_sha256: {required: true, description: 'Verified CMDB file checksum'}
+  access_dir: {required: true, description: 'Private directory in this runner only'}
+outputs:
+  access_file:
+    description: Private access contract path; never upload this file.
+    value: ${{ inputs.access_dir }}/access.json
+runs:
+  using: composite
+  steps:
+    - name: Execute IaC cloud access owner
+      shell: bash
+      env:
+        ACCESS_PHASE: ${{ inputs.phase }}
+        CMDB_FILE: ${{ inputs.cmdb_file }}
+        EXPECTED_CMDB_SHA256: ${{ inputs.cmdb_sha256 }}
+        ACCESS_DIR: ${{ inputs.access_dir }}
+      run: bash "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/prod-selfhost-access.sh" "$ACCESS_PHASE"
