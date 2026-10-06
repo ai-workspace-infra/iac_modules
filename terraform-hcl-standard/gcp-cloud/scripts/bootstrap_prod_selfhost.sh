@@ -61,8 +61,23 @@ ruby -ryaml -rjson -e '
 ' "$GITOPS_DIR/resources/xworktech.com/prod/gcp/github-actions-oidc.yaml" \
   "$GITOPS_DIR/resources/svc.plus/prod/gcp/web-saas.yaml" >"$WORKDIR/declarations.json" 2>"$WORKDIR/private.log" || stop 'invalid YAML declaration'
 guard() {
-  # Guard/provider/parser details are private; emit only a static reason.
-  jq -L "$LIB" -e "$@" 2>"$WORKDIR/private.log" || stop 'declaration plan or state guard rejected input'
+  # Only the module's fixed guard reasons may leave the private workspace.
+  # jq parser diagnostics and provider/input values are never echoed.
+  local reason
+  if jq -L "$LIB" -e "$@" 2>"$WORKDIR/private.log"; then return; fi
+  reason=$(sed -n 's/^jq: error (at .*): //p' "$WORKDIR/private.log")
+  case "$reason" in
+    'declaration kind mismatch'|'PROD declaration identity mismatch'|'WIF identity or subjects mismatch'|\
+    'existing state key mismatch'|'resource namespace or policy allowance mismatch'|\
+    'invalid or deferred Terraform plan'|'delete replace or unknown action rejected'|\
+    'unexpected data dependency'|'write outside bootstrap targets'|'unknown target contract'|\
+    'IAM API project mismatch'|'IAM grant mismatch'|'API enablement mismatch'|\
+    'policy identity or local rule mismatch'|'broad conditional or incorrect policy'|\
+    'existing policy requires separate review'|'duplicate or omitted bootstrap target'|\
+    'existing state lineage serial required'|'existing protected state missing do not create second state')
+      stop "$reason" ;;
+    *) stop 'declaration plan or state guard rejected input' ;;
+  esac
 }
 guard 'include "prod-bootstrap"; declarations' "$WORKDIR/declarations.json" >/dev/null
 
