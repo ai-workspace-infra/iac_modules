@@ -1,0 +1,22 @@
+name: iac-cleanup
+description: GitOps-bound IaC owner action; delivery approvals and DAG belong to Toolkit.
+inputs:
+  iac-root:
+    description: Pinned owner checkout
+    required: true
+  evidence-dir:
+    description: Public stage evidence
+    required: true
+  private-dir:
+    description: Private ephemeral materials
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: cleanup
+      shell: bash
+      env:
+        IAC_ROOT: ${{ inputs.iac-root }}
+        IAC_EVIDENCE: ${{ inputs.evidence-dir }}
+        IAC_PRIVATE: ${{ inputs.private-dir }}
+      run: python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/unified_cli.py" cleanup

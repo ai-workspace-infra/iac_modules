@@ -1,0 +1,57 @@
+name: iac-receipt-verify
+description: GitOps-bound IaC owner action; delivery approvals and DAG belong to Toolkit.
+inputs:
+  summary-file:
+    description: Downloaded aggregate summary
+    required: true
+  receipt-sha256:
+    description: Expected exact summary checksum
+    required: true
+  run-id:
+    description: Expected caller run
+    required: true
+  run-attempt:
+    description: Expected caller attempt
+    required: true
+  gitops-sha:
+    description: Expected declaration SHA
+    required: true
+  iac-sha:
+    description: Expected owner SHA
+    required: true
+  target-manifest:
+    description: Expected GitOps source path
+    required: true
+  action:
+    description: Expected requested action
+    required: true
+  correlation-id:
+    description: Expected correlation
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install exact renderer dependencies
+      shell: bash
+      run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.2 Jinja2==3.1.6
+    - name: verify-summary
+      shell: bash
+      env:
+        IAC_SUMMARY: ${{ inputs.summary-file }}
+        IAC_CHECKSUM: ${{ inputs.receipt-sha256 }}
+        IAC_RUN_ID: ${{ inputs.run-id }}
+        IAC_ATTEMPT: ${{ inputs.run-attempt }}
+        IAC_GITOPS_SHA: ${{ inputs.gitops-sha }}
+        IAC_SHA: ${{ inputs.iac-sha }}
+        IAC_MANIFEST: ${{ inputs.target-manifest }}
+        IAC_ACTION: ${{ inputs.action }}
+        IAC_CORRELATION: ${{ inputs.correlation-id }}
+      run: python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/unified_cli.py" verify-summary
+      id: verify
+outputs:
+  result:
+    description: result
+    value: ${{ steps.verify.outputs.result }}
+  deploy_matrix:
+    description: deploy_matrix
+    value: ${{ steps.verify.outputs.deploy_matrix }}

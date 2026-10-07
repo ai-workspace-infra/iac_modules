@@ -1,0 +1,38 @@
+name: auth-gcp-cloud
+description: GitOps-bound IaC owner action; delivery approvals and DAG belong to Toolkit.
+inputs:
+  provider:
+    description: GitOps/Vault-bound WIF provider
+    required: true
+  service-account:
+    description: Runtime service account
+    required: true
+  audience:
+    description: Declared audience
+    required: true
+  reconcile:
+    description: Explicit bootstrap reconcile
+    required: true
+runs:
+  using: composite
+  steps:
+    - id: runtime
+      if: inputs.reconcile != 'true'
+      uses: google-github-actions/auth@v2
+      with:
+        workload_identity_provider: ${{ inputs.provider }}
+        service_account: ${{ inputs.service-account }}
+        audience: ${{ inputs.audience }}
+    - id: bootstrap
+      if: inputs.reconcile == 'true' && env.GCP_BOOTSTRAP_AUTH_JSON != ''
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ env.GCP_BOOTSTRAP_AUTH_JSON }}
+        token_format: access_token
+    - if: inputs.reconcile == 'true' && env.GCP_BOOTSTRAP_AUTH_JSON != ''
+      shell: bash
+      env:
+        BOOTSTRAP_TOKEN: ${{ steps.bootstrap.outputs.access_token }}
+      run: printf "%s\n" "TF_VAR_access_token=$BOOTSTRAP_TOKEN" "GCP_BOOTSTRAP_ACCESS_TOKEN=$BOOTSTRAP_TOKEN" "CLOUDSDK_AUTH_ACCESS_TOKEN=$BOOTSTRAP_TOKEN"
+        >> "$GITHUB_ENV"
+    - uses: google-github-actions/setup-gcloud@v2

@@ -1,0 +1,45 @@
+name: Explicit IaC maintenance
+description: Audited adoption only; no deployment caller may invoke this action implicitly.
+inputs:
+  operation:
+    description: Only adopt-aws-identity; explicit reviewed recovery, never ordinary plan
+    required: true
+  iac-root:
+    description: Fixed owner source
+    required: true
+  gitops-root:
+    description: Fixed declarations
+    required: true
+  bootstrap-manifest:
+    description: GitOps non-secret bootstrap identity config
+    required: true
+  private-dir:
+    description: Private temporary maintenance copy
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        OPERATION: ${{ inputs.operation }}
+        IAC_ROOT: ${{ inputs.iac-root }}
+        GITOPS_ROOT: ${{ inputs.gitops-root }}
+        BOOTSTRAP_MANIFEST: ${{ inputs.bootstrap-manifest }}
+        IAC_PRIVATE: ${{ inputs.private-dir }}
+      run: |-
+        python3 - <<'PYCODE'
+        import os,shutil,sys
+        from pathlib import Path
+        sys.path.insert(0,str(Path(os.environ['IAC_ROOT'])/'scripts/pipeline'))
+        from unified.contracts import checkout_sha,source_file,require
+        require(os.environ['OPERATION']=='adopt-aws-identity','unsupported maintenance operation')
+        checkout_sha(os.environ['IAC_ROOT']);checkout_sha(os.environ['GITOPS_ROOT'])
+        source_file(os.environ['GITOPS_ROOT'],os.environ['BOOTSTRAP_MANIFEST'])
+        root=Path(os.environ['IAC_PRIVATE'])/'maintenance-iac'
+        destination=root/'terraform-hcl-standard/aws-cloud/bootstrap/identity'
+        shutil.copytree(Path(os.environ['IAC_ROOT'])/'terraform-hcl-standard/aws-cloud/bootstrap/identity',destination,ignore=shutil.ignore_patterns('.terraform','*.tfvars*','*.tfstate*'))
+        PYCODE
+        export IAC_MODULES_ROOT="$IAC_PRIVATE/maintenance-iac"
+        export IAC_BOOTSTRAP_CONFIG="$GITOPS_ROOT/$BOOTSTRAP_MANIFEST"
+        export GITOPS_AWS_OIDC_CONFIG="$IAC_PRIVATE/oidc.json"
+        bash "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/maintenance/aws/adopt_github_oidc_terraform_state.sh"

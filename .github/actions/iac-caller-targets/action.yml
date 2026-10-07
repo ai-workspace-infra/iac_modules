@@ -1,0 +1,55 @@
+name: iac-caller-targets
+description: GitOps-bound IaC owner action; delivery approvals and DAG belong to Toolkit.
+inputs:
+  iac-root:
+    description: Pinned owner checkout
+    required: true
+  gitops-root:
+    description: Pinned declaration checkout
+    required: true
+  target-manifest:
+    description: Explicit target or empty for exact catalog lookup
+    required: true
+  caller:
+    description: selfhost/serverless
+    required: true
+  topology-path:
+    description: Serverless topology source or empty
+    required: true
+  selectors:
+    description: Exact existing caller identity selectors
+    required: true
+  state-key:
+    description: Retained caller state key or empty
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install exact renderer dependencies
+      shell: bash
+      run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.2 Jinja2==3.1.6
+    - name: resolve-caller
+      shell: bash
+      env:
+        IAC_ROOT: ${{ inputs.iac-root }}
+        IAC_GITOPS_ROOT: ${{ inputs.gitops-root }}
+        IAC_MANIFEST: ${{ inputs.target-manifest }}
+        IAC_CALLER: ${{ inputs.caller }}
+        IAC_TOPOLOGY: ${{ inputs.topology-path }}
+        IAC_SELECTORS: ${{ inputs.selectors }}
+        IAC_STATE_KEY: ${{ inputs.state-key }}
+      run: python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/unified_cli.py" resolve-caller
+      id: targets
+outputs:
+  target_manifest:
+    description: target_manifest
+    value: ${{ steps.targets.outputs.target_manifest }}
+  gitops_sha:
+    description: gitops_sha
+    value: ${{ steps.targets.outputs.gitops_sha }}
+  iac_sha:
+    description: iac_sha
+    value: ${{ steps.targets.outputs.iac_sha }}
+  selectors:
+    description: selectors
+    value: ${{ steps.targets.outputs.selectors }}

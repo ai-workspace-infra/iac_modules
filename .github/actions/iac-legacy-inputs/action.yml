@@ -1,0 +1,53 @@
+name: iac-legacy-inputs
+description: GitOps-bound IaC owner action; delivery approvals and DAG belong to Toolkit.
+inputs:
+  inputs-json:
+    description: Legacy and new inputs; inconsistent aliases fail
+    required: true
+  stage:
+    description: Selected stage
+    required: true
+  provider:
+    description: Fixed wrapper provider or empty
+    required: true
+  iac-root:
+    description: Pinned owner checkout
+    required: true
+  gitops-root:
+    description: Pinned declarations
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install exact renderer dependencies
+      shell: bash
+      run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.2 Jinja2==3.1.6
+    - name: normalize-legacy
+      shell: bash
+      env:
+        IAC_INPUTS: ${{ inputs.inputs-json }}
+        IAC_STAGE: ${{ inputs.stage }}
+        IAC_PROVIDER: ${{ inputs.provider }}
+        IAC_ROOT: ${{ inputs.iac-root }}
+        IAC_GITOPS_ROOT: ${{ inputs.gitops-root }}
+      run: python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/unified_cli.py" normalize-legacy
+      id: normalize
+outputs:
+  target_manifest:
+    description: target_manifest
+    value: ${{ steps.normalize.outputs.target_manifest }}
+  selectors:
+    description: selectors
+    value: ${{ steps.normalize.outputs.selectors }}
+  action:
+    description: action
+    value: ${{ steps.normalize.outputs.action }}
+  environment:
+    description: environment
+    value: ${{ steps.normalize.outputs.environment }}
+  gitops_sha:
+    description: gitops_sha
+    value: ${{ steps.normalize.outputs.gitops_sha }}
+  iac_sha:
+    description: iac_sha
+    value: ${{ steps.normalize.outputs.iac_sha }}
