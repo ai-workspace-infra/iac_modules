@@ -1,7 +1,7 @@
 name: Serverless Provider execution owner
 description: Execute only the allowlisted Cloud Run or Cloudflare deployment selected by Toolkit.
 inputs:
-  operation: {required: true, description: "cloud-run, ssr, edge-worker, page-worker, static-pages, dashboard, pages, frontend-router, or edge-gateway"}
+  operation: {required: true, description: "registry-preflight, cloud-run, ssr, edge-worker, page-worker, static-pages, dashboard, pages, frontend-router, or edge-gateway"}
   environment: {required: true, description: "Selected environment matching the GitOps declaration"}
   release_ref: {required: true, description: "Immutable service release tag"}
 runs:
@@ -23,6 +23,7 @@ runs:
           "${CLOUDFLARE_BOUNDARY_CONFIG:?}" >/dev/null
         export DEPLOY_ENV="$PROVIDER_ENVIRONMENT" CLOUDFLARE_ENV="$PROVIDER_ENVIRONMENT"
         case "$PROVIDER_OPERATION" in
+          registry-preflight) script=serverless-registry-preflight.sh ;;
           cloud-run) script=deploy-cloudrun-services.sh ;;
           ssr|edge-worker|page-worker) script=deploy-portal-opennext-worker.sh ;;
           static-pages|dashboard|pages) script=deploy-cloudflare-pages.sh ;;
@@ -32,7 +33,7 @@ runs:
         esac
         bash "$GITHUB_ACTION_PATH/../../../scripts/pipeline/$script"
         case "$PROVIDER_OPERATION" in
-          cloud-run) target="${CLOUD_RUN_SERVICE:?}" ;;
+          cloud-run|registry-preflight) target="${CLOUD_RUN_SERVICE:?}" ;;
           ssr|edge-worker|page-worker) target="${PORTAL_SSR_BOUNDARY:?}" ;;
           edge-gateway) target="${EDGE_GATEWAY_BOUNDARY:?}" ;;
           *) target="$PROVIDER_OPERATION" ;;
