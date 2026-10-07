@@ -218,8 +218,19 @@ def normalize_resources(document):
                 raise SystemExit("VM data_disk.mount_path must be /data")
             if not re.fullmatch(r"[a-z][a-z0-9-]{0,61}[a-z0-9]", str(data_disk.get("device_name", ""))):
                 raise SystemExit("VM data_disk.device_name must be a stable GCP device name")
-        if model == "STANDARD" and (not vm.get("deletion_protection") or data_disk is None):
-            raise SystemExit("STANDARD service VMs require deletion_protection and data_disk")
+        # Durable storage may be the original inline disk or separately managed
+        # retained disks. Validate retained declarations below before returning;
+        # never translate their existing module addresses into an inline disk.
+        retained_disks = global_config["persistent_data_disks"]
+        has_retained_disk = isinstance(retained_disks, list) and any(
+            isinstance(disk, dict) and disk.get("instance") == vm["name"]
+            and disk.get("zone") == vm["zone"] and disk.get("mount_path") == "/data"
+            for disk in retained_disks
+        )
+        if model == "STANDARD" and (
+            not vm.get("deletion_protection") or (data_disk is None and not has_retained_disk)
+        ):
+            raise SystemExit("STANDARD service VMs require deletion_protection and durable /data storage")
         if model == "STANDARD" and "max_run_duration_seconds" in vm:
             raise SystemExit("STANDARD service VMs must not have max_run_duration_seconds")
         if vm.get("public_ip") and not global_config.get("spot_ssh_source_ranges"):
