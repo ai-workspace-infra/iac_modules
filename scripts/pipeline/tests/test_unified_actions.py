@@ -16,6 +16,9 @@ class ActionContracts(unittest.TestCase):
             *actions.glob('iac-*/action.yml'),
             *actions.glob('auth-*/action.yml'),
             actions / 'node-access-gcp/action.yml',
+            actions / 'gitops-gcp-target/action.yml',
+            actions / 'gitops-aws-oidc/action.yml',
+            actions / 'cloud-run-serving-facts/action.yml',
         ]
 
     def test_local_action_dependencies_and_inputs_exist(self):
