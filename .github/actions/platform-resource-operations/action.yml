@@ -1,9 +1,9 @@
 name: Platform resource operations owner
 description: Parameterized IaC cloud-fact, DNS, SMTP and existing-target inventory operations.
 inputs:
-  operation: {required: true, description: resize-preflight, existing-host, sit-dns, or smtp-sync}
-  environment: {required: true, description: Exact sit, uat or prod environment}
-  declaration: {required: false, default: '', description: Selected GitOps YAML existing-host declaration}
+  operation: {required: true, description: "resize-preflight, existing-host, sit-dns, or smtp-sync"}
+  environment: {required: true, description: "Exact sit, uat or prod environment"}
+  declaration: {required: false, default: '', description: "Selected GitOps YAML existing-host declaration"}
 outputs:
   instance_id: {description: Resolved authoritative instance ID, value: '${{ steps.execute.outputs.instance_id }}'}
   direction: {description: Resize direction, value: '${{ steps.execute.outputs.direction }}'}

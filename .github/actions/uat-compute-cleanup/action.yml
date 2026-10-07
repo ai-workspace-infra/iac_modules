@@ -1,8 +1,8 @@
 name: UAT compute cleanup owner
 description: Exact GitOps UAT allowlist, successful inventory, and verified absence; never prunes images or persistent data.
 inputs:
-  policy: {required: true, description: Immutable GitOps cleanup YAML declaration}
-  mode: {required: true, description: plan or apply}
+  policy: {required: true, description: "Immutable GitOps cleanup YAML declaration"}
+  mode: {required: true, description: "plan or apply"}
 outputs:
   status: {description: plan-only or verified-deletion, value: '${{ steps.cleanup.outputs.status }}'}
   receipt: {description: Private runtime JSON receipt path, value: '${{ steps.cleanup.outputs.receipt }}'}

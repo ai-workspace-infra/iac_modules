@@ -1,9 +1,9 @@
 name: Serverless Provider execution owner
 description: Execute only the allowlisted Cloud Run or Cloudflare deployment selected by Toolkit.
 inputs:
-  operation: {required: true, description: cloud-run, ssr, edge-worker, page-worker, static-pages, dashboard, pages, frontend-router, or edge-gateway}
-  environment: {required: true, description: Selected environment matching the GitOps declaration}
-  release_ref: {required: true, description: Immutable service release tag}
+  operation: {required: true, description: "cloud-run, ssr, edge-worker, page-worker, static-pages, dashboard, pages, frontend-router, or edge-gateway"}
+  environment: {required: true, description: "Selected environment matching the GitOps declaration"}
+  release_ref: {required: true, description: "Immutable service release tag"}
 runs:
   using: composite
   steps:
