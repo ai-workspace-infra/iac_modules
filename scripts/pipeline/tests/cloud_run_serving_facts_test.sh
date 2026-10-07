@@ -52,5 +52,7 @@ grep -q 'ambiguous linux/amd64 manifest' "${work}/stderr"
 
 run IMAGE=accounts:latest && { echo 'tagged image path must fail' >&2; exit 1; }
 grep -q 'Artifact Registry repository path' "${work}/stderr"
+run IMAGE=user@asia-northeast1-docker.pkg.dev/open-platform-uat/serverless/accounts && { echo 'registry authority must reject credentials' >&2; exit 1; }
+grep -q 'Artifact Registry repository path' "${work}/stderr"
 
 echo 'cloud_run_serving_facts_test: PASS'

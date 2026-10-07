@@ -18,7 +18,7 @@ child=""
 if [[ -n "${IMAGE:-}" ]]; then
   registry="${IMAGE%%/*}"
   repository="${IMAGE#*/}"
-  [[ "${registry}" == *.pkg.dev && "${repository}" != "${IMAGE}" && \
+  [[ "${registry}" =~ ^[a-z0-9][a-z0-9-]*-docker[.]pkg[.]dev$ && "${repository}" != "${IMAGE}" && \
     "${repository}" =~ ^[a-z0-9][a-z0-9._/-]*[a-z0-9]$ && \
     "${repository}" != *..* && "${repository}" != *//* ]] || {
     echo '::error::IMAGE must be an Artifact Registry repository path without a tag or digest.' >&2
@@ -29,7 +29,7 @@ if [[ -n "${IMAGE:-}" ]]; then
     echo '::error::cannot mint an access token for the Artifact Registry metadata query.' >&2
     exit 1
   }
-  raw="$(printf 'Authorization: Bearer %s\n' "${access_token}" | curl --fail --silent --show-error \
+  raw="$(printf 'Authorization: Bearer %s\n' "${access_token}" | curl --fail --silent --show-error --connect-timeout 10 --max-time 60 \
     --header @- \
     --header 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
     "https://${registry}/v2/${repository}/manifests/${ARTIFACT_DIGEST}")" || {

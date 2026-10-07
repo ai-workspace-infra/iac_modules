@@ -36,3 +36,5 @@ jobs:
           bash scripts/pipeline/tests/serverless-provider-target-test.sh
           python3 scripts/pipeline/tests/test_xconnect_lab_contract.py -v
           bash scripts/pipeline/tests/xconnect-lab-lifecycle-test.sh
+          python3 scripts/pipeline/tests/test_gitops_cloud_targets.py -v
+          bash scripts/pipeline/tests/cloud_run_serving_facts_test.sh

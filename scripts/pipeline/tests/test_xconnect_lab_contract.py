@@ -56,6 +56,9 @@ class XConnectLabContractTests(unittest.TestCase):
             self.state([{"address": "aws_instance.client", "type": "aws_instance",
                          "values": {"tags_all": {"LabRun": "xcl-999-1"}}}]),
             self.state([{"address": "aws_instance.production", "type": "aws_instance", "values": {}}]),
+            self.state([{"address": "aws_instance.client", "type": "aws_instance", "values": {}}]),
+            self.state([{"address": "aws_security_group.client", "type": "aws_security_group",
+                         "values": {"tags_all": {}}}]),
             self.state([], child_modules=[{"address": "module.foreign"}]),
         ]
         for value in cases:

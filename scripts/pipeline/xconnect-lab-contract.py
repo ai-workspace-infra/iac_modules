@@ -65,9 +65,9 @@ def guard_cleanup(folder: Path, run: str) -> None:
         if address not in allowed:
             raise ValueError("unexpected resource in lab state")
         values = resource.get("values", {})
-        if resource.get("type", "").startswith("aws_") and "tags_all" in values:
-            if values["tags_all"].get("LabRun") != run:
-                raise ValueError("AWS lab ownership mismatch")
+        tags = values.get("tags_all")
+        if not isinstance(tags, dict) or tags.get("LabRun") != run:
+            raise ValueError("AWS lab ownership evidence is missing or mismatched")
 
 
 def render(action: str, folder: Path, declaration: Path, environment: dict[str, str]) -> None:
