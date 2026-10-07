@@ -15,6 +15,10 @@ on:
         description: Exact GitOps commit selected by the caller preflight.
         required: true
         type: string
+      release_ref:
+        description: Immutable release selected by the caller.
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -75,3 +79,24 @@ jobs:
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ steps.vault.outputs.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ steps.vault.outputs.CLOUDFLARE_API_TOKEN }}
+      - name: Record exact domain owner operation receipt
+        env:
+          OWNER_SHA: ${{ job.workflow_sha }}
+          ENVIRONMENT: ${{ inputs.environment }}
+          RELEASE_REF: ${{ inputs.release_ref }}
+          DNS_MODE: ${{ inputs.dns_mode }}
+        run: |
+          set -euo pipefail
+          [[ "$OWNER_SHA" =~ ^[0-9a-f]{40}$ && "$RELEASE_REF" =~ ^(v|daily-build-)[0-9][A-Za-z0-9._-]*$ ]] || exit 2
+          mkdir -p "$RUNNER_TEMP/domains-owner-receipt"
+          jq -n --arg owner "$OWNER_SHA" --arg environment "$ENVIRONMENT" --arg release "$RELEASE_REF" \
+            --arg target "$DNS_MODE" --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            '{schema:1,accepted:true,scope:"provider-operation",owner_repository:"ai-workspace-infra/iac_modules",
+              owner_commit:$owner,run_id:$run,run_attempt:$attempt,environment:$environment,release_ref:$release,
+              operation:"domains",target:$target}' > "$RUNNER_TEMP/domains-owner-receipt/receipt.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: owner-receipt-provider-domains
+          path: ${{ runner.temp }}/domains-owner-receipt/receipt.json
+          if-no-files-found: error
+          retention-days: 7
