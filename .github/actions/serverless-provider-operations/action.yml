@@ -4,6 +4,7 @@ inputs:
   operation: {required: true, description: "registry-preflight, cloud-run, ssr, edge-worker, page-worker, static-pages, dashboard, pages, frontend-router, or edge-gateway"}
   environment: {required: true, description: "Selected environment matching the GitOps declaration"}
   release_ref: {required: true, description: "Immutable service release tag"}
+  gcp_declaration: {required: false, default: '', description: "Immutable GitOps GCP namespace for registry-preflight or cloud-run"}
 runs:
   using: composite
   steps:
@@ -14,6 +15,7 @@ runs:
         PROVIDER_ENVIRONMENT: ${{ inputs.environment }}
         PROVIDER_RELEASE_REF: ${{ inputs.release_ref }}
         PROVIDER_OWNER_SHA: ${{ github.action_ref }}
+        GCP_DECLARATION: ${{ inputs.gcp_declaration }}
       run: |
         set -euo pipefail
         case "$PROVIDER_ENVIRONMENT" in sit|uat|prod) ;; *) exit 2 ;; esac
@@ -22,6 +24,11 @@ runs:
           '.kind == "EdgeRoutingConfig" and .metadata.environment == $environment' \
           "${CLOUDFLARE_BOUNDARY_CONFIG:?}" >/dev/null
         export DEPLOY_ENV="$PROVIDER_ENVIRONMENT" CLOUDFLARE_ENV="$PROVIDER_ENVIRONMENT"
+        if [[ "$PROVIDER_OPERATION" == cloud-run || "$PROVIDER_OPERATION" == registry-preflight ]]; then
+          yq -o=json '.' "${GCP_DECLARATION:?}" | jq -e \
+            --arg environment "$PROVIDER_ENVIRONMENT" --arg project "${GCP_PROJECT_ID:?}" --arg region "${GCP_REGION:?}" \
+            '.global.environment == $environment and .global.project_id == $project and .global.region == $region' >/dev/null
+        fi
         case "$PROVIDER_OPERATION" in
           registry-preflight) script=serverless-registry-preflight.sh ;;
           cloud-run) script=deploy-cloudrun-services.sh ;;
