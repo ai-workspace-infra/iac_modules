@@ -16,10 +16,27 @@ set -euo pipefail
 
 child=""
 if [[ -n "${IMAGE:-}" ]]; then
-  raw="$(docker buildx imagetools inspect --raw "${IMAGE}@${ARTIFACT_DIGEST}")" || {
+  registry="${IMAGE%%/*}"
+  repository="${IMAGE#*/}"
+  [[ "${registry}" == *.pkg.dev && "${repository}" != "${IMAGE}" && \
+    "${repository}" =~ ^[a-z0-9][a-z0-9._/-]*[a-z0-9]$ && \
+    "${repository}" != *..* && "${repository}" != *//* ]] || {
+    echo '::error::IMAGE must be an Artifact Registry repository path without a tag or digest.' >&2
+    exit 1
+  }
+  access_token="$(gcloud auth print-access-token)"
+  [[ -n "${access_token}" ]] || {
+    echo '::error::cannot mint an access token for the Artifact Registry metadata query.' >&2
+    exit 1
+  }
+  raw="$(printf 'Authorization: Bearer %s\n' "${access_token}" | curl --fail --silent --show-error \
+    --header @- \
+    --header 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+    "https://${registry}/v2/${repository}/manifests/${ARTIFACT_DIGEST}")" || {
     echo "::error::cannot read ${IMAGE}@${ARTIFACT_DIGEST} from the registry." >&2
     exit 1
   }
+  unset access_token
   child="$(jq -er '
     if has("manifests") then
       [.manifests[]? | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest]
