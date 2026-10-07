@@ -251,6 +251,29 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
         vm_module = rendered.split('module "spot_web_saas_uat" {', 1)[1].split("\n}", 1)[0]
         self.assertNotIn("data_disk_id", vm_module)
         self.assertNotIn("attached_disk", vm_module)
+
+        # Promote compute while preserving the independently managed disk's
+        # resource identity. Rendering does not prove no live VM replacement.
+        vm.update(provisioning_model="STANDARD", deletion_protection=True)
+        manifest["spec"]["resources"]["service_vms"] = manifest["spec"]["resources"].pop("spot_vms")
+        manifest["spec"]["resource"] = {"lifecycle": "persistent"}
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(generator, "load_resources", return_value=manifest):
+            generator.render(SimpleNamespace(resources="ignored", workdir=tempdir))
+            persistent_rendered = (Path(tempdir) / "generated_platform.tf").read_text(encoding="utf-8")
+        self.assertIn('module "retained_data_disk_web_saas_uat_data"', persistent_rendered)
+        self.assertNotIn('module "data_disk_web_saas_uat"', persistent_rendered)
+        self.assertIn('module "spot_web_saas_uat"', persistent_rendered)
+        self.assertRegex(persistent_rendered, r'provisioning_model\s+= "STANDARD"')
+        self.assertRegex(persistent_rendered, r'deletion_protection\s+= true')
+        for mutation in ("no_disk", "wrong_instance", "no_protection", "invalid_disk"):
+            import copy
+            candidate = copy.deepcopy(manifest)
+            if mutation == "no_disk": candidate["spec"]["resources"]["persistent_data_disks"] = []
+            elif mutation == "wrong_instance": candidate["spec"]["resources"]["persistent_data_disks"][0]["instance"] = "other-vm"
+            elif mutation == "no_protection": candidate["spec"]["resources"]["service_vms"][0]["deletion_protection"] = False
+            else: candidate["spec"]["resources"]["persistent_data_disks"][0]["size_gb"] = 0
+            with self.subTest(mutation=mutation), self.assertRaises(SystemExit):
+                generator.normalize_resources(candidate)
         spot_vm_module = (ROOT / "modules" / "spot_vm" / "main.tf").read_text(encoding="utf-8")
         self.assertIn("ignore_changes = [attached_disk]", spot_vm_module)
         self.assertIn("persistent_data_disks = [", rendered)
