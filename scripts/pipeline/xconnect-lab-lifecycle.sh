@@ -30,7 +30,8 @@ tf_read() {
   local log="$LAB_DIR/terraform-${command}.log" code
   if terraform -chdir="$TF" "$command" "$@" >"$destination" 2>"$log"; then return 0; else code=$?; fi
   diagnose "$command" "$log" "$code"
-  die 'Lab state/output inspection failed; cleanup is unverified and requires exact-run recovery'
+  echo '::error::Lab state/output inspection failed; cleanup is unverified and requires exact-run recovery' >&2
+  exit "$code"
 }
 
 case "$XCONNECT_IAC_OPERATION" in

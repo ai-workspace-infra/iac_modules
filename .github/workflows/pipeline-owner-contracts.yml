@@ -39,5 +39,6 @@ jobs:
           python3 scripts/pipeline/tests/test_xconnect_terraform_diagnostics.py -v
           bash scripts/pipeline/tests/xconnect-lab-lease-test.sh
           bash scripts/pipeline/tests/xconnect-lab-lifecycle-test.sh
+          bash scripts/pipeline/tests/xconnect-lab-lifecycle-negative-test.sh
           python3 scripts/pipeline/tests/test_gitops_cloud_targets.py -v
           bash scripts/pipeline/tests/cloud_run_serving_facts_test.sh
