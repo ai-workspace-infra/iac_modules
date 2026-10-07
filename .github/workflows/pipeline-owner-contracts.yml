@@ -1,0 +1,36 @@
+name: Pipeline owner Shell contracts
+on:
+  pull_request:
+    paths: ['.github/actions/**', 'scripts/pipeline/**', '.github/workflows/pipeline-owner-contracts.yml']
+  push:
+    branches: [main]
+    paths: ['.github/actions/**', 'scripts/pipeline/**', '.github/workflows/pipeline-owner-contracts.yml']
+permissions:
+  contents: read
+jobs:
+  contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install checksum-pinned YAML reader
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location https://github.com/mikefarah/yq/releases/download/v4.54.1/yq_linux_amd64 -o "$RUNNER_TEMP/yq"
+          echo "8e34fc298390875de416e6a4afcb8cabeceb25d9aa8506c1a2f9353cf702ea5f  $RUNNER_TEMP/yq" | sha256sum --check --status
+          chmod 755 "$RUNNER_TEMP/yq"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - name: Validate owner scripts and action YAML
+        run: |
+          set -euo pipefail
+          while IFS= read -r file; do bash -n "$file"; done < <(git ls-files -co --exclude-standard scripts/pipeline | grep -E '\.sh$')
+          for action in .github/actions/*/action.yml; do yq -e '.name != null and .runs.using == "composite"' "$action" >/dev/null; done
+      - name: Falsify dynamic target and cleanup contracts
+        run: |
+          bash scripts/pipeline/tests/action-metadata-test.sh .github/actions/platform-resource-operations/action.yml .github/actions/serverless-provider-operations/action.yml .github/actions/uat-compute-cleanup/action.yml
+          bash scripts/pipeline/tests/uat-compute-cleanup-test.sh
+          bash scripts/pipeline/tests/platform-resource-facts-test.sh
+          bash scripts/pipeline/tests/smtp-owner-test.sh
+          bash scripts/pipeline/tests/serverless-provider-target-test.sh
