@@ -1,0 +1,30 @@
+name: auth-vultr-vps
+description: GitOps-bound IaC owner action; delivery approvals and DAG belong to Toolkit.
+inputs:
+  target-contract-file:
+    description: target-contract-file
+    required: true
+  target-id:
+    description: target-id
+    required: true
+  iac-root:
+    description: iac-root
+    required: true
+  gitops-root:
+    description: gitops-root
+    required: true
+  stage:
+    description: stage
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Verify actual vultr-vps identity
+      shell: bash
+      env:
+        IAC_CONTRACT: ${{ inputs.target-contract-file }}
+        IAC_TARGET: ${{ inputs.target-id }}
+        IAC_ROOT: ${{ inputs.iac-root }}
+        IAC_GITOPS_ROOT: ${{ inputs.gitops-root }}
+        IAC_STAGE: ${{ inputs.stage }}
+      run: python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/unified_cli.py" verify-identity
