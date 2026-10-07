@@ -1,0 +1,49 @@
+{
+  "scope": "offline_scaffold_no_caller_cutover",
+  "playbooks_unit_tests": 37,
+  "supabase_unit_tests": 39,
+  "pg_plan_fixture": {
+    "scope": "isolated_sql_plan_semantics_only",
+    "checks": [
+      "seven_role_plan_executes_owner_NOLOGIN",
+      "runtime_DML_and_readonly_export_audit_monitor_mutation_denials",
+      "monitor_inherits_pg_monitor",
+      "migrator_explicit_SET_owner_future_default_ACL",
+      "transaction_failure_rolls_back_role_creation",
+      "existing_role_plan_has_no_password_change",
+      "created_container_removed_tmpfs_no_host_volume"
+    ],
+    "production_acceptance": false,
+    "credential_authentication": "not_tested_unix_socket_fixture_trust",
+    "tls": "not_tested_network_none"
+  },
+  "terraform_managed_validate": "passed temporary backend=false without credentials",
+  "terraform_fmt": "passed",
+  "provider_schema": {
+    "provider": "supabase/supabase",
+    "version": "1.11.0",
+    "resources": [
+      "supabase_apikey",
+      "supabase_branch",
+      "supabase_edge_function",
+      "supabase_edge_function_secrets",
+      "supabase_project",
+      "supabase_settings",
+      "supabase_third_party_auth"
+    ],
+    "database_password": {
+      "sensitive": true,
+      "write_only": false
+    },
+    "actual_state_read": false
+  },
+  "not_run": [
+    "production credential auth/TLS",
+    "real Vault/OIDC/IAM",
+    "production engine or roles",
+    "source RLS/recursive memberships/PUBLIC/functions",
+    "Accounts52/Billing1 migratectl",
+    "caller cutover"
+  ],
+  "production_ready": false
+}

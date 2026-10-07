@@ -1,3 +1,5 @@
+> 新增离线契约入口 `scripts/render_contract.py` 与 `init_contract.sh`；现有入口及输出保留。启用前阅读 [SAFETY.md](SAFETY.md) 与 [兼容清单](contracts/database-provision-v1/COMPATIBILITY.md)。
+
 # Supabase Cloud Terraform support
 
 This provider tree adds Supabase Cloud support to the repository's YAML-driven
