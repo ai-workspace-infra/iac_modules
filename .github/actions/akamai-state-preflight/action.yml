@@ -1,6 +1,7 @@
 name: Read-only Akamai state preflight
 description: IaC query owner; Toolkit selects the declarations, authorizes access and publishes evidence.
 inputs:
+  phase: {required: false, default: query, description: validate before authorization or query after authorization}
   environment: {required: true, description: Exact UAT environment}
   account: {required: true, description: Concrete reviewed Akamai account}
   correlation-id: {required: true, description: Caller operation identity}
@@ -12,10 +13,12 @@ runs:
   using: composite
   steps:
     - uses: hashicorp/setup-terraform@v3
+      if: inputs.phase == 'query'
       with:
         terraform_version: 1.10.5
     - shell: bash
       env:
+        PREFLIGHT_PHASE: ${{ inputs.phase }}
         PREFLIGHT_ENVIRONMENT: ${{ inputs.environment }}
         PREFLIGHT_ACCOUNT: ${{ inputs.account }}
         PREFLIGHT_CORRELATION_ID: ${{ inputs.correlation-id }}

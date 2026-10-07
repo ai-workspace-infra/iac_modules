@@ -19,6 +19,10 @@ def main():
         'ai-workspace-infra/platform-ops-toolkit/.github/workflows/environment-data-operations.yml@'), 'invalid caller')
     owner_sha = checkout_sha(os.environ['IAC_ROOT'])
     gitops_sha = checkout_sha(os.environ['GITOPS_ROOT'], os.environ['GITOPS_SHA'])
+    phase = os.environ.get('PREFLIGHT_PHASE', 'query')
+    require(phase in {'validate', 'query'}, 'invalid preflight phase')
+    if phase == 'validate':
+        return 0
     spec = importlib.util.spec_from_file_location('akamai_preflight', Path(os.environ['IAC_ROOT']) / 'scripts/akamai_state_preflight.py')
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module

@@ -83,6 +83,12 @@ class DeliveryHandoff(unittest.TestCase):
                 self.assertNotEqual(self.run_script('akamai-preflight-action.py', **env).returncode, 0)
         self.assertFalse((self.base/'preflight.json').exists())
 
+    def test_akamai_validation_before_credentials_never_queries(self):
+        result = self.run_script('akamai-preflight-action.py', PREFLIGHT_PHASE='validate',
+            GITHUB_WORKFLOW_REF='ai-workspace-infra/platform-ops-toolkit/.github/workflows/environment-data-operations.yml@refs/heads/main')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.base/'preflight.json').exists())
+
 
 if __name__ == '__main__':
     unittest.main()
