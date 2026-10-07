@@ -1,0 +1,38 @@
+name: Platform resource operations owner
+description: Parameterized IaC cloud-fact, DNS, SMTP and existing-target inventory operations.
+inputs:
+  operation: {required: true, description: resize-preflight, existing-host, sit-dns, or smtp-sync}
+  environment: {required: true, description: Exact sit, uat or prod environment}
+  declaration: {required: false, default: '', description: Selected GitOps YAML existing-host declaration}
+outputs:
+  instance_id: {description: Resolved authoritative instance ID, value: '${{ steps.execute.outputs.instance_id }}'}
+  direction: {description: Resize direction, value: '${{ steps.execute.outputs.direction }}'}
+  current_plan: {description: Current provider plan, value: '${{ steps.execute.outputs.current_plan }}'}
+  region: {description: Provider region, value: '${{ steps.execute.outputs.region }}'}
+  os_id: {description: Provider OS ID, value: '${{ steps.execute.outputs.os_id }}'}
+  current_ip: {description: Current provider address, value: '${{ steps.execute.outputs.current_ip }}'}
+  label: {description: Provider label, value: '${{ steps.execute.outputs.label }}'}
+  source_disk: {description: Source capacity, value: '${{ steps.execute.outputs.source_disk }}'}
+  target_disk: {description: Target capacity, value: '${{ steps.execute.outputs.target_disk }}'}
+  operation_id: {description: Correlated operation ID, value: '${{ steps.execute.outputs.operation_id }}'}
+runs:
+  using: composite
+  steps:
+    - id: execute
+      shell: bash
+      env:
+        RESOURCE_OPERATION: ${{ inputs.operation }}
+        RESOURCE_ENVIRONMENT: ${{ inputs.environment }}
+        EXISTING_HOST_DECLARATION: ${{ inputs.declaration }}
+      run: |
+        set -euo pipefail
+        case "$RESOURCE_ENVIRONMENT" in sit|uat|prod) ;; *) exit 2 ;; esac
+        case "$RESOURCE_OPERATION" in
+          resize-preflight) script=resize-instance-preflight.sh ;;
+          existing-host) script=render-existing-host-cmdb.sh ;;
+          sit-dns) script=cloudflare-sit-dns-reconcile.sh ;;
+          smtp-sync) script=sync-smtp-secrets.sh ;;
+          *) echo '::error::Unregistered resource operation'; exit 2 ;;
+        esac
+        export DEPLOY_ENV="$RESOURCE_ENVIRONMENT" VAULT_ENV_PATH="$RESOURCE_ENVIRONMENT"
+        bash "$GITHUB_ACTION_PATH/../../../scripts/pipeline/$script"
