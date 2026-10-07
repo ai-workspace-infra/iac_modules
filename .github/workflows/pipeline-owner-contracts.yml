@@ -25,7 +25,7 @@ jobs:
       - name: Validate owner scripts and action YAML
         run: |
           set -euo pipefail
-          while IFS= read -r file; do bash -n "$file"; done < <(git ls-files -co --exclude-standard scripts/pipeline | rg '\.sh$')
+          while IFS= read -r file; do bash -n "$file"; done < <(git ls-files -co --exclude-standard scripts/pipeline | grep -E '\.sh$')
           for action in .github/actions/*/action.yml; do yq -e '.name != null and .runs.using == "composite"' "$action" >/dev/null; done
       - name: Falsify dynamic target and cleanup contracts
         run: |

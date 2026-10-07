@@ -33,7 +33,7 @@ MOCK
 chmod 755 "$tmp/bin/curl"
 export PATH="$tmp/bin:$PATH" VULTR_API_KEY=fixture-key INSTANCE_ID=stale-id TARGET_PLAN=vc2-2c-2gb EXPECTED_HOSTNAME=service.example.org GITHUB_OUTPUT="$tmp/output"
 bash "$root/resize-instance-preflight.sh" >/dev/null 2>&1
-rg -q '^instance_id=new-id$' "$GITHUB_OUTPUT"; rg -q '^direction=upgrade$' "$GITHUB_OUTPUT"
+grep -q '^instance_id=new-id$' "$GITHUB_OUTPUT"; grep -q '^direction=upgrade$' "$GITHUB_OUTPUT"
 echo 'PASS authoritative resolved ID emitted for downstream operations'
 rm "$GITHUB_OUTPUT"
 if AMBIGUOUS=true bash "$root/resize-instance-preflight.sh" >/dev/null 2>&1; then exit 1; fi

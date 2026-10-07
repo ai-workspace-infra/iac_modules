@@ -31,8 +31,8 @@ MOCK
 chmod 755 "$tmp/bin/"*
 fixture() { rm -f "$tmp/output" "$tmp/calls" "$tmp/smtp-username" "$tmp/smtp-password"; }
 reject() { if bash "$root/sync-smtp-secrets.sh" >/dev/null 2>&1; then exit 1; fi; [[ ! -s "$GITHUB_OUTPUT" ]]; echo "PASS reject $1"; }
-fixture; MOCK_HTTP=404 bash "$root/sync-smtp-secrets.sh" >/dev/null; rg -q '^smtp_configured=false$' "$GITHUB_OUTPUT"; [[ ! -e "$tmp/calls" ]]; echo 'PASS explicit absent source makes no Provider call'
-fixture; bash "$root/sync-smtp-secrets.sh" >/dev/null; rg -q '^smtp_configured=true$' "$GITHUB_OUTPUT"; echo 'PASS configured SMTP secrets converge'
+fixture; MOCK_HTTP=404 bash "$root/sync-smtp-secrets.sh" >/dev/null; grep -q '^smtp_configured=false$' "$GITHUB_OUTPUT"; [[ ! -e "$tmp/calls" ]]; echo 'PASS explicit absent source makes no Provider call'
+fixture; bash "$root/sync-smtp-secrets.sh" >/dev/null; grep -q '^smtp_configured=true$' "$GITHUB_OUTPUT"; echo 'PASS configured SMTP secrets converge'
 fixture; MOCK_FAILURE=create reject 'Provider permission failure'
 fixture; MOCK_FAILURE=convergence reject 'written secret failed readback'
 fixture; MOCK_HTTP=401 reject 'Vault credential rejection'

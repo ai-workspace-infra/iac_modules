@@ -42,11 +42,11 @@ reject() {
 }
 fixture; CLEANUP_MODE=plan bash "$root/uat-compute-cleanup.sh" >/dev/null
 jq -e '.status == "plan-only" and .accepted == false' "$RUNNER_TEMP/uat-compute-cleanup-receipt.json" >/dev/null
-! rg -q 'services delete' "$tmp/calls"; echo 'PASS plan never deletes'
+! grep -q 'services delete' "$tmp/calls"; echo 'PASS plan never deletes'
 fixture; yq -i '.spec.enabled = false' "$CLEANUP_POLICY"; reject disabled; [[ ! -e "$tmp/calls" ]]
 fixture; yq -i '.metadata.environment = "prod"' "$CLEANUP_POLICY"; reject prod; [[ ! -e "$tmp/calls" ]]
 fixture; yq -i '.spec.services = ["prod-accounts"]' "$CLEANUP_POLICY"; reject 'out-of-scope service'
-fixture; touch "$tmp/list-fail"; reject 'failed facts query'; ! rg -q 'services delete' "$tmp/calls"
+fixture; touch "$tmp/list-fail"; reject 'failed facts query'; ! grep -q 'services delete' "$tmp/calls"
 fixture; touch "$tmp/delete-fail"; reject 'failed deletion'
 fixture; touch "$tmp/still-present"; reject 'resource remains after deletion'
 fixture; bash "$root/uat-compute-cleanup.sh" >/dev/null
