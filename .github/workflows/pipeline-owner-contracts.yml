@@ -33,3 +33,4 @@ jobs:
           bash scripts/pipeline/tests/uat-compute-cleanup-test.sh
           bash scripts/pipeline/tests/platform-resource-facts-test.sh
           bash scripts/pipeline/tests/smtp-owner-test.sh
+          bash scripts/pipeline/tests/serverless-provider-target-test.sh
