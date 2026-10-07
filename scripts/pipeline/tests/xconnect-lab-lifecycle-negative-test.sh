@@ -39,14 +39,17 @@ JSON
 export PATH="$temporary/bin:$PATH"
 export RUNNER_TEMP="$temporary" IAC_ROOT="$root" GITOPS_ROOT="$temporary/gitops"
 export XCONNECT_DECLARATION="$temporary/gitops/lab.json" TF_VAR_run_id=xcl-123-5
-export IAC_REF="$(printf 'a%.0s' {1..40})" GITOPS_REF="$(printf 'b%.0s' {1..40})" PLAYBOOKS_REF="$(printf 'c%.0s' {1..40})"
+IAC_REF="$(printf 'a%.0s' {1..40})"
+GITOPS_REF="$(printf 'b%.0s' {1..40})"
+PLAYBOOKS_REF="$(printf 'c%.0s' {1..40})"
+export IAC_REF GITOPS_REF PLAYBOOKS_REF
 export CLI_RELEASE_TAG=v0.1.14 GATEWAY_RELEASE_TAG=v0.1.8 XRAY_RELEASE_TAG=v26.3.27
 export TF_STATE_ACCESS_KEY=test TF_STATE_SECRET_KEY=test TF_STATE_REGION=auto
 export TF_STATE_ENDPOINT=https://state.invalid TF_STATE_BUCKET=state-bucket
 export MOCK_AWS_CALLS="$temporary/aws-calls"
 
 permissions() {
-  stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1"
+  python3 -c 'import os, stat, sys; print(oct(stat.S_IMODE(os.stat(sys.argv[1]).st_mode))[2:])' "$1"
 }
 
 prepare_lab() {
