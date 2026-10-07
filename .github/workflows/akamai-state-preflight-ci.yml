@@ -1,10 +1,10 @@
 name: Akamai State Preflight Contract
 on:
   pull_request:
-    paths: [scripts/akamai_state_preflight.py, scripts/tests/test_akamai_state_preflight.py, .github/workflows/akamai-state-preflight*.yml]
+    paths: [scripts/akamai_state_preflight.py, scripts/tests/test_akamai_state_preflight.py, scripts/pipeline/akamai-preflight-action.py, scripts/pipeline/tests/test_delivery_action_handoff.py, .github/actions/akamai-state-preflight/**, .github/workflows/akamai-state-preflight*.yml]
   push:
     branches: [main, feature/akamai-data-preflight]
-    paths: [scripts/akamai_state_preflight.py, scripts/tests/test_akamai_state_preflight.py, .github/workflows/akamai-state-preflight*.yml]
+    paths: [scripts/akamai_state_preflight.py, scripts/tests/test_akamai_state_preflight.py, scripts/pipeline/akamai-preflight-action.py, scripts/pipeline/tests/test_delivery_action_handoff.py, .github/actions/akamai-state-preflight/**, .github/workflows/akamai-state-preflight*.yml]
 permissions:
   contents: read
 jobs:

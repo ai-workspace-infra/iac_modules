@@ -19,7 +19,8 @@ these scripts from the Terraform working directory, so every relative path in th
 | `adopt-resize-replacement.sh`, `resize-instance-apply-terraform.sh` | guarded resize flow |
 | `vultr-instance-snapshot.sh` | create or resume a Vultr instance snapshot and wait for completion |
 | `ensure-gcp-vm-running.py`, `register-gcp-oslogin-key.sh` | GCP runtime reconcile and OS Login key |
-| `gcp-temporary-ssh-access.sh open\|close` | short-lived runner SSH access to one OS Login VM: RUNNING reconcile, target facts, one-run OS Login key with TTL, runner-/32 tag-scoped tcp:22 rule; revocation with rollback |
+| `gcp-temporary-ssh-access.sh open\|close` | short-lived runner SSH access to one OS Login VM: RUNNING reconcile, target facts, one-run OS Login key with TTL, optional runner-/32 tag-scoped tcp:22 rule; revocation with rollback |
+| `../node_deploy/resolve_gcp_vault.py`, `../node_deploy/resolve_gcp_vault_source.py` | GCP instance/firewall facts → validated provider-neutral Vault `NodeDeployment` contract |
 | `verify-aws-boot-health.sh` | EC2 status-check gate |
 | `cloudflare-dns-record.py` | single A-record cutover/rollback with an environment-bound checkpoint and guarded recovery; see [contract](cloudflare-dns-record.md) |
 | `cloudflare-gateway-dns-upsert.py` | guarded single-A gateway record upsert with exact-zone lookup, conflict rejection, checkpointed recovery and resolver convergence; see [contract](cloudflare-gateway-dns-upsert.md) |
@@ -38,7 +39,9 @@ owns release provenance checks and decides when to invoke these operations.
 not-yet-existing `ACCESS_DIR`; optional `OSLOGIN_KEY_TTL` (default `20m`, at
 most `120m`), `TARGET_TAGS` (default: the VM's network tags), `SOURCE_IP`
 (default: the runner's public egress address) and `ENSURE_RUNNING` (default
-`true`). `open` writes `ACCESS_DIR/access.json` (`target_ip`, `target_tags`,
+`true`). `SSH_KEY_PATH` reuses a caller-created one-run key without removing
+its files during close; `OPEN_FIREWALL=false` registers that key without public
+ingress for an already-routed overlay. `open` writes `ACCESS_DIR/access.json` (`target_ip`, `target_tags`,
 `ssh_user`, `private_key`, `known_hosts`, `firewall_rule`, `source_range`,
 `oslogin_key_ttl`) and the same facts to `GITHUB_OUTPUT`; the OS Login user is
 masked in Actions. It refuses an existing rule or directory, and a failed open

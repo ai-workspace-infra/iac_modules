@@ -99,7 +99,22 @@ elif [[ "${method}" == 'DELETE' && "${url}" == *'/dns_records/billing-origin-cna
 elif [[ "${url}" == *'/zones?name='* ]]; then
   printf '%s' '{"success":true,"result":[{"id":"zone-1"}]}'
 elif [[ "${url}" == *'/pages/projects/ai-workspace-portal-uat/domains'* && "${method}" == 'GET' ]]; then
-  printf '%s' '{"success":true,"result":[]}'
+  case "${MOCK_PAGES_MODE:-absent}" in
+    get-fails) exit 22 ;;
+    malformed) printf '%s' '{"success":true,"result":{}}' ;;
+    delete-fails|still-present) printf '%s' '{"success":true,"result":[{"name":"console-serverless-uat.onwalk.net","status":"active"}]}' ;;
+    present)
+      if [[ -f "${MOCK_CURL_LOG}.pages-removed" ]]; then
+        printf '%s' '{"success":true,"result":[]}'
+      else
+        printf '%s' '{"success":true,"result":[{"name":"console-serverless-uat.onwalk.net","status":"active"}]}'
+      fi ;;
+    *) printf '%s' '{"success":true,"result":[]}' ;;
+  esac
+elif [[ "${url}" == *'/pages/projects/ai-workspace-portal-uat/domains/'* && "${method}" == 'DELETE' ]]; then
+  [[ "${MOCK_PAGES_MODE:-absent}" != delete-fails ]] || exit 22
+  touch "${MOCK_CURL_LOG}.pages-removed"
+  printf '%s' '{"success":true,"result":{}}'
 elif [[ "${url}" == *'/workers/domains'* && "${method}" == 'GET' ]]; then
   printf '%s' '{"success":true,"result":[{"id":"accounts-alias-worker-domain","hostname":"accounts-uat.onwalk.net","service":"edge-gateway-core-uat"}]}'
 elif [[ "${url}" == *'/zones/zone-1/workers/routes' && "${method}" == 'GET' ]]; then
@@ -221,3 +236,27 @@ for mode in none uat-records; do
   grep -F 'PUT' "${test_dir}/${mode}.log" | grep -Fq '"hostname":"billing-serverless-uat.onwalk.net"'
 done
 echo "serverless_domains_owner_guarded_test: PASS"
+
+# The Worker owner must be proved detached before any Worker domain write.
+for case_name in get-fails delete-fails still-present malformed; do
+  if PATH="${test_dir}/bin:${PATH}" MOCK_PAGES_MODE="$case_name" \
+    MOCK_CURL_LOG="${test_dir}/pages-$case_name.log" \
+    CLOUDFLARE_ACCOUNT_ID=account-1 CLOUDFLARE_API_TOKEN=test-token \
+    CLOUDFLARE_BOUNDARY_CONFIG="${test_dir}/guarded.json" \
+    CLOUDFLARE_API_BASE_OVERRIDE=https://cloudflare.invalid/client/v4 \
+    SERVERLESS_DNS_MODE=none bash "$reconciler" >"${test_dir}/pages-$case_name.output" 2>&1; then
+    echo "Unverified Pages ownership accepted: $case_name" >&2; exit 1
+  fi
+  if grep -F $'PUT\t' "${test_dir}/pages-$case_name.log" | grep -Fq /workers/domains; then
+    echo "Worker domain written before Pages cleanup: $case_name" >&2; exit 1
+  fi
+  echo "PASS Pages gate rejects $case_name before Worker writes"
+done
+PATH="${test_dir}/bin:${PATH}" MOCK_PAGES_MODE=present \
+  MOCK_CURL_LOG="${test_dir}/pages-success.log" \
+  CLOUDFLARE_ACCOUNT_ID=account-1 CLOUDFLARE_API_TOKEN=test-token \
+  CLOUDFLARE_BOUNDARY_CONFIG="${test_dir}/guarded.json" \
+  CLOUDFLARE_API_BASE_OVERRIDE=https://cloudflare.invalid/client/v4 \
+  SERVERLESS_DNS_MODE=none bash "$reconciler" >"${test_dir}/pages-success.output" 2>&1 || { cat "${test_dir}/pages-success.output"; exit 1; }
+test -f "${test_dir}/pages-success.log.pages-removed"
+echo 'PASS Pages detach is verified by a fresh authoritative read'

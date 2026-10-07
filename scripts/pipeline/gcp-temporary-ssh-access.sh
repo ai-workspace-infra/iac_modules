@@ -50,9 +50,10 @@ close_access() {
     echo "::error::Temporary SSH firewall rule ${ACCESS_RULE_NAME} is ${state/present/still present}." >&2
     result=1
   fi
-  if [[ -f "${ACCESS_DIR}/id_ed25519.pub" ]]; then
+  local key_path="${SSH_KEY_PATH:-${ACCESS_DIR}/id_ed25519}"
+  if [[ -f "${key_path}.pub" ]]; then
     gcloud compute os-login ssh-keys remove --project="${GCP_PROJECT_ID}" \
-      --key-file="${ACCESS_DIR}/id_ed25519.pub" >/dev/null || {
+      --key-file="${key_path}.pub" >/dev/null || {
       echo '::error::The temporary OS Login key could not be revoked; it still expires at its TTL.' >&2
       result=1
     }
@@ -71,11 +72,17 @@ open_access() {
     echo '::error::OSLOGIN_KEY_TTL must be 1m to 120m.' >&2; exit 2;
   }
   [[ ! -e "${ACCESS_DIR}" ]] || { echo '::error::ACCESS_DIR already exists; refusing to reuse another run access.' >&2; exit 2; }
-  case "$(rule_state)" in
-    absent) ;;
-    present) echo "::error::Firewall rule ${ACCESS_RULE_NAME} already exists; refusing to adopt it." >&2; exit 1 ;;
-    *) echo '::error::Cannot list firewall rules; refusing to open access.' >&2; exit 1 ;;
-  esac
+  local open_firewall="${OPEN_FIREWALL:-true}"
+  [[ "${open_firewall}" == true || "${open_firewall}" == false ]] || {
+    echo '::error::OPEN_FIREWALL must be true or false.' >&2; exit 2;
+  }
+  if [[ "${open_firewall}" == true ]]; then
+    case "$(rule_state)" in
+      absent) ;;
+      present) echo "::error::Firewall rule ${ACCESS_RULE_NAME} already exists; refusing to adopt it." >&2; exit 1 ;;
+      *) echo '::error::Cannot list firewall rules; refusing to open access.' >&2; exit 1 ;;
+    esac
+  fi
 
   # From here on anything created is rolled back if open does not finish.
   trap 'status=$?; trap - EXIT; if (( status != 0 )); then echo "::error::Opening temporary SSH access failed; rolling back." >&2; close_access || true; fi; exit "${status}"' EXIT
@@ -103,9 +110,10 @@ if not sys.argv[2] or any(not re.fullmatch(r"[a-z]([-a-z0-9]{0,61}[a-z0-9])?", t
     raise SystemExit("::error::the VM has no valid network tags to scope the firewall rule")
 PY
 
-  local source_ip
-  source_ip="${SOURCE_IP:-$(curl --fail --silent --show-error --retry 3 --connect-timeout 5 --max-time 15 https://api.ipify.org)}"
-  python3 - "${source_ip}" <<'PY'
+  local source_ip=""
+  if [[ "${open_firewall}" == true ]]; then
+    source_ip="${SOURCE_IP:-$(curl --fail --silent --show-error --retry 3 --connect-timeout 5 --max-time 15 https://api.ipify.org)}"
+    python3 - "${source_ip}" <<'PY'
 import ipaddress, sys
 try:
     public = ipaddress.IPv4Address(sys.argv[1]).is_global
@@ -114,10 +122,18 @@ except ValueError:
 if not public:
     raise SystemExit("::error::the runner egress address is not a public IPv4 address")
 PY
+  fi
 
-  ssh-keygen -q -t ed25519 -N '' -C "ci-${ACCESS_RULE_NAME}" -f "${ACCESS_DIR}/id_ed25519"
+  local key_path="${SSH_KEY_PATH:-${ACCESS_DIR}/id_ed25519}"
+  if [[ -n "${SSH_KEY_PATH:-}" ]]; then
+    [[ -s "${key_path}" && -s "${key_path}.pub" ]] || {
+      echo '::error::SSH_KEY_PATH must name an existing private/public one-run key pair.' >&2; exit 2;
+    }
+  else
+    ssh-keygen -q -t ed25519 -N '' -C "ci-${ACCESS_RULE_NAME}" -f "${key_path}"
+  fi
   gcloud compute os-login ssh-keys add --project="${GCP_PROJECT_ID}" \
-    --key-file="${ACCESS_DIR}/id_ed25519.pub" --ttl="${ttl}" >/dev/null
+    --key-file="${key_path}.pub" --ttl="${ttl}" >/dev/null
   local profile ssh_user token profile_url
   if [[ -n "${GCP_OSLOGIN_DEPLOY_ACCOUNT:-}" ]]; then
     # --project does not scope gcloud's GetLoginProfile request. A fixed WIF
@@ -138,29 +154,38 @@ PY
   [[ "${ssh_user}" =~ ^[a-z_][a-z0-9_-]{0,31}\$?$ ]] || { echo '::error::OS Login returned no valid Linux user.' >&2; exit 1; }
   [[ -z "${GITHUB_ACTIONS:-}" ]] || echo "::add-mask::${ssh_user}"
 
-  gcloud compute firewall-rules create "${ACCESS_RULE_NAME}" --project="${GCP_PROJECT_ID}" \
-    --network="${GCP_NETWORK}" --direction=INGRESS --priority=1000 --action=ALLOW --rules=tcp:22 \
-    --source-ranges="${source_ip}/32" --target-tags="${tags}" \
-    --description="Temporary CI SSH access to ${GCP_INSTANCE}" --quiet >/dev/null
+  if [[ "${open_firewall}" == true ]]; then
+    gcloud compute firewall-rules create "${ACCESS_RULE_NAME}" --project="${GCP_PROJECT_ID}" \
+      --network="${GCP_NETWORK}" --direction=INGRESS --priority=1000 --action=ALLOW --rules=tcp:22 \
+      --source-ranges="${source_ip}/32" --target-tags="${tags}" \
+      --description="Temporary CI SSH access to ${GCP_INSTANCE}" --quiet >/dev/null
+  fi
 
   jq -n --arg instance "${GCP_INSTANCE}" --arg project "${GCP_PROJECT_ID}" --arg zone "${GCP_ZONE}" \
     --arg ip "${target_ip}" --arg tags "${tags}" --arg user "${ssh_user}" --arg dir "${ACCESS_DIR}" \
-    --arg rule "${ACCESS_RULE_NAME}" --arg source "${source_ip}/32" --arg ttl "${ttl}" \
+    --arg rule "${ACCESS_RULE_NAME}" --arg source "${source_ip}" --arg ttl "${ttl}" \
+    --arg key "${key_path}" --arg open_firewall "${open_firewall}" \
     '{instance:$instance, project:$project, zone:$zone, target_ip:$ip, target_tags:($tags|split(",")),
-      ssh_user:$user, private_key:($dir + "/id_ed25519"), known_hosts:($dir + "/known_hosts"),
-      firewall_rule:$rule, source_range:$source, oslogin_key_ttl:$ttl}' > "${ACCESS_DIR}/access.json"
+      ssh_user:$user, private_key:$key, known_hosts:($dir + "/known_hosts"),
+      firewall_rule:(if $open_firewall == "true" then $rule else null end),
+      source_range:(if $open_firewall == "true" then ($source + "/32") else null end),
+      oslogin_key_ttl:$ttl}' > "${ACCESS_DIR}/access.json"
   chmod 600 "${ACCESS_DIR}/access.json"
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     {
       echo "access_file=${ACCESS_DIR}/access.json"
       echo "target_ip=${target_ip}"
       echo "ssh_user=${ssh_user}"
-      echo "private_key=${ACCESS_DIR}/id_ed25519"
+      echo "private_key=${key_path}"
       echo "known_hosts=${ACCESS_DIR}/known_hosts"
     } >> "${GITHUB_OUTPUT}"
   fi
   trap - EXIT
-  echo "Temporary SSH access to ${GCP_INSTANCE} is open from ${source_ip}/32 via ${ACCESS_RULE_NAME}; the OS Login key expires after ${ttl}."
+  if [[ "${open_firewall}" == true ]]; then
+    echo "Temporary SSH access to ${GCP_INSTANCE} is open from ${source_ip}/32 via ${ACCESS_RULE_NAME}; the OS Login key expires after ${ttl}."
+  else
+    echo "The OS Login key for ${GCP_INSTANCE} expires after ${ttl}; no public firewall rule was opened."
+  fi
 }
 
 case "${1:-}" in

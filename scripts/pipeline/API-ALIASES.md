@@ -13,3 +13,7 @@ The fixed-SHA reusable workflow `.github/workflows/cloudflare-serverless-domains
 Do not enable new GitOps API aliases until the Toolkit caller has migrated to this reviewed owner and old gateway deployments are suppressed. Keep the frozen legacy executor until real UAT owner/caller evidence permits its removal. Qualified Selfhost origins must have origin DNS and must not be bound back to a Worker, which would create a routing loop. PROD credentials/protection for the reusable owner must be reconciled separately; offline tests do not prove live Vault roles.
 
 Provider APIs: [Worker Domains](https://developers.cloudflare.com/api/resources/workers/subresources/domains/), [Worker Routes](https://developers.cloudflare.com/api/resources/workers/subresources/routes/), and Cloudflare zone DNS records. Tests use a fake provider and never authenticate or change live DNS.
+
+## Toolkit-owned delivery entrypoints
+
+New callers use Toolkit `iac-cloudflare-serverless-domains.yaml` and `iac-akamai-state-preflight.yaml`, with fixed-SHA IaC actions. The old IaC reusable workflows remain LEGACY until Vault claim migration and an exact UAT/non-mutating rehearsal prove the replacement route; do not extend them or add callers. Static repository CI remains in IaC.

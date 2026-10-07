@@ -1,0 +1,27 @@
+name: GitOps-bound Serverless domain request
+description: Validate an immutable DNS request before authorization, or record completed owner evidence.
+inputs:
+  phase: {required: true, description: prepare or receipt}
+  environment: {required: true, description: Exact declaration environment}
+  dns-mode: {required: true, description: none, uat-records or prod-cutover}
+  release-ref: {required: true, description: Immutable release identity}
+  gitops-sha: {required: true, description: Exact GitOps SHA}
+  gitops-root: {required: true, description: Fixed GitOps checkout}
+  iac-root: {required: true, description: Fixed IaC checkout}
+  config-file: {required: true, description: Private rendered declaration path}
+  receipt-file: {required: false, default: '', description: Sanitized completed operation receipt path}
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        DOMAIN_PHASE: ${{ inputs.phase }}
+        REQUESTED_ENVIRONMENT: ${{ inputs.environment }}
+        SERVERLESS_DNS_MODE: ${{ inputs.dns-mode }}
+        RELEASE_REF: ${{ inputs.release-ref }}
+        GITOPS_REF: ${{ inputs.gitops-sha }}
+        GITOPS_DIR: ${{ inputs.gitops-root }}
+        IAC_ROOT: ${{ inputs.iac-root }}
+        CLOUDFLARE_BOUNDARY_CONFIG: ${{ inputs.config-file }}
+        DOMAIN_RECEIPT_FILE: ${{ inputs.receipt-file }}
+      run: python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/serverless-domains-context.py"

@@ -13,6 +13,34 @@ inputs:
   reconcile:
     description: Explicit bootstrap reconcile
     required: true
+  cleanup-credentials:
+    description: Remove the generated Google credential file during post cleanup
+    required: false
+    default: 'true'
+  load-state-contract:
+    description: Bind the optional S3-compatible Terraform state contract to the runner environment
+    required: false
+    default: 'false'
+  state-endpoint:
+    description: S3-compatible Terraform state endpoint selected by Toolkit
+    required: false
+    default: ''
+  state-bucket:
+    description: Terraform state bucket selected by Toolkit
+    required: false
+    default: ''
+  state-access-key:
+    description: Short-lived Terraform state access key selected by Toolkit
+    required: false
+    default: ''
+  state-secret-key:
+    description: Short-lived Terraform state secret key selected by Toolkit
+    required: false
+    default: ''
+  state-region:
+    description: Terraform state region selected by Toolkit
+    required: false
+    default: ''
 runs:
   using: composite
   steps:
@@ -23,6 +51,7 @@ runs:
         workload_identity_provider: ${{ inputs.provider }}
         service_account: ${{ inputs.service-account }}
         audience: ${{ inputs.audience }}
+        cleanup_credentials: ${{ inputs.cleanup-credentials }}
     - id: bootstrap
       if: inputs.reconcile == 'true' && env.GCP_BOOTSTRAP_AUTH_JSON != ''
       uses: google-github-actions/auth@v2
@@ -36,3 +65,24 @@ runs:
       run: printf "%s\n" "TF_VAR_access_token=$BOOTSTRAP_TOKEN" "GCP_BOOTSTRAP_ACCESS_TOKEN=$BOOTSTRAP_TOKEN" "CLOUDSDK_AUTH_ACCESS_TOKEN=$BOOTSTRAP_TOKEN"
         >> "$GITHUB_ENV"
     - uses: google-github-actions/setup-gcloud@v2
+    - name: Bind the reviewed Terraform state contract
+      if: inputs.load-state-contract == 'true'
+      shell: bash
+      env:
+        STATE_ENDPOINT: ${{ inputs.state-endpoint }}
+        STATE_BUCKET: ${{ inputs.state-bucket }}
+        STATE_ACCESS_KEY: ${{ inputs.state-access-key }}
+        STATE_SECRET_KEY: ${{ inputs.state-secret-key }}
+        STATE_REGION: ${{ inputs.state-region }}
+      run: |
+        set -euo pipefail
+        for name in STATE_ENDPOINT STATE_BUCKET STATE_ACCESS_KEY STATE_SECRET_KEY STATE_REGION; do
+          [[ -n "${!name}" ]] || { echo "::error::${name} is required when load-state-contract=true" >&2; exit 1; }
+        done
+        {
+          echo "TF_STATE_ENDPOINT=${STATE_ENDPOINT}"
+          echo "TF_STATE_BUCKET=${STATE_BUCKET}"
+          echo "TF_STATE_ACCESS_KEY=${STATE_ACCESS_KEY}"
+          echo "TF_STATE_SECRET_KEY=${STATE_SECRET_KEY}"
+          echo "TF_STATE_REGION=${STATE_REGION}"
+        } >> "${GITHUB_ENV}"
