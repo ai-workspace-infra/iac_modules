@@ -29,8 +29,10 @@ jobs:
           for action in .github/actions/*/action.yml; do yq -e '.name != null and .runs.using == "composite"' "$action" >/dev/null; done
       - name: Falsify dynamic target and cleanup contracts
         run: |
-          bash scripts/pipeline/tests/action-metadata-test.sh .github/actions/platform-resource-operations/action.yml .github/actions/serverless-provider-operations/action.yml .github/actions/uat-compute-cleanup/action.yml
+          bash scripts/pipeline/tests/action-metadata-test.sh .github/actions/platform-resource-operations/action.yml .github/actions/serverless-provider-operations/action.yml .github/actions/uat-compute-cleanup/action.yml .github/actions/xconnect-lab-lifecycle/action.yml
           bash scripts/pipeline/tests/uat-compute-cleanup-test.sh
           bash scripts/pipeline/tests/platform-resource-facts-test.sh
           bash scripts/pipeline/tests/smtp-owner-test.sh
           bash scripts/pipeline/tests/serverless-provider-target-test.sh
+          python3 scripts/pipeline/tests/test_xconnect_lab_contract.py -v
+          bash scripts/pipeline/tests/xconnect-lab-lifecycle-test.sh
