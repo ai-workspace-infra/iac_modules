@@ -199,13 +199,21 @@ safeguard_pages_domain() {
   local domains_response
   local existing_name
   local existing_status
-  domains_response="$(api_request GET "${domains_url}" || echo '{"result":[]}')"
+  domains_response="$(api_request GET "${domains_url}")"
+  jq -e '.result | type == "array"' <<<"${domains_response}" >/dev/null
   existing_name="$(jq -r --arg hostname "${hostname}" 'first(.result[]? | select(.name == $hostname) | .name) // empty' <<<"${domains_response}")"
   existing_status="$(jq -r --arg hostname "${hostname}" 'first(.result[]? | select(.name == $hostname) | .status // "unknown")' <<<"${domains_response}")"
 
   if [[ -n "${existing_name}" ]]; then
     echo "Detaching stale Pages domain (${existing_name}, status=${existing_status}) to allow Worker custom domain binding..."
-    api_request DELETE "${domains_url}/${existing_name}" >/dev/null || true
+    api_request DELETE "${domains_url}/${existing_name}" >/dev/null
+    domains_response="$(api_request GET "${domains_url}")"
+    jq -e --arg hostname "${hostname}" \
+      '(.result | type == "array") and all(.result[]; .name != $hostname)' \
+      <<<"${domains_response}" >/dev/null || {
+      echo "::error::Pages still owns the selected Worker domain; refusing cutover." >&2
+      return 1
+    }
   fi
   echo "Pages does not own the Worker Console target: ${hostname}"
 }

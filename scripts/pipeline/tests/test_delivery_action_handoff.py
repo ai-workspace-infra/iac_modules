@@ -28,7 +28,10 @@ class DeliveryHandoff(unittest.TestCase):
                                          'spec': {'runtime': {'mode': 'serverless'}}}))
         fake = self.iac / 'scripts/akamai_state_preflight.py'
         fake.parent.mkdir()
-        fake.write_text("import json\nfrom pathlib import Path\ndef main(args):\n    Path(args[args.index('--output')+1]).write_text(json.dumps({'status':'passed','mode':'read-only'}))\n    return 0\n")
+        fake.write_text("import json\nfrom pathlib import Path\nNAMESPACES=('web-saas',)\ndef load_manifest_expectations(gitops,iac):\n    if (gitops/'resources/svc.plus/uat/akamai/web-saas.yaml').read_text()!='reviewed':\n        raise ValueError('manifest_namespace_mismatch')\n    return []\ndef main(args):\n    Path(args[args.index('--output')+1]).write_text(json.dumps({'status':'passed','mode':'read-only'}))\n    return 0\n")
+        manifest = self.gitops/'resources/svc.plus/uat/akamai/web-saas.yaml'
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text('reviewed')
         for root in (self.iac, self.gitops):
             subprocess.run(['git', '-C', str(root), 'add', '.'], check=True)
             subprocess.run(['git', '-C', str(root), 'commit', '-qm', 'fixture'], check=True)
@@ -87,6 +90,17 @@ class DeliveryHandoff(unittest.TestCase):
         result = self.run_script('akamai-preflight-action.py', PREFLIGHT_PHASE='validate',
             GITHUB_WORKFLOW_REF='ai-workspace-infra/platform-ops-toolkit/.github/workflows/environment-data-operations.yml@refs/heads/main')
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.base/'preflight.json').exists())
+
+    def test_akamai_bad_manifest_fails_before_query(self):
+        manifest = self.gitops/'resources/svc.plus/uat/akamai/web-saas.yaml'
+        manifest.write_text('wrong namespace')
+        subprocess.run(['git', '-C', str(self.gitops), 'add', '.'], check=True)
+        subprocess.run(['git', '-C', str(self.gitops), 'commit', '-qm', 'invalid fixture'], check=True)
+        result = self.run_script('akamai-preflight-action.py', PREFLIGHT_PHASE='validate', GITOPS_SHA=self.sha(self.gitops),
+            GITHUB_WORKFLOW_REF='ai-workspace-infra/platform-ops-toolkit/.github/workflows/environment-data-operations.yml@refs/heads/main')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('manifest_namespace_mismatch', result.stderr)
         self.assertFalse((self.base/'preflight.json').exists())
 
 
