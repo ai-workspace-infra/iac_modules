@@ -16,6 +16,9 @@ class ActionContracts(unittest.TestCase):
             *actions.glob('iac-*/action.yml'),
             *actions.glob('auth-*/action.yml'),
             actions / 'node-access-gcp/action.yml',
+            actions / 'gitops-gcp-target/action.yml',
+            actions / 'gitops-aws-oidc/action.yml',
+            actions / 'cloud-run-serving-facts/action.yml',
         ]
 
     def test_local_action_dependencies_and_inputs_exist(self):
@@ -59,3 +62,9 @@ class ActionContracts(unittest.TestCase):
         self.assertEqual(bind['if'], "inputs.load-state-contract == 'true'")
         self.assertIn('STATE_SECRET_KEY', bind['env'])
         self.assertIn('TF_STATE_SECRET_KEY', bind['run'])
+
+    def test_cloud_run_facts_do_not_invoke_docker(self):
+        source = (ROOT / 'scripts/pipeline/cloud-run-serving-facts.sh').read_text()
+        self.assertNotIn('docker buildx', source)
+        self.assertIn('gcloud auth print-access-token', source)
+        self.assertIn('/manifests/${ARTIFACT_DIGEST}', source)

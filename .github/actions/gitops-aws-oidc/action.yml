@@ -1,0 +1,40 @@
+name: Validate an AWS OIDC GitOps target
+description: IaC owner reader for the environment-bound AWS role, region and audience contract.
+inputs:
+  manifest:
+    description: Path to the pinned AWS GitHub Actions OIDC declaration
+    required: true
+  environment:
+    description: Expected prod or uat environment
+    required: true
+  account:
+    description: Expected concrete 12-digit AWS account ID
+    required: true
+outputs:
+  role_arn:
+    description: Validated AWS deployment role ARN
+    value: ${{ steps.target.outputs.role_arn }}
+  region:
+    description: Validated AWS region
+    value: ${{ steps.target.outputs.region }}
+  audience:
+    description: Validated GitHub OIDC audience
+    value: ${{ steps.target.outputs.audience }}
+runs:
+  using: composite
+  steps:
+    - name: Install exact reader dependency
+      shell: bash
+      run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.2
+    - name: Validate the AWS OIDC declaration
+      id: target
+      shell: bash
+      env:
+        MANIFEST: ${{ inputs.manifest }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        ACCOUNT: ${{ inputs.account }}
+      run: |
+        set -euo pipefail
+        python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/gitops_cloud_targets.py" aws \
+          --manifest "${MANIFEST}" --environment "${ENVIRONMENT}" --account "${ACCOUNT}" \
+          --github-output "${GITHUB_OUTPUT}"

@@ -1,0 +1,49 @@
+name: Query Cloud Run serving facts
+description: IaC owner query for Cloud Run traffic, ready revision and OCI index child facts.
+inputs:
+  project-id:
+    description: Declared GCP project ID
+    required: true
+  region:
+    description: Declared Cloud Run region
+    required: true
+  service:
+    description: Exact Cloud Run service name
+    required: true
+  image:
+    description: Artifact Registry image repository without tag or digest
+    required: false
+    default: ''
+  artifact-digest:
+    description: Exact OCI artifact or index digest whose child facts should be queried
+    required: true
+outputs:
+  latest_ready_revision:
+    description: Latest ready Cloud Run revision
+    value: ${{ steps.facts.outputs.latest_ready_revision }}
+  traffic_revisions:
+    description: Compact JSON array of revisions receiving traffic
+    value: ${{ steps.facts.outputs.traffic_revisions }}
+  serving_digest:
+    description: Digest reported by the latest ready Cloud Run revision
+    value: ${{ steps.facts.outputs.serving_digest }}
+  linux_amd64_child_digest:
+    description: Single linux/amd64 child digest when the artifact is an OCI index
+    value: ${{ steps.facts.outputs.linux_amd64_child_digest }}
+runs:
+  using: composite
+  steps:
+    - name: Install Google Cloud CLI
+      uses: google-github-actions/setup-gcloud@v2
+    - name: Query exact Cloud Run and OCI facts
+      id: facts
+      shell: bash
+      env:
+        GCP_PROJECT_ID: ${{ inputs.project-id }}
+        GCP_REGION: ${{ inputs.region }}
+        CLOUD_RUN_SERVICE_NAME: ${{ inputs.service }}
+        IMAGE: ${{ inputs.image }}
+        ARTIFACT_DIGEST: ${{ inputs.artifact-digest }}
+      run: |
+        set -euo pipefail
+        "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/cloud-run-serving-facts.sh"

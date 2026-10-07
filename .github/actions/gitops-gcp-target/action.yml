@@ -1,0 +1,48 @@
+name: Read or validate a GCP GitOps target
+description: IaC owner reader for GCP project, region and Artifact Registry target contracts.
+inputs:
+  manifest:
+    description: Path to the pinned GCP GitOps declaration
+    required: true
+  mode:
+    description: read or validate
+    required: true
+  environment:
+    description: Expected environment for validate mode
+    required: false
+    default: ''
+  project-id:
+    description: Vault-authorized project ID for validate mode
+    required: false
+    default: ''
+  region:
+    description: Vault-authorized region for validate mode
+    required: false
+    default: ''
+outputs:
+  project_id:
+    description: Declared GCP project ID
+    value: ${{ steps.target.outputs.project_id }}
+  region:
+    description: Declared GCP region
+    value: ${{ steps.target.outputs.region }}
+runs:
+  using: composite
+  steps:
+    - name: Install exact reader dependency
+      shell: bash
+      run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.2
+    - name: Read and validate the GCP declaration
+      id: target
+      shell: bash
+      env:
+        MANIFEST: ${{ inputs.manifest }}
+        MODE: ${{ inputs.mode }}
+        ENVIRONMENT: ${{ inputs.environment }}
+        PROJECT_ID: ${{ inputs.project-id }}
+        REGION: ${{ inputs.region }}
+      run: |
+        set -euo pipefail
+        python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/gitops_cloud_targets.py" gcp \
+          --manifest "${MANIFEST}" --mode "${MODE}" --environment "${ENVIRONMENT}" \
+          --project-id "${PROJECT_ID}" --region "${REGION}" --github-output "${GITHUB_OUTPUT}"
