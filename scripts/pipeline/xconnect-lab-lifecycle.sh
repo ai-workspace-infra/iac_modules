@@ -7,6 +7,7 @@ for name in XCONNECT_IAC_OPERATION IAC_ROOT GITOPS_ROOT XCONNECT_DECLARATION LAB
 done
 [[ "$XCONNECT_IAC_OPERATION" =~ ^(preflight|prepare|apply|cleanup)$ ]] || die 'Unsupported XConnect IaC operation'
 [[ "$MODE" =~ ^(dry-run|apply|cleanup)$ ]] || die 'Invalid Toolkit mode'
+TF_VAR_run_id="${TF_VAR_run_id:?TF_VAR_run_id is required}"
 [[ "$TF_VAR_run_id" =~ ^xcl-[0-9]+-[0-9]+$ ]] || die 'Invalid exact run identity'
 [[ "$LAB_DIR" == "$RUNNER_TEMP/"* && "$LAB_DIR" != *'/../'* ]] || die 'LAB_DIR must remain below RUNNER_TEMP'
 TF="$IAC_ROOT/vpn-overlay/xconnect-lab"

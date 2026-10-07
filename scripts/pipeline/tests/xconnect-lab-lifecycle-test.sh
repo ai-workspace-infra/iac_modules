@@ -46,7 +46,10 @@ export TF_VAR_run_id=xcl-123-1 MODE=apply XCONNECT_IAC_OPERATION=apply
 export MOCK_CALLS="$temporary/terraform-calls" MOCK_AWS_CALLS="$temporary/aws-calls"
 export TF_STATE_ACCESS_KEY=test TF_STATE_SECRET_KEY=test TF_STATE_REGION=auto
 export TF_STATE_ENDPOINT=https://state.invalid TF_STATE_BUCKET=test
-export IAC_REF="$(printf 'a%.0s' {1..40})" GITOPS_REF="$(printf 'b%.0s' {1..40})" PLAYBOOKS_REF="$(printf 'c%.0s' {1..40})"
+IAC_REF="$(printf 'a%.0s' {1..40})"
+GITOPS_REF="$(printf 'b%.0s' {1..40})"
+PLAYBOOKS_REF="$(printf 'c%.0s' {1..40})"
+export IAC_REF GITOPS_REF PLAYBOOKS_REF
 export CLI_RELEASE_TAG=v1 GATEWAY_RELEASE_TAG=v1 XRAY_RELEASE_TAG=v1
 
 bash "$root/scripts/pipeline/xconnect-lab-lifecycle.sh"
