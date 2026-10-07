@@ -9,12 +9,17 @@ import sys
 COMMANDS = {'init', 'validate', 'plan', 'apply', 'destroy', 'output', 'show', 'state'}
 OPERATIONS = ('RunInstances', 'ModifyInstanceAttribute', 'DescribeInstanceAttribute',
               'DescribeInstances', 'CreateSecurityGroup', 'AuthorizeSecurityGroupIngress',
-              'DeleteSecurityGroup', 'TerminateInstances')
-CODES = ('InvalidParameterCombination', 'UnauthorizedOperation', 'AccessDenied',
-         'InsufficientInstanceCapacity', 'VcpuLimitExceeded', 'RequestLimitExceeded',
-         'DependencyViolation', 'Unsupported', 'ExpiredToken', 'InvalidClientTokenId')
+              'AuthorizeSecurityGroupEgress', 'DeleteSecurityGroup', 'TerminateInstances')
+CODES = ('InvalidParameterCombination', 'InvalidParameterValue', 'InvalidParameter',
+         'UnauthorizedOperation', 'AccessDenied', 'AccessDeniedException',
+         'InsufficientInstanceCapacity', 'InsufficientFreeAddressesInSubnet',
+         'MaxSpotInstanceCountExceeded', 'VcpuLimitExceeded', 'SpotMaxPriceTooLow',
+         'RequestLimitExceeded', 'DependencyViolation', 'InvalidAMIID.NotFound',
+         'InvalidSubnetID.NotFound', 'InvalidGroup.NotFound', 'Unsupported',
+         'ExpiredToken', 'InvalidClientTokenId', 'RequestExpired')
 RESOURCES = ('aws_instance.gateway', 'aws_instance.client',
              'aws_security_group.gateway', 'aws_security_group.client')
+ATTRIBUTES = ('InstanceInitiatedShutdownBehavior',)
 MAX_BYTES = 8 * 1024 * 1024
 
 
@@ -52,22 +57,27 @@ def summarize(command, raw, code):
         raise ValueError('invalid diagnostic invocation')
     text = diagnostic_text(raw)
     return (f'Terraform {command} failed (exit {code}); resource={labels(text, RESOURCES)}; '
-            f'api={labels(text, OPERATIONS)}; code={labels(text, CODES)}. '
+            f'api={labels(text, OPERATIONS)}; code={labels(text, CODES)}; '
+            f'attribute={labels(text, ATTRIBUTES)}. '
             'Raw details remain runner-private and are not uploaded.')
 
 
 def main():
     try:
         command, filename, code = sys.argv[1:]
-        raw_bytes = Path(filename).read_bytes()
+        with Path(filename).open('rb') as log:
+            raw_bytes = log.read(MAX_BYTES + 1)
         raw = raw_bytes.decode('utf-8', errors='replace') if len(raw_bytes) <= MAX_BYTES else ''
         message = summarize(command, raw, int(code))
     except (OSError, ValueError, RecursionError):
         message = 'Terraform failed; safe diagnostic extraction unavailable. Raw details are not published.'
     print('::error::' + message)
     if os.environ.get('GITHUB_STEP_SUMMARY'):
-        with Path(os.environ['GITHUB_STEP_SUMMARY']).open('a') as summary:
-            summary.write('\n### Terraform failure (safe labels only)\n\n' + message + '\n')
+        try:
+            with Path(os.environ['GITHUB_STEP_SUMMARY']).open('a') as summary:
+                summary.write('\n### Terraform failure (safe labels only)\n\n' + message + '\n')
+        except OSError:
+            pass
 
 
 if __name__ == '__main__':

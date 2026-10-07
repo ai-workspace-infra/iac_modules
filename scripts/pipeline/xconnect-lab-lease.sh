@@ -12,6 +12,12 @@ run="$(<"$LAB_DIR/run-id")"
 prefix=runs/uat/svc.plus/aws-cloud/primary/xconnect-lab
 case "${1:?}" in
   create)
+    for ref in IAC_REF GITOPS_REF PLAYBOOKS_REF; do
+      [[ "${!ref:-}" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::$ref must be an immutable commit SHA" >&2; exit 2; }
+    done
+    for tag in CLI_RELEASE_TAG GATEWAY_RELEASE_TAG XRAY_RELEASE_TAG; do
+      [[ "${!tag:-}" =~ ^v[0-9][0-9A-Za-z._-]*$ ]] || { echo "::error::$tag must be an immutable release tag" >&2; exit 2; }
+    done
     jq -n --arg run "$run" --arg iac "$IAC_REF" --arg gitops "$GITOPS_REF" --arg playbooks "$PLAYBOOKS_REF" \
       --arg cli "$CLI_RELEASE_TAG" --arg gateway "$GATEWAY_RELEASE_TAG" --arg xray "$XRAY_RELEASE_TAG" \
       --arg provider "${GATEWAY_PROVIDER:-external}" --arg external_gateway_id "${EXTERNAL_GATEWAY_ID:-}" \
