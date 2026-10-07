@@ -5,6 +5,7 @@ inputs:
   environment: {required: true, description: "Exact sit, uat or prod environment"}
   declaration: {required: false, default: '', description: "Selected GitOps YAML existing-host declaration"}
 outputs:
+  smtp_configured: {description: Explicit configured or absent SMTP source, value: '${{ steps.execute.outputs.smtp_configured }}'}
   instance_id: {description: Resolved authoritative instance ID, value: '${{ steps.execute.outputs.instance_id }}'}
   direction: {description: Resize direction, value: '${{ steps.execute.outputs.direction }}'}
   current_plan: {description: Current provider plan, value: '${{ steps.execute.outputs.current_plan }}'}

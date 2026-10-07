@@ -10,6 +10,7 @@ trap 'rm -rf "$tmp"' EXIT
 printf 'X-Vault-Token: %s\n' "$VAULT_TOKEN" > "$tmp/header"
 status="$(curl --silent --show-error --max-time 20 -H "@$tmp/header" -o "$tmp/body" -w '%{http_code}' "$VAULT_ADDR/v1/$path" 2>/dev/null)"
 if [[ "$status" == 404 ]]; then
+  printf 'smtp_configured=false\n' >> "${GITHUB_OUTPUT:-/dev/null}"
   echo 'SMTP secret is not configured in the selected environment; no secret was changed.'
   exit 0
 fi
@@ -31,4 +32,5 @@ for key in username password; do
   gcloud secrets versions access latest --secret="$name" --project="$GCP_PROJECT_ID" --quiet > "$tmp/current" 2>/dev/null
   cmp -s "$tmp/current" "$tmp/desired" || { echo '::error::SMTP secret did not converge.' >&2; exit 1; }
 done
+printf 'smtp_configured=true\n' >> "${GITHUB_OUTPUT:-/dev/null}"
 echo 'SMTP Secret Manager values verified against the selected Vault record.'

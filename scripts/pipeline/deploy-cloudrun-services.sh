@@ -149,12 +149,14 @@ for svc in "${SERVICES[@]}"; do
 
   secret_flags=()
   if [[ "${svc}" == "accounts" ]]; then
-    if gcloud secrets describe smtp-username --project="${GCP_PROJECT}" --quiet >/dev/null 2>&1 && \
-       gcloud secrets describe smtp-password --project="${GCP_PROJECT}" --quiet >/dev/null 2>&1; then
+    case "${SMTP_CONFIGURED:-}" in true|false) ;; *) echo 'Explicit SMTP source status is required' >&2; exit 2 ;; esac
+    if [[ "$SMTP_CONFIGURED" == true ]]; then
+      gcloud secrets describe smtp-username --project="${GCP_PROJECT}" --quiet >/dev/null 2>&1
+      gcloud secrets describe smtp-password --project="${GCP_PROJECT}" --quiet >/dev/null 2>&1
       echo "==> [Cloud Run] Binding Secret Manager SMTP credentials (smtp-username, smtp-password)..."
       secret_flags+=("--set-secrets=SMTP_USERNAME=smtp-username:latest,SMTP_PASSWORD=smtp-password:latest")
     else
-      echo "==> [Cloud Run] SMTP secrets not present in Secret Manager; skipping secret bindings."
+      echo 'SMTP is explicitly absent from the selected environment Vault record.'
     fi
   fi
 

@@ -32,3 +32,4 @@ jobs:
           bash scripts/pipeline/tests/action-metadata-test.sh .github/actions/platform-resource-operations/action.yml .github/actions/serverless-provider-operations/action.yml .github/actions/uat-compute-cleanup/action.yml
           bash scripts/pipeline/tests/uat-compute-cleanup-test.sh
           bash scripts/pipeline/tests/platform-resource-facts-test.sh
+          bash scripts/pipeline/tests/smtp-owner-test.sh
