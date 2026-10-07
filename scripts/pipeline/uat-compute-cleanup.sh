@@ -3,6 +3,7 @@ set -euo pipefail
 umask 077
 : "${CLEANUP_POLICY:?}" "${CLEANUP_MODE:?}" "${RUNNER_TEMP:?}" "${GITHUB_RUN_ID:?}" "${GITHUB_RUN_ATTEMPT:?}" "${GITHUB_OUTPUT:?}" "${CLEANUP_OWNER_SHA:?}"
 [[ "$CLEANUP_OWNER_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 2
+rm -f "$RUNNER_TEMP/uat-compute-cleanup-receipt.json"
 case "$CLEANUP_MODE" in plan|apply) ;; *) exit 2 ;; esac
 tmp="$(mktemp -d "$RUNNER_TEMP/uat-cleanup.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT

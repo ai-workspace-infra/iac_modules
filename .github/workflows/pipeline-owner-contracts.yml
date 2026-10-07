@@ -30,3 +30,4 @@ jobs:
       - name: Falsify dynamic target and cleanup contracts
         run: |
           bash scripts/pipeline/tests/uat-compute-cleanup-test.sh
+          bash scripts/pipeline/tests/platform-resource-facts-test.sh

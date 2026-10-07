@@ -68,7 +68,7 @@ case "${http_code}" in
     } ;;
   *)
     echo "::error::Vultr API returned unexpected HTTP ${http_code} for instance ${INSTANCE_ID}." >&2
-    head -c 400 "${http_body}" >&2; exit 1 ;;
+    exit 1 ;;
 esac
 
 instance="$(jq -c '.instance' < "${http_body}")"
@@ -86,9 +86,14 @@ source_disk="$(jq -r '.disk // empty' <<<"${instance}")"
   exit 1
 }
 
-plans="$(curl -fsS --retry 3 -H "Authorization: Bearer ${VULTR_API_KEY}" \
+[[ "$os_id" =~ ^[0-9]+$ && "$region" =~ ^[a-z0-9-]+$ && "$current_plan" =~ ^[A-Za-z0-9-]+$ &&
+  "$current_ip" =~ ^[0-9]+(\.[0-9]+){3}$ && "$label" != *$'\n'* && "$label" != *$'\r'* ]] || exit 1
+for capacity in "$source_vcpu" "$source_ram" "$source_disk"; do [[ "$capacity" =~ ^[1-9][0-9]*$ ]] || exit 1; done
+[[ -z "$EXPECTED_HOSTNAME" || "$label" == "$EXPECTED_HOSTNAME" ]] || exit 1
+[[ -z "$EXPECTED_IP" || "$current_ip" == "$EXPECTED_IP" ]] || exit 1
+plans="$(curl -fsS --max-time 30 --retry 3 -H "Authorization: Bearer ${VULTR_API_KEY}" \
   'https://api.vultr.com/v2/plans?type=vc2&per_page=500')"
-target_spec="$(jq -c --arg plan "${TARGET_PLAN}" '.plans[]? | select(.id == $plan)' <<<"${plans}" | head -n 1)"
+target_spec="$(jq -ec --arg plan "${TARGET_PLAN}" '[.plans[]? | select(.id == $plan)] | select(length == 1) | .[0]' <<<"${plans}")"
 [[ -n "${target_spec}" ]] || {
   echo "::error::Vultr did not return capacity metadata for target plan ${TARGET_PLAN}" >&2
   exit 1
@@ -96,6 +101,7 @@ target_spec="$(jq -c --arg plan "${TARGET_PLAN}" '.plans[]? | select(.id == $pla
 target_vcpu="$(jq -r '.vcpu_count // empty' <<<"${target_spec}")"
 target_ram="$(jq -r '.ram // empty' <<<"${target_spec}")"
 target_disk="$(jq -r '.disk // empty' <<<"${target_spec}")"
+for capacity in "$target_vcpu" "$target_ram" "$target_disk"; do [[ "$capacity" =~ ^[1-9][0-9]*$ ]] || exit 1; done
 [[ -n "${target_vcpu}" && -n "${target_ram}" && -n "${target_disk}" ]] || {
   echo "::error::Target plan ${TARGET_PLAN} is missing capacity metadata" >&2
   exit 1

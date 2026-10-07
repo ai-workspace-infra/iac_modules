@@ -2,6 +2,8 @@
 set -euo pipefail
 umask 077
 : "${EXISTING_HOST_DECLARATION:?}" "${EXISTING_TARGET_HOST:?}" "${EXISTING_TARGET_USER:?}" "${OUTPUT_DIR:?}" "${RESOURCE_ENVIRONMENT:?}"
+: "${RUNNER_TEMP:?}"
+[[ "$OUTPUT_DIR" == "$RUNNER_TEMP/"* && "$OUTPUT_DIR" != *'/../'* && "$OUTPUT_DIR" != */.. && ! -e "$OUTPUT_DIR" ]] || exit 2
 [[ "$RESOURCE_ENVIRONMENT" == uat ]] || { echo 'Existing AI Workspace target is UAT-only' >&2; exit 2; }
 [[ "$EXISTING_TARGET_HOST" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ &&
    "$EXISTING_TARGET_USER" =~ ^[a-z_][a-z0-9_-]{0,31}\$?$ ]] || exit 2
@@ -13,7 +15,7 @@ jq -e --arg environment "$RESOURCE_ENVIRONMENT" '
   .spec.management_mode == "existing" and .spec.fact_source == "explicit-target" and
   (.spec.groups | type == "array" and length > 0 and all(.[]; test("^[a-z][a-z0-9_]*$"))) and
   (.spec.service_domains | type == "array" and all(.[]; test("^[A-Za-z0-9][A-Za-z0-9.-]+$")))' "$declaration" >/dev/null
-mkdir -p "$OUTPUT_DIR"
+mkdir -m 700 "$OUTPUT_DIR"
 # An explicit externally managed target is not a verified provider instance.
 # Do not invent instance ID, capacity, cloud provider, region or Terraform state.
 jq --arg host "$EXISTING_TARGET_HOST" --arg user "$EXISTING_TARGET_USER" '
