@@ -11,11 +11,15 @@ import urllib.parse
 import urllib.request
 import urllib.error
 from pathlib import Path
+import sys
 
 import yaml
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT.parent / "scripts"))
+from cmdb_v1 import make_document, write_document  # noqa: E402
+
 TEMPLATES = ROOT / "templates"
 GITOPS_ROOT = Path(os.environ.get("GITOPS_ROOT", ROOT.parents[2] / "gitops"))
 DEFAULT_RESOURCES = GITOPS_ROOT / "resources" / "xworktech.com" / "uat" / "gcp" / "open-platform-uat.yaml"
@@ -648,6 +652,7 @@ def inventory(args):
     if runtime.get("project_id") != global_config["project_id"]:
         raise SystemExit("Terraform runtime project differs from the resource declaration")
     environment = global_config["environment"]
+    host_records = {}
     cmdb = {
         "environment": environment,
         "project_id": runtime.get("project_id"),
@@ -669,14 +674,25 @@ def inventory(args):
         ansible_host = public_ip or private_ip
         if not ansible_host:
             raise SystemExit(f"Vault VM {node['name']} has no reachable IP for deployment")
-        cmdb["vault_nodes"].append({
+        vault_record = {
             "name": node["name"],
+            "fqdn": node.get("service_domain", node["name"]),
+            "ip": ansible_host,
             "zone": node["zone"],
             "private_ip": private_ip,
             "public_ip": public_ip,
+            "resource_id": runtime.get("vault_self_links", {}).get(node["name"]),
             "ansible_host": ansible_host,
             "ansible_user": global_config.get("ssh_username", "github-actions"),
-        })
+            "cloud_provider": "gcp-cloud",
+            "cloud_region": global_config.get("region", ""),
+            "project_id": runtime.get("project_id"),
+            "groups": node.get("inventory_groups", ["vault"]),
+            "tags": node.get("tags", []) or [],
+            "host_vars": dict(node.get("host_vars") or {}),
+        }
+        cmdb["vault_nodes"].append(vault_record)
+        host_records[node["name"]] = vault_record
     for vm in spot_vms:
         facts = runtime.get("spot_instances", {}).get(vm["name"], {})
         public_ip = facts.get("public_ip")
@@ -695,13 +711,14 @@ def inventory(args):
         inventory_name = spot_inventory_name(vm)
         if inventory_name in cmdb:
             raise SystemExit(f"Spot VM inventory name {inventory_name} collides with a CMDB platform key")
-        cmdb[inventory_name] = {
+        spot_record = {
             "name": vm["name"],
             "fqdn": inventory_name,
             "ip": address,
             "private_ip": private_ip,
             "public_ip": public_ip,
             "zone": facts.get("zone", vm["zone"]),
+            "resource_id": facts.get("self_link"),
             "ansible_user": (
                 oslogin_username(runtime.get("project_id"), runtime.get("deploy_account"))
                 if vm.get("enable_oslogin")
@@ -709,6 +726,9 @@ def inventory(args):
             ),
             "groups": vm.get("inventory_groups", []),
             "provider": "gcp-cloud",
+            "cloud_provider": "gcp-cloud",
+            "cloud_region": global_config.get("region", ""),
+            "project_id": runtime.get("project_id"),
             "provisioning_model": facts.get("provisioning_model"),
             "iap_tunnel": not vm.get("public_ip") and global_config.get("enable_iap_ssh", False),
             "node_id": host_vars["node_id"],
@@ -716,6 +736,8 @@ def inventory(args):
             "tags": vm.get("tags", []) or [],
             "host_vars": host_vars if vm.get("host_vars") else {},
         }
+        cmdb[inventory_name] = spot_record
+        host_records[inventory_name] = spot_record
         if vm.get("data_disk"):
             disk_id = facts.get("data_disk_id")
             if not disk_id:
@@ -725,6 +747,7 @@ def inventory(args):
                 "device_name": facts.get("data_disk_device_name"),
                 "mount_path": vm["data_disk"]["mount_path"],
             }
+            host_records[inventory_name]["data_disk"] = cmdb[inventory_name]["data_disk"]
         declared_persistent_disks = [
             disk for disk in global_config.get("persistent_data_disks", [])
             if disk["instance"] == vm["name"]
@@ -750,7 +773,18 @@ def inventory(args):
                     "mount_path": disk["mount_path"],
                     "management": "google_compute_attached_disk",
                 })
-    (workdir / "cmdb.json").write_text(json.dumps(cmdb, indent=2) + "\n", encoding="utf-8")
+            host_records[inventory_name]["persistent_data_disks"] = cmdb[inventory_name]["persistent_data_disks"]
+    write_document(
+        workdir / "cmdb.json",
+        make_document(
+            host_records,
+            cloud_provider="gcp-cloud",
+            resource_paths=str(args.resources),
+            project_id=runtime.get("project_id"),
+            environment=environment,
+            legacy=cmdb,
+        ),
+    )
     lines = ["[vault]"]
     lines.extend(
         f"{node['name']} ansible_host={node['ansible_host']} ansible_user={node['ansible_user']}"
