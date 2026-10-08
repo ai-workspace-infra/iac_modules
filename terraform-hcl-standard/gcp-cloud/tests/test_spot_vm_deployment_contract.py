@@ -52,6 +52,9 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
             "project_id": "open-platform-shared",
             "vault_private_ips": {"vault-shared-0": "10.82.0.2"},
             "vault_public_ips": {"vault-shared-0": "198.51.100.20"},
+            "vault_self_links": {
+                "vault-shared-0": "projects/open-platform-shared/zones/asia-east1-a/instances/vault-shared-0"
+            },
         }
         with tempfile.TemporaryDirectory() as tempdir, patch.object(
             generator, "load_resources", return_value=manifest
@@ -60,6 +63,11 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
             cmdb = json.loads((Path(tempdir) / "cmdb.json").read_text(encoding="utf-8"))
             inventory = (Path(tempdir) / "inventory.ini").read_text(encoding="utf-8")
         self.assertEqual(cmdb["vault_nodes"][0]["public_ip"], "198.51.100.20")
+        self.assertEqual(cmdb["schema_version"], "cmdb.v1")
+        self.assertEqual(
+            cmdb["hosts"]["vault-shared-0"]["resource_id"].split("/")[-1],
+            "vault-shared-0",
+        )
         self.assertIn("vault-shared-0 ansible_host=198.51.100.20 ansible_user=ubuntu", inventory)
 
     def test_namespace_public_ip_allowlist_renders_project_org_policy(self):

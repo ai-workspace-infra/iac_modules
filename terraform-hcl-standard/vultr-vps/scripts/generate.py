@@ -32,6 +32,9 @@ import yaml
 from jinja2 import Environment, FileSystemLoader
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", "scripts")))
+from cmdb_v1 import make_document, write_document  # noqa: E402
+
 # scripts/ -> vultr-vps 根
 VULTR_VPS_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
 TEMPLATE_DIR = os.path.join(VULTR_VPS_ROOT, "templates")
@@ -337,9 +340,15 @@ def cmd_inventory(args):
             + "\n".join(details)
         )
 
-    with open(os.path.join(workdir, "cmdb.json"), "w", encoding="utf-8") as fh:
-        json.dump(cmdb, fh, indent=2, ensure_ascii=False)
-        fh.write("\n")
+    write_document(
+        os.path.join(workdir, "cmdb.json"),
+        make_document(
+            cmdb,
+            cloud_provider="vultr",
+            resource_paths=args.resources,
+            environment=glob.get("environment"),
+        ),
+    )
 
     # 每台主机整行在 Python 侧拼好（含带引号的 host_vars），模板里只做表达式
     # 输出，避免 Jinja2 trim_blocks 把行尾 block 标签后的换行吃掉。

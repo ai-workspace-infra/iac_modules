@@ -344,6 +344,11 @@ output "platform_runtime" {
       {{ node.name | tojson }} = module.{{ node.name | tf_id }}.public_ip
 {% endfor %}
     }
+    vault_self_links = {
+{% for node in vault_nodes %}
+      {{ node.name | tojson }} = module.{{ node.name | tf_id }}.self_link
+{% endfor %}
+    }
     spot_instances = {
 {% for vm in spot_vms %}
 {% set vm_persistent_disks = persistent_data_disks | selectattr('instance', 'equalto', vm.name) | list %}
