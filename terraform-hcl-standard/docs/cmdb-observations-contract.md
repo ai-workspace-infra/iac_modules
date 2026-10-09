@@ -68,3 +68,22 @@ collector.
 
 Cloud APIs, runtime identities, PostgreSQL transactional upsert/locking,
 retention, and Toolkit orchestration are not implemented by this contract.
+
+## GCP API adapter
+
+`cmdb_collect_gcp.py` reads Compute aggregated instances with explicit project
+identity and pagination, or Cloud Run v2 services with an explicit region. It
+uses runtime `gcloud` access tokens for controlled local collection or metadata
+tokens for a host workload identity. Tokens are never arguments or output.
+Only allowlisted instance/service fields are kept; startup scripts, container
+environment values and unfiltered provider responses are excluded.
+
+`cmdb_collect_scope.py` consumes a GitOps `CMDBCollectionScope` YAML and emits
+one sanitized envelope per enabled project/product/region scope. A denied API,
+incomplete zone/region or failed page emits a failed/partial receipt and exits
+nonzero while preserving other completed scopes. Compute native IDs include
+the numeric instance ID; Cloud Run identities include the service UID.
+
+The adapter performs no database, SSH, IAM mutation, service bootstrap or API
+enablement. PostgreSQL artifact ingestion is a separate Playbooks operation.
+An explicit region receipt does not prove Cloud Run coverage in other regions.
