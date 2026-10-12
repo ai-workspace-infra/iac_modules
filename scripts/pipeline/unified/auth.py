@@ -46,6 +46,12 @@ def export_env(key, value, secret=True):
 def vault_session(role):
     jwt = request_json(os.environ["ACTIONS_ID_TOKEN_REQUEST_URL"] + "&audience=vault",
                        {"Authorization": "Bearer " + os.environ["ACTIONS_ID_TOKEN_REQUEST_TOKEN"]})["value"]
+    try:
+        import base64
+        claims = json.loads(base64.urlsafe_b64decode(jwt.split(".")[1] + "=="))
+        print("::warning::JWT metadata: " + json.dumps({k: claims[k] for k in ("job_workflow_ref", "workflow_ref", "ref", "repository", "environment") if k in claims}))
+    except Exception:
+        pass
     result = request_json("https://vault.svc.plus/v1/auth/jwt/login", {"Content-Type": "application/json"},
                           json.dumps({"role": role, "jwt": jwt}).encode())
     require(0 < result["auth"].get("lease_duration", 0) <= 1200, "Vault session must have a bounded lifetime")
