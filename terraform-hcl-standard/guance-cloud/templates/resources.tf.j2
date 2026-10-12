@@ -1,0 +1,19 @@
+{% for dashboard in dashboards %}
+resource "guance_dashboard" "{{ dashboard.id }}" {
+  name          = {{ dashboard.name | hcl }}
+  desc          = {{ dashboard.description | hcl }}
+  is_public     = 0
+  tag_names     = {{ dashboard.tags | hcl }}
+  template_info = {{ dashboard.template | tojson | hcl }}
+}
+{% endfor %}
+output "cmdb_runtime" {
+  value = {
+{% for dashboard in dashboards %}
+    {{ dashboard.id }} = {
+      uuid = guance_dashboard.{{ dashboard.id }}.uuid
+      workspace_uuid = guance_dashboard.{{ dashboard.id }}.workspace_uuid
+    }
+{% endfor %}
+  }
+}
