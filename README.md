@@ -125,6 +125,11 @@ The resize provider operations `vultr-instance-snapshot.sh`,
 Toolkit retains approval, sequence, Vault delivery and release evidence. Source
 instance destruction additionally requires `CONFIRM_DESTROY=true`; the owner
 test uses mocked provider responses and never mutates cloud resources.
+
+Provider-specific delivery facts are exposed through the composite actions
+`gitops-gcp-target`, `gitops-aws-oidc` and `cloud-run-serving-facts`. They read
+and validate IaC/GitOps or cloud facts; the Toolkit caller retains approval,
+workflow sequencing, traffic convergence and final digest acceptance.
 | `docs/archive/legacy-pipelines/` | Parked pipeline definitions that used to sit under `.github/actions/` (workflow-shaped files GitHub never ran) — see its [README](docs/archive/legacy-pipelines/README.md) |
 | `.github/workflows/` | `validate-release-pr.yml` (release-branch policy) and `pipeline-scripts.yml` (tests for `scripts/pipeline/`) |
 | `example/` | Reference samples: Pulumi (Python) and plain Terraform for AWS / Azure / GCP |

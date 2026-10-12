@@ -1,0 +1,37 @@
+name: Execute XConnect lab IaC lifecycle
+description: Own the isolated XConnect lab Terraform, state evidence, and lease CRUD without host execution.
+inputs:
+  operation:
+    description: Exact lifecycle operation preflight, prepare, apply, or cleanup.
+    required: true
+  iac-root:
+    description: Fixed IaC owner checkout root.
+    required: true
+  gitops-root:
+    description: Fixed GitOps declaration checkout root.
+    required: true
+  declaration-file:
+    description: Reviewed XConnect lab declaration file.
+    required: true
+  lab-dir:
+    description: Private same-run working directory below RUNNER_TEMP.
+    required: true
+  run-id:
+    description: Exact xcl-GITHUB_RUN_ID-GITHUB_RUN_ATTEMPT identity.
+    required: true
+  mode:
+    description: Toolkit-selected dry-run, apply, or cleanup mode.
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        XCONNECT_IAC_OPERATION: ${{ inputs.operation }}
+        IAC_ROOT: ${{ inputs.iac-root }}
+        GITOPS_ROOT: ${{ inputs.gitops-root }}
+        XCONNECT_DECLARATION: ${{ inputs.declaration-file }}
+        LAB_DIR: ${{ inputs.lab-dir }}
+        TF_VAR_run_id: ${{ inputs.run-id }}
+        MODE: ${{ inputs.mode }}
+      run: bash "$GITHUB_ACTION_PATH/../../../scripts/pipeline/xconnect-lab-lifecycle.sh"

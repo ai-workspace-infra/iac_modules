@@ -131,6 +131,22 @@ with `FALSE`; callers in such projects must explicitly enable OS Login and
 provide a matching deployment SSH path. A successful VM plan alone does not
 prove that Ansible can sign in.
 
+Resource-only `inventory` calls resolve a missing `GCP_OSLOGIN_USERNAME` through
+the declared project's runtime `deploy_account`, using the already authenticated
+WIF credential and the OS Login `users.getLoginProfile` API with explicit
+`projectId`. The CLI `describe-profile` implementation omits that API field
+even when `--project` is set. The owner requires one
+Linux service-account POSIX username; invalid, missing or ambiguous profiles
+stop CMDB publication. This read does not register keys, perform SSH, select a
+personal account or change IAM. Host deploy owners still register their own
+expiring key and pass the verified username through the existing contract.
+When `GOOGLE_GHA_CREDS_PATH` is supplied by GitHub authentication, the owner
+first verifies its external-account type and exact runtime service-account
+impersonation URL, then activates that same short-lived WIF credential in
+gcloud. OS Login requires a registered account even when ADC already works
+for project/instance reads. Other credential types or identities are refused;
+this does not initiate interactive login or require bootstrap credentials.
+
 A public Spot VM that serves traffic (for example a regional Agent Proxy)
 declares it on the VM:
 

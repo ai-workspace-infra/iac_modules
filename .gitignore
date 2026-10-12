@@ -39,6 +39,7 @@ coverage.xml
 .terraform/
 *.tfstate
 *.tfstate.*
+terraform-hcl-standard/gcp-cloud/envs/.prod-selfhost-bootstrap-*/
 # Generated Terraform provider/backend files for AWS cloud envs
 terraform-hcl-standard/aws-cloud/envs/*/provider.tf
 terraform-hcl-standard/aws-cloud/envs/*/backend.tf

@@ -1,0 +1,29 @@
+name: Read-only Akamai state preflight
+description: IaC query owner; Toolkit selects the declarations, authorizes access and publishes evidence.
+inputs:
+  phase: {required: false, default: query, description: validate before authorization or query after authorization}
+  environment: {required: true, description: Exact UAT environment}
+  account: {required: true, description: Concrete reviewed Akamai account}
+  correlation-id: {required: true, description: Caller operation identity}
+  iac-root: {required: true, description: Immutable IaC checkout}
+  gitops-root: {required: true, description: Immutable GitOps checkout}
+  gitops-sha: {required: true, description: Resolved declaration SHA}
+  output: {required: true, description: Sanitized preflight report path}
+runs:
+  using: composite
+  steps:
+    - uses: hashicorp/setup-terraform@v3
+      if: inputs.phase == 'query'
+      with:
+        terraform_version: 1.10.5
+    - shell: bash
+      env:
+        PREFLIGHT_PHASE: ${{ inputs.phase }}
+        PREFLIGHT_ENVIRONMENT: ${{ inputs.environment }}
+        PREFLIGHT_ACCOUNT: ${{ inputs.account }}
+        PREFLIGHT_CORRELATION_ID: ${{ inputs.correlation-id }}
+        IAC_ROOT: ${{ inputs.iac-root }}
+        GITOPS_ROOT: ${{ inputs.gitops-root }}
+        GITOPS_SHA: ${{ inputs.gitops-sha }}
+        PREFLIGHT_JSON_PATH: ${{ inputs.output }}
+      run: python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/akamai-preflight-action.py"

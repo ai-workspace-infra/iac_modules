@@ -10,7 +10,11 @@ module "project" {
 {% if external_ip_allowed_instances and manage_external_ip_policy %}
 resource "google_org_policy_policy" "vm_external_ip_access" {
   name   = "projects/${module.project.project_number}/policies/compute.vmExternalIpAccess"
+{% if external_ip_policy_parent_identity == 'project_number' %}
+  parent = "projects/${module.project.project_number}"
+{% else %}
   parent = "projects/${module.project.project_id}"
+{% endif %}
 
   # The Google provider currently normalizes imported policy names to the
   # short constraint name in state. Ignore only that import representation
@@ -209,7 +213,7 @@ module "data_disk_{{ vm.name | tf_id }}" {
 {% endif %}
 module "spot_{{ vm.name | tf_id }}" {
   source          = "../../modules/spot_vm"
-  depends_on      = [module.project, module.network]
+  depends_on      = [module.project, module.network{% if external_ip_allowed_instances and manage_external_ip_policy %}, google_org_policy_policy.vm_external_ip_access{% endif %}]
   project_id      = module.project.project_id
   name            = {{ vm.name | tojson }}
   zone            = {{ vm.zone | tojson }}
@@ -338,6 +342,11 @@ output "platform_runtime" {
     vault_public_ips = {
 {% for node in vault_nodes %}
       {{ node.name | tojson }} = module.{{ node.name | tf_id }}.public_ip
+{% endfor %}
+    }
+    vault_self_links = {
+{% for node in vault_nodes %}
+      {{ node.name | tojson }} = module.{{ node.name | tf_id }}.self_link
 {% endfor %}
     }
     spot_instances = {

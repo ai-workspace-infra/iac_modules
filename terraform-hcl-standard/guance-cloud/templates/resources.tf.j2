@@ -1,0 +1,50 @@
+{# One explicit block per resource. Loops run here in Jinja, never in the generated HCL. #}
+{% for item in notify_objects %}
+variable "{{ item.variable }}" {
+  type      = string
+  sensitive = true
+}
+
+{% endfor %}
+{% for item in notify_objects %}
+resource "guance_notify_object" "{{ item.id }}" {
+{{ item.attrs | hcl_body }}
+}
+
+{% endfor %}
+{% for item in dashboards %}
+resource "guance_dashboard" "{{ item.id }}" {
+{{ item.attrs | hcl_body }}
+}
+
+{% endfor %}
+{% for item in alert_policies %}
+resource "guance_alert_policy" "{{ item.id }}" {
+{{ item.attrs | hcl_body }}
+}
+
+{% endfor %}
+{% for item in monitors %}
+resource "guance_monitor" "{{ item.id }}" {
+{{ item.attrs | hcl_body }}
+}
+
+{% endfor %}
+{% for item in mutes %}
+resource "guance_mute" "{{ item.id }}" {
+{{ item.attrs | hcl_body }}
+}
+
+{% endfor %}
+output "cmdb_runtime" {
+  value = {
+{% for kind, kind_items in cmdb_groups %}
+{% for item in kind_items %}
+    {{ item.id }} = {
+      uuid           = {{ kind }}.{{ item.id }}.uuid
+      workspace_uuid = {{ kind }}.{{ item.id }}.workspace_uuid
+    }
+{% endfor %}
+{% endfor %}
+  }
+}

@@ -7,11 +7,13 @@ on:
   pull_request:
     paths:
       - "scripts/pipeline/**"
+      - ".github/actions/**"
       - ".github/workflows/pipeline-scripts.yml"
   push:
     branches: [main]
     paths:
       - "scripts/pipeline/**"
+      - ".github/actions/**"
 
 permissions:
   contents: read
@@ -22,6 +24,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install exact owner contract dependencies
+        run: python3 -m pip install PyYAML==6.0.2 Jinja2==3.1.6
+
       - name: Static checks
         run: |
           set -euo pipefail
@@ -29,7 +34,8 @@ jobs:
           for f in scripts/pipeline/*.sh scripts/pipeline/lib/*.sh scripts/pipeline/tests/*.sh; do
             bash -n "$f"
           done
-          python3 -m py_compile scripts/pipeline/*.py scripts/pipeline/tests/*.py
+          python3 -m compileall -q scripts/pipeline
+          for f in scripts/pipeline/maintenance/aws/*.sh; do bash -n "$f"; done
           shellcheck -S warning scripts/pipeline/*.sh scripts/pipeline/lib/*.sh scripts/pipeline/tests/*.sh
 
       - name: Entry points are executable

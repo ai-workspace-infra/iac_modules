@@ -1,0 +1,42 @@
+name: iac-terraform-lifecycle
+description: GitOps-bound IaC owner action; delivery approvals and DAG belong to Toolkit.
+inputs:
+  target-contract-file:
+    description: Prepared exact GitOps contract path
+    required: true
+  target-id:
+    description: Declared target ID
+    required: true
+  iac-root:
+    description: Pinned IaC checkout root
+    required: true
+  gitops-root:
+    description: Pinned GitOps checkout root
+    required: true
+  evidence-dir:
+    description: Public sanitized stage evidence directory
+    required: true
+  private-dir:
+    description: Private ephemeral runner directory
+    required: true
+  dependencies-dir:
+    description: Downloaded predecessor receipts directory
+    required: true
+  stage:
+    description: Explicit lifecycle stage
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: execute
+      shell: bash
+      env:
+        IAC_CONTRACT: ${{ inputs.target-contract-file }}
+        IAC_TARGET: ${{ inputs.target-id }}
+        IAC_ROOT: ${{ inputs.iac-root }}
+        IAC_GITOPS_ROOT: ${{ inputs.gitops-root }}
+        IAC_EVIDENCE: ${{ inputs.evidence-dir }}
+        IAC_PRIVATE: ${{ inputs.private-dir }}
+        IAC_DEPENDENCIES: ${{ inputs.dependencies-dir }}
+        IAC_STAGE: ${{ inputs.stage }}
+      run: python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/unified_cli.py" execute

@@ -1,0 +1,21 @@
+name: iac-caller-inventory
+description: GitOps-bound IaC owner action; delivery approvals and DAG belong to Toolkit.
+inputs:
+  summary-file:
+    description: Exact receipt-verified aggregate summary
+    required: true
+  output-dir:
+    description: Compatibility host inventory directory
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install exact renderer dependencies
+      shell: bash
+      run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.2 Jinja2==3.1.6
+    - name: caller-inventory
+      shell: bash
+      env:
+        IAC_SUMMARY: ${{ inputs.summary-file }}
+        IAC_DESTINATION: ${{ inputs.output-dir }}
+      run: python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/unified_cli.py" caller-inventory

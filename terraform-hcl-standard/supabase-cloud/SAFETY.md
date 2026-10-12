@@ -1,0 +1,9 @@
+# 显式安全入口；legacy不切换
+
+本PR新增scripts/render_contract.py/init_contract.sh与contract_templates，不改变legacy root HCL、render.py、init.sh、URI outputs、pooler data source。旧database_password/DSN输入与outputs仍有state/plan风险；sensitive不避免持久state。未读取实际state/.env，不清理历史秘密。下游调用者和旧Vault读者保留。
+
+新renderer只接受非秘密YAML与新鲜工作目录；external无resource/import/provider，adopt显式，create独立。strict默认true阻止provider需要密码的managed render；关闭strict必须ack_sensitive_state=true。模板precondition再次保护，并prevent_destroy、ignore_changes password。原生provider密码仍写state；没有伪装为无落盘。
+
+角色与Vault接口均fixture-only，不由Terraform local-exec调用，不接selfhost Playbooks；真实bootstrap/秘密访问暂停。官方provider源码无库内角色资源证据见controlled_roles/README.md；已安装版本schema尚未验证。
+
+调用者影响与迁移见contracts/database-provision-v1/COMPATIBILITY.md；当前无caller切换，无生产ready回执。

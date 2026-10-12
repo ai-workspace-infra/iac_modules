@@ -1,0 +1,119 @@
+name: AWS identity recovery owner
+description: Dedicated break-glass IAM recovery; not part of ordinary deployment or automatic adoption.
+inputs:
+  iac-root:
+    description: Fixed owner checkout
+    required: true
+  gitops-root:
+    description: Fixed declarations
+    required: true
+  manifest-path:
+    description: Tracked GitOps AWS OIDC declaration
+    required: true
+  private-dir:
+    description: Private runner recovery directory
+    required: true
+  action:
+    description: Explicit recovery plan/apply
+    required: true
+  environment:
+    description: uat/prod
+    required: true
+  allow-root-break-glass:
+    description: Explicit one-time recovery authorization; false by default
+    required: true
+  phase:
+    description: reconcile or finalize; finalize never repeats IAM changes
+    required: true
+  evidence-dir:
+    description: Sanitized recovery receipt directory
+    required: true
+outputs:
+  role_arn:
+    description: Declared runtime role
+    value: ${{ steps.contract.outputs.role_arn }}
+  result:
+    description: result
+    value: ${{ steps.final.outputs.result }}
+  iac_sha:
+    description: iac_sha
+    value: ${{ steps.final.outputs.iac_sha }}
+  gitops_sha:
+    description: gitops_sha
+    value: ${{ steps.final.outputs.gitops_sha }}
+  receipt_sha256:
+    description: receipt_sha256
+    value: ${{ steps.final.outputs.receipt_sha256 }}
+runs:
+  using: composite
+  steps:
+    - id: contract
+      shell: bash
+      env:
+        IAC_ROOT: ${{ inputs.iac-root }}
+        IAC_GITOPS_ROOT: ${{ inputs.gitops-root }}
+        IAC_MANIFEST: ${{ inputs.manifest-path }}
+        IAC_PRIVATE: ${{ inputs.private-dir }}
+        BOOTSTRAP_ACTION: ${{ inputs.action }}
+        DEPLOYMENT_ENV: ${{ inputs.environment }}
+        ALLOW_ROOT_BREAK_GLASS: ${{ inputs.allow-root-break-glass }}
+      run: |-
+        python3 - <<'PYCODE'
+        import json,os,sys
+        from pathlib import Path
+        sys.path.insert(0,str(Path(os.environ['IAC_ROOT'])/'scripts/pipeline'))
+        import yaml
+        from unified.contracts import checkout_sha,source_file,require,digest,write_json,output
+        root=Path(os.environ['IAC_GITOPS_ROOT']);path=source_file(root,os.environ['IAC_MANIFEST'])
+        data=yaml.safe_load(path.read_text())
+        require(data['metadata']['provider']=='aws' and data['metadata']['environment']==os.environ['DEPLOYMENT_ENV'],'AWS declaration mismatch')
+        private=Path(os.environ['IAC_PRIVATE']);private.mkdir(parents=True,exist_ok=True);private.chmod(0o700)
+        write_json(private/'oidc.json',data)
+        write_json(private/'context.json',{'schema_version':'aws-identity-recovery/v1','run_id':os.environ['GITHUB_RUN_ID'],'run_attempt':os.environ['GITHUB_RUN_ATTEMPT'],'gitops_sha':checkout_sha(root),'iac_sha':checkout_sha(os.environ['IAC_ROOT']),'manifest_sha256':digest(path),'environment':os.environ['DEPLOYMENT_ENV'],'account':data['spec']['aws']['account_id'],'action':os.environ['BOOTSTRAP_ACTION'],'verification':{'contract':True},'result':'failed'})
+        output({'role_arn':data['spec']['aws']['role_arn']})
+        PYCODE
+      if: inputs.phase == 'reconcile'
+    - name: Reconcile the declared AWS OIDC trust
+      shell: bash
+      env:
+        IAC_ROOT: ${{ inputs.iac-root }}
+        IAC_GITOPS_ROOT: ${{ inputs.gitops-root }}
+        IAC_MANIFEST: ${{ inputs.manifest-path }}
+        IAC_PRIVATE: ${{ inputs.private-dir }}
+        BOOTSTRAP_ACTION: ${{ inputs.action }}
+        DEPLOYMENT_ENV: ${{ inputs.environment }}
+        ALLOW_ROOT_BREAK_GLASS: ${{ inputs.allow-root-break-glass }}
+        GITOPS_AWS_OIDC_CONFIG: ${{ inputs.private-dir }}/oidc.json
+      run: bash "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/maintenance/aws/reconcile_github_oidc_trust.sh"
+      if: inputs.phase == 'reconcile'
+    - if: inputs.phase == 'finalize'
+      shell: bash
+      env:
+        IAC_ROOT: ${{ inputs.iac-root }}
+        GITOPS_ROOT: ${{ inputs.gitops-root }}
+        IAC_PRIVATE: ${{ inputs.private-dir }}
+        EVIDENCE: ${{ inputs.evidence-dir }}
+        ACTION: ${{ inputs.action }}
+      run: |-
+        python3 - <<'PYCODE'
+        import os,sys,shutil
+        from pathlib import Path
+        sys.path.insert(0,str(Path(os.environ['IAC_ROOT'])/'scripts/pipeline'))
+        from unified.contracts import checkout_sha,read_json,write_json,require,digest,output
+        from unified.auth import command_json
+        private=Path(os.environ['IAC_PRIVATE']);receipt=read_json(private/'context.json')
+        require(receipt['iac_sha']==checkout_sha(os.environ['IAC_ROOT']) and receipt['gitops_sha']==checkout_sha(os.environ['GITOPS_ROOT']),'recovery source changed')
+        require(receipt['action']==os.environ['ACTION'],'recovery action mismatch')
+        if os.environ['ACTION']=='apply':
+            identity=command_json(['aws','sts','get-caller-identity','--output','json'])
+            config=read_json(private/'oidc.json')['spec']['aws']
+            require(identity['Account']==config['account_id'] and identity['Arn'].startswith('arn:aws:sts::'+config['account_id']+':assumed-role/'+config['role_name']+'/'),'new OIDC identity is unverified')
+            receipt['verification']['runtime_identity']=True
+        receipt['result']='reconciled_verified' if os.environ['ACTION']=='apply' else 'planned'
+        shutil.rmtree(private)
+        receipt['verification']['cleanup']=True
+        write_json(Path(os.environ['EVIDENCE'])/'receipt.json',receipt)
+        output({k:receipt[k] for k in ('result','iac_sha','gitops_sha')})
+        output({'receipt_sha256':digest(Path(os.environ['EVIDENCE'])/'receipt.json')})
+        PYCODE
+      id: final

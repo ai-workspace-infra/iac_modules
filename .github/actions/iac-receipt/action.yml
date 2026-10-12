@@ -1,0 +1,30 @@
+name: iac-receipt
+description: GitOps-bound IaC owner action; delivery approvals and DAG belong to Toolkit.
+inputs:
+  evidence-dir:
+    description: Stage evidence directory
+    required: true
+  execution-result:
+    description: Owner step outcome
+    required: true
+  cleanup-result:
+    description: Cleanup step outcome
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: receipt
+      shell: bash
+      env:
+        IAC_EVIDENCE: ${{ inputs.evidence-dir }}
+        IAC_EXECUTION_RESULT: ${{ inputs.execution-result }}
+        IAC_CLEANUP_RESULT: ${{ inputs.cleanup-result }}
+      run: python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/unified_cli.py" receipt
+      id: receipt
+outputs:
+  result:
+    description: result
+    value: ${{ steps.receipt.outputs.result }}
+  receipt_sha256:
+    description: receipt_sha256
+    value: ${{ steps.receipt.outputs.receipt_sha256 }}

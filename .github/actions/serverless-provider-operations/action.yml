@@ -1,0 +1,61 @@
+name: Serverless Provider execution owner
+description: Execute only the allowlisted Cloud Run or Cloudflare deployment selected by Toolkit.
+inputs:
+  operation: {required: true, description: "registry-preflight, cloud-run, ssr, edge-worker, page-worker, static-pages, dashboard, pages, frontend-router, or edge-gateway"}
+  environment: {required: true, description: "Selected environment matching the GitOps declaration"}
+  release_ref: {required: true, description: "Immutable service release tag"}
+  gcp_declaration: {required: false, default: '', description: "Immutable GitOps GCP namespace for registry-preflight or cloud-run"}
+runs:
+  using: composite
+  steps:
+    - id: execute
+      shell: bash
+      env:
+        PROVIDER_OPERATION: ${{ inputs.operation }}
+        PROVIDER_ENVIRONMENT: ${{ inputs.environment }}
+        PROVIDER_RELEASE_REF: ${{ inputs.release_ref }}
+        PROVIDER_OWNER_SHA: ${{ github.action_ref }}
+        GCP_DECLARATION: ${{ inputs.gcp_declaration }}
+      run: |
+        set -euo pipefail
+        case "$PROVIDER_ENVIRONMENT" in sit|uat|prod) ;; *) exit 2 ;; esac
+        [[ "$PROVIDER_OWNER_SHA" =~ ^[0-9a-f]{40}$ && "$PROVIDER_RELEASE_REF" =~ ^(v|daily-build-)[0-9][A-Za-z0-9._-]*$ ]] || exit 2
+        jq -e --arg environment "$PROVIDER_ENVIRONMENT" \
+          '.kind == "EdgeRoutingConfig" and .metadata.environment == $environment' \
+          "${CLOUDFLARE_BOUNDARY_CONFIG:?}" >/dev/null
+        export DEPLOY_ENV="$PROVIDER_ENVIRONMENT" CLOUDFLARE_ENV="$PROVIDER_ENVIRONMENT"
+        if [[ "$PROVIDER_OPERATION" == cloud-run || "$PROVIDER_OPERATION" == registry-preflight ]]; then
+          yq -o=json '.' "${GCP_DECLARATION:?}" | jq -e \
+            --arg environment "$PROVIDER_ENVIRONMENT" --arg project "${GCP_PROJECT_ID:?}" --arg region "${GCP_REGION:?}" \
+            '.global.environment == $environment and .global.project_id == $project and .global.region == $region' >/dev/null
+        fi
+        case "$PROVIDER_OPERATION" in
+          registry-preflight) script=serverless-registry-preflight.sh ;;
+          cloud-run) script=deploy-cloudrun-services.sh ;;
+          ssr|edge-worker|page-worker) script=deploy-portal-opennext-worker.sh ;;
+          static-pages|dashboard|pages) script=deploy-cloudflare-pages.sh ;;
+          frontend-router) script=deploy-frontend-router.sh ;;
+          edge-gateway) script=deploy-cloudflare-worker.sh ;;
+          *) echo '::error::Unregistered Provider operation'; exit 2 ;;
+        esac
+        bash "$GITHUB_ACTION_PATH/../../../scripts/pipeline/$script"
+        case "$PROVIDER_OPERATION" in
+          cloud-run|registry-preflight) target="${CLOUD_RUN_SERVICE:?}" ;;
+          ssr|edge-worker|page-worker) target="${PORTAL_SSR_BOUNDARY:?}" ;;
+          edge-gateway) target="${EDGE_GATEWAY_BOUNDARY:?}" ;;
+          *) target="$PROVIDER_OPERATION" ;;
+        esac
+        receipt_dir="$(mktemp -d "$RUNNER_TEMP/provider-receipt.XXXXXX")"
+        jq -n --arg operation "$PROVIDER_OPERATION" --arg target "$target" \
+          --arg environment "$PROVIDER_ENVIRONMENT" --arg release "$PROVIDER_RELEASE_REF" \
+          --arg owner "$PROVIDER_OWNER_SHA" --arg run "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" \
+          '{schema:1,accepted:true,scope:"provider-operation",owner_repository:"ai-workspace-infra/iac_modules",
+            owner_commit:$owner,run_id:$run,run_attempt:$attempt,environment:$environment,release_ref:$release,
+            operation:$operation,target:$target}' > "$receipt_dir/receipt.json"
+        printf 'receipt=%s\nname=owner-receipt-provider-%s-%s\n' "$receipt_dir/receipt.json" "$PROVIDER_OPERATION" "$target" >> "$GITHUB_OUTPUT"
+    - uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.execute.outputs.name }}
+        path: ${{ steps.execute.outputs.receipt }}
+        if-no-files-found: error
+        retention-days: 7

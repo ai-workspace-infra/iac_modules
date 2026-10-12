@@ -7,12 +7,19 @@ import json
 import os
 import re
 import subprocess
+import urllib.parse
+import urllib.request
+import urllib.error
 from pathlib import Path
+import sys
 
 import yaml
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT.parent / "scripts"))
+from cmdb_v1 import make_document, write_document  # noqa: E402
+
 TEMPLATES = ROOT / "templates"
 GITOPS_ROOT = Path(os.environ.get("GITOPS_ROOT", ROOT.parents[2] / "gitops"))
 DEFAULT_RESOURCES = GITOPS_ROOT / "resources" / "xworktech.com" / "uat" / "gcp" / "open-platform-uat.yaml"
@@ -86,6 +93,7 @@ def normalize_resources(document):
         "xconnect_mode": spec.get("xconnect_mode", "gateway"),
         "ssh_source_ranges": spec.get("ssh_source_ranges", []),
         "external_ip_allowed_instances": spec.get("external_ip_allowed_instances", []),
+        "external_ip_policy_parent_identity": spec.get("external_ip_policy_parent_identity", "project_id"),
         "manage_external_ip_policy": spec.get("manage_external_ip_policy", True),
         "spot_ssh_source_ranges": spec.get("spot_ssh_source_ranges", []),
         "spot_network_tags": spec.get("spot_network_tags", []),
@@ -214,8 +222,19 @@ def normalize_resources(document):
                 raise SystemExit("VM data_disk.mount_path must be /data")
             if not re.fullmatch(r"[a-z][a-z0-9-]{0,61}[a-z0-9]", str(data_disk.get("device_name", ""))):
                 raise SystemExit("VM data_disk.device_name must be a stable GCP device name")
-        if model == "STANDARD" and (not vm.get("deletion_protection") or data_disk is None):
-            raise SystemExit("STANDARD service VMs require deletion_protection and data_disk")
+        # Durable storage may be the original inline disk or separately managed
+        # retained disks. Validate retained declarations below before returning;
+        # never translate their existing module addresses into an inline disk.
+        retained_disks = global_config["persistent_data_disks"]
+        has_retained_disk = isinstance(retained_disks, list) and any(
+            isinstance(disk, dict) and disk.get("instance") == vm["name"]
+            and disk.get("zone") == vm["zone"] and disk.get("mount_path") == "/data"
+            for disk in retained_disks
+        )
+        if model == "STANDARD" and (
+            not vm.get("deletion_protection") or (data_disk is None and not has_retained_disk)
+        ):
+            raise SystemExit("STANDARD service VMs require deletion_protection and durable /data storage")
         if model == "STANDARD" and "max_run_duration_seconds" in vm:
             raise SystemExit("STANDARD service VMs must not have max_run_duration_seconds")
         if vm.get("public_ip") and not global_config.get("spot_ssh_source_ranges"):
@@ -450,11 +469,15 @@ def render(args):
         keep_trailing_newline=True,
     )
     env.filters["tf_id"] = tf_id
+    policy_parent_identity = global_config.get("external_ip_policy_parent_identity", "project_id")
+    if policy_parent_identity not in {"project_id", "project_number"}:
+        raise SystemExit("external_ip_policy_parent_identity must be project_id or project_number")
     content = env.get_template("open-platform.tf.j2").render(
         environment=global_config["environment"],
         vault_nodes=nodes,
         external_ip_allowed_instances=global_config.get("external_ip_allowed_instances", []),
         manage_external_ip_policy=global_config.get("manage_external_ip_policy", True),
+        external_ip_policy_parent_identity=policy_parent_identity,
         spot_vms=spot_vms,
         persistent_data_disks=persistent_data_disks,
         cloud_run_services=cloud_run_services,
@@ -522,14 +545,107 @@ def render(args):
     print(f"rendered {args.resources} -> {workdir}")
 
 
-def oslogin_username():
-    """Return the deploy principal's OS Login POSIX user from the environment.
+def get_oslogin_profile(project_id, deploy_account):
+    """Read the project-scoped API profile using this run's WIF token only.
 
-    The deployer registers its SSH key in its own OS Login profile before
-    rendering the inventory and exports the resolved username; Terraform
-    state does not know it.
+    gcloud describe-profile calls GetLoginProfile without projectId even when
+    --project is set. A new principal can therefore return no POSIX accounts.
+    Use the API's explicit projectId instead of guessing a username. A missing
+    first-time profile is initialized separately with an unused one-minute
+    public key, revoked before inventory can be accepted.
     """
-    username = os.environ.get("GCP_OSLOGIN_USERNAME", "").strip()
+    token = subprocess.check_output(
+        ["gcloud", "auth", "print-access-token", f"--account={deploy_account}"],
+        text=True, stderr=subprocess.DEVNULL, timeout=60,
+    ).strip()
+    if not token or re.search(r"\s", token):
+        raise ValueError("invalid runtime token")
+    url = ("https://oslogin.googleapis.com/v1/users/"
+           + urllib.parse.quote(deploy_account, safe="") + "/loginProfile?"
+           + urllib.parse.urlencode({"projectId": project_id}))
+    request = urllib.request.Request(url, headers={"Authorization": "Bearer " + token}, method="GET")
+    with urllib.request.urlopen(request, timeout=15) as response:
+        return json.load(response)
+
+
+def oslogin_username(project_id=None, deploy_account=None):
+    """Resolve the WIF deployer's POSIX user, initializing a missing profile.
+
+    Host deployment may supply its previously verified username. Resource-only
+    callers instead query the exact runtime service account's OS Login profile;
+    they never select a personal account or mint another credential.
+    """
+    username = os.environ.get("GCP_OSLOGIN_USERNAME")
+    if username is None:
+        if not re.fullmatch(r"[a-z][a-z0-9-]{4,28}[a-z0-9]", str(project_id)) or not re.fullmatch(
+            r"[a-z][a-z0-9-]{4,28}[a-z0-9]@" + re.escape(str(project_id)) + r"\.iam\.gserviceaccount\.com",
+            str(deploy_account),
+        ):
+            raise SystemExit("OS Login inventory requires a verified runtime project and deploy service account")
+        # google-github-actions/auth supplies ADC and a credential-file override,
+        # but does not necessarily register a gcloud account. OS Login addresses
+        # a user's profile and therefore needs that same WIF account activated,
+        # as the existing register-gcp-oslogin-key.sh owner already does.
+        credential_file = os.environ.get("GOOGLE_GHA_CREDS_PATH", "")
+        if credential_file:
+            try:
+                credential = json.loads(Path(credential_file).read_text())
+                expected_url = (
+                    "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/"
+                    + deploy_account + ":generateAccessToken"
+                )
+                if not isinstance(credential, dict) or credential.get("type") != "external_account" or (
+                    credential.get("service_account_impersonation_url") != expected_url
+                ):
+                    raise ValueError("WIF principal differs")
+                subprocess.run(
+                    ["gcloud", "--quiet", "auth", "login", f"--cred-file={credential_file}"],
+                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60,
+                )
+            except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+                raise SystemExit("Cannot activate the exact runtime service account's GitHub WIF credential") from None
+        try:
+            profile = get_oslogin_profile(project_id, deploy_account)
+            # A first-time service account has no POSIX profile until import.
+            # Only initialize an absent account list, under the exact WIF
+            # contract already verified above. Existing/ambiguous profiles and
+            # HTTP failures must never trigger registration or permission changes.
+            if isinstance(profile, dict) and (
+                "posixAccounts" not in profile or profile.get("posixAccounts") == []
+            ) and credential_file:
+                try:
+                    subprocess.run(
+                        ["bash", str(ROOT.parents[1] / "scripts/pipeline/initialize-gcp-oslogin-profile.sh"),
+                         project_id, deploy_account],
+                        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=75,
+                    )
+                except (OSError, subprocess.SubprocessError):
+                    raise SystemExit("Bounded runtime OS Login profile initialization or temporary key revocation failed") from None
+                profile = get_oslogin_profile(project_id, deploy_account)
+            if not isinstance(profile, dict) or not isinstance(profile.get("posixAccounts"), list):
+                raise SystemExit("Cannot resolve unique Linux OS Login username: profile has no POSIX account list")
+            names = {
+                item.get("username") for item in profile["posixAccounts"]
+                if isinstance(item, dict) and item.get("operatingSystemType") == "LINUX"
+                and isinstance(item.get("username"), str)
+            }
+            if len(names) != 1:
+                raise SystemExit(
+                    "Cannot resolve unique Linux OS Login username: "
+                    f"linux_account_count={len(names)} total_account_count={len(profile['posixAccounts'])}"
+                )
+            username = names.pop()
+            if not re.fullmatch(r"sa_[0-9]+", username):
+                raise SystemExit("Cannot resolve unique Linux OS Login username: service-account username format differs")
+        except urllib.error.HTTPError as exc:
+            raise SystemExit(f"OS Login profile API request failed: HTTP {exc.code}") from None
+        except subprocess.SubprocessError:
+            raise SystemExit("OS Login profile query failed for the exact authenticated runtime service account") from None
+        except OSError as exc:
+            raise SystemExit(f"OS Login profile transport failed: {type(exc).__name__}") from None
+        except (ValueError, TypeError):
+            raise SystemExit("Cannot resolve the runtime service account's unique Linux OS Login username") from None
+    username = username.strip()
     if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", username):
         raise SystemExit("OS Login Spot VMs require GCP_OSLOGIN_USERNAME from the deploy principal's profile")
     return username
@@ -544,7 +660,10 @@ def inventory(args):
         text=True,
     )
     runtime = json.loads(raw)
+    if runtime.get("project_id") != global_config["project_id"]:
+        raise SystemExit("Terraform runtime project differs from the resource declaration")
     environment = global_config["environment"]
+    host_records = {}
     cmdb = {
         "environment": environment,
         "project_id": runtime.get("project_id"),
@@ -566,14 +685,25 @@ def inventory(args):
         ansible_host = public_ip or private_ip
         if not ansible_host:
             raise SystemExit(f"Vault VM {node['name']} has no reachable IP for deployment")
-        cmdb["vault_nodes"].append({
+        vault_record = {
             "name": node["name"],
+            "fqdn": node.get("service_domain", node["name"]),
+            "ip": ansible_host,
             "zone": node["zone"],
             "private_ip": private_ip,
             "public_ip": public_ip,
+            "resource_id": runtime.get("vault_self_links", {}).get(node["name"]),
             "ansible_host": ansible_host,
             "ansible_user": global_config.get("ssh_username", "github-actions"),
-        })
+            "cloud_provider": "gcp-cloud",
+            "cloud_region": global_config.get("region", ""),
+            "project_id": runtime.get("project_id"),
+            "groups": node.get("inventory_groups", ["vault"]),
+            "tags": node.get("tags", []) or [],
+            "host_vars": dict(node.get("host_vars") or {}),
+        }
+        cmdb["vault_nodes"].append(vault_record)
+        host_records[node["name"]] = vault_record
     for vm in spot_vms:
         facts = runtime.get("spot_instances", {}).get(vm["name"], {})
         public_ip = facts.get("public_ip")
@@ -592,20 +722,24 @@ def inventory(args):
         inventory_name = spot_inventory_name(vm)
         if inventory_name in cmdb:
             raise SystemExit(f"Spot VM inventory name {inventory_name} collides with a CMDB platform key")
-        cmdb[inventory_name] = {
+        spot_record = {
             "name": vm["name"],
             "fqdn": inventory_name,
             "ip": address,
             "private_ip": private_ip,
             "public_ip": public_ip,
             "zone": facts.get("zone", vm["zone"]),
+            "resource_id": facts.get("self_link"),
             "ansible_user": (
-                oslogin_username()
+                oslogin_username(runtime.get("project_id"), runtime.get("deploy_account"))
                 if vm.get("enable_oslogin")
                 else global_config.get("ssh_username", "github-actions")
             ),
             "groups": vm.get("inventory_groups", []),
             "provider": "gcp-cloud",
+            "cloud_provider": "gcp-cloud",
+            "cloud_region": global_config.get("region", ""),
+            "project_id": runtime.get("project_id"),
             "provisioning_model": facts.get("provisioning_model"),
             "iap_tunnel": not vm.get("public_ip") and global_config.get("enable_iap_ssh", False),
             "node_id": host_vars["node_id"],
@@ -613,6 +747,8 @@ def inventory(args):
             "tags": vm.get("tags", []) or [],
             "host_vars": host_vars if vm.get("host_vars") else {},
         }
+        cmdb[inventory_name] = spot_record
+        host_records[inventory_name] = spot_record
         if vm.get("data_disk"):
             disk_id = facts.get("data_disk_id")
             if not disk_id:
@@ -622,6 +758,7 @@ def inventory(args):
                 "device_name": facts.get("data_disk_device_name"),
                 "mount_path": vm["data_disk"]["mount_path"],
             }
+            host_records[inventory_name]["data_disk"] = cmdb[inventory_name]["data_disk"]
         declared_persistent_disks = [
             disk for disk in global_config.get("persistent_data_disks", [])
             if disk["instance"] == vm["name"]
@@ -647,7 +784,18 @@ def inventory(args):
                     "mount_path": disk["mount_path"],
                     "management": "google_compute_attached_disk",
                 })
-    (workdir / "cmdb.json").write_text(json.dumps(cmdb, indent=2) + "\n", encoding="utf-8")
+            host_records[inventory_name]["persistent_data_disks"] = cmdb[inventory_name]["persistent_data_disks"]
+    write_document(
+        workdir / "cmdb.json",
+        make_document(
+            host_records,
+            cloud_provider="gcp-cloud",
+            resource_paths=str(args.resources),
+            project_id=runtime.get("project_id"),
+            environment=environment,
+            legacy=cmdb,
+        ),
+    )
     lines = ["[vault]"]
     lines.extend(
         f"{node['name']} ansible_host={node['ansible_host']} ansible_user={node['ansible_user']}"

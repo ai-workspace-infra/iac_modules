@@ -1,0 +1,81 @@
+name: iac-targets
+description: GitOps-bound IaC owner action; delivery approvals and DAG belong to Toolkit.
+inputs:
+  iac-root:
+    description: Pinned owner source checkout
+    required: true
+  gitops-root:
+    description: Pinned GitOps checkout
+    required: true
+  target-manifest:
+    description: GitOps IaCPipelineTargets path
+    required: true
+  environment:
+    description: Declared environment selector
+    required: true
+  action:
+    description: check/plan/apply/destroy
+    required: true
+  stage-scope:
+    description: all/bootstrap/account/resources
+    required: true
+  bootstrap-mode:
+    description: verify/reconcile
+    required: true
+  gitops-ref:
+    description: Requested declaration ref
+    required: true
+  iac-ref:
+    description: Requested owner ref
+    required: true
+  correlation-id:
+    description: Parent correlation value
+    required: true
+  contract-file:
+    description: Output validated contract file
+    required: true
+  selectors:
+    description: Legacy selectors as JSON; mismatches fail
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install exact renderer dependencies
+      shell: bash
+      run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.2 Jinja2==3.1.6
+    - name: prepare
+      shell: bash
+      env:
+        IAC_ROOT: ${{ inputs.iac-root }}
+        IAC_GITOPS_ROOT: ${{ inputs.gitops-root }}
+        IAC_MANIFEST: ${{ inputs.target-manifest }}
+        IAC_ENVIRONMENT: ${{ inputs.environment }}
+        IAC_ACTION: ${{ inputs.action }}
+        IAC_SCOPE: ${{ inputs.stage-scope }}
+        IAC_BOOTSTRAP_MODE: ${{ inputs.bootstrap-mode }}
+        IAC_GITOPS_REF: ${{ inputs.gitops-ref }}
+        IAC_REF: ${{ inputs.iac-ref }}
+        IAC_CORRELATION: ${{ inputs.correlation-id }}
+        IAC_CONTRACT: ${{ inputs.contract-file }}
+        IAC_SELECTORS: ${{ inputs.selectors }}
+      run: python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/unified_cli.py" prepare
+      id: prepare
+outputs:
+  gitops_sha:
+    description: gitops_sha
+    value: ${{ steps.prepare.outputs.gitops_sha }}
+  iac_sha:
+    description: iac_sha
+    value: ${{ steps.prepare.outputs.iac_sha }}
+  contract_sha256:
+    description: contract_sha256
+    value: ${{ steps.prepare.outputs.contract_sha256 }}
+  github_environment:
+    description: github_environment
+    value: ${{ steps.prepare.outputs.github_environment }}
+  correlation_id:
+    description: correlation_id
+    value: ${{ steps.prepare.outputs.correlation_id }}
+  targets:
+    description: targets
+    value: ${{ steps.prepare.outputs.targets }}

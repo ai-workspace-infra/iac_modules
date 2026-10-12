@@ -1,0 +1,58 @@
+name: IaC entry summary
+description: Verify exact current-run static report or master evidence after every predecessor settles.
+inputs:
+  needs-json:
+    description: needs-json
+    required: true
+  iac-root:
+    description: iac-root
+    required: true
+  report-file:
+    description: report-file
+    required: true
+  summary-file:
+    description: summary-file
+    required: true
+  target-manifest:
+    description: target-manifest
+    required: true
+  correlation-id:
+    description: correlation-id
+    required: true
+outputs:
+  result:
+    description: result
+    value: ${{ steps.verify.outputs.result }}
+  gitops_sha:
+    description: gitops_sha
+    value: ${{ steps.verify.outputs.gitops_sha }}
+  iac_sha:
+    description: iac_sha
+    value: ${{ steps.verify.outputs.iac_sha }}
+  receipt_sha256:
+    description: receipt_sha256
+    value: ${{ steps.verify.outputs.receipt_sha256 }}
+  receipt_artifact_id:
+    description: receipt_artifact_id
+    value: ${{ steps.verify.outputs.receipt_artifact_id }}
+  inventory_artifact_id:
+    description: inventory_artifact_id
+    value: ${{ steps.verify.outputs.inventory_artifact_id }}
+  deploy_matrix:
+    description: deploy_matrix
+    value: ${{ steps.verify.outputs.deploy_matrix }}
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.2 Jinja2==3.1.6
+    - id: verify
+      shell: bash
+      env:
+        IAC_NEEDS: ${{ inputs.needs-json }}
+        IAC_ROOT: ${{ inputs.iac-root }}
+        IAC_REPORT: ${{ inputs.report-file }}
+        IAC_SUMMARY: ${{ inputs.summary-file }}
+        IAC_MANIFEST: ${{ inputs.target-manifest }}
+        IAC_CORRELATION: ${{ inputs.correlation-id }}
+      run: python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/unified_cli.py" entry-summary

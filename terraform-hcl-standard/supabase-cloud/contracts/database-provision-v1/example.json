@@ -1,0 +1,114 @@
+{
+  "apiVersion": "DatabaseProvisionSpec/v1",
+  "identity": {
+    "env": "fixture",
+    "instance": "isolated",
+    "database": "example"
+  },
+  "backend": "self_managed_postgresql",
+  "mode": "adopt_existing",
+  "operation": "roles",
+  "operation_id": "fixture-operation-001",
+  "repository_shas": {
+    "playbooks": "39140812fc4725694fcd022b4894726b5a3b49d4",
+    "iac_modules": "df3fd7a4d20e8983442e0aa50f9ad4101f929c81"
+  },
+  "tls": {
+    "mode": "verify-full",
+    "ca_ref": "fixture/ca"
+  },
+  "safety": {
+    "strict_no_secret_state": true,
+    "allow_rotation": false,
+    "allow_rebuild": false,
+    "allow_delete": false,
+    "allow_cutover": false,
+    "allow_engine_change": false,
+    "explicit_adoption": true
+  },
+  "vault": {
+    "auth_ref": "oidc/fixture",
+    "mount": "kv",
+    "publication": "staging_validate_active"
+  },
+  "roles": [
+    {
+      "name": "example_dba",
+      "purpose": "dba",
+      "login": true,
+      "dsn_secret_ref": {
+        "kind": "kv_v2",
+        "mount": "kv",
+        "path": "fixture/databases/isolated/example/dba",
+        "field": "dsn",
+        "expected_version": 0
+      }
+    },
+    {
+      "name": "example_runtime",
+      "purpose": "runtime",
+      "login": true,
+      "dsn_secret_ref": {
+        "kind": "kv_v2",
+        "mount": "kv",
+        "path": "fixture/databases/isolated/example/runtime",
+        "field": "dsn",
+        "expected_version": 0
+      }
+    },
+    {
+      "name": "example_ddl_migrator",
+      "purpose": "ddl_migrator",
+      "login": true,
+      "dsn_secret_ref": {
+        "kind": "kv_v2",
+        "mount": "kv",
+        "path": "fixture/databases/isolated/example/ddl_migrator",
+        "field": "dsn",
+        "expected_version": 0
+      }
+    },
+    {
+      "name": "example_readonly_export",
+      "purpose": "readonly_export",
+      "login": true,
+      "dsn_secret_ref": {
+        "kind": "kv_v2",
+        "mount": "kv",
+        "path": "fixture/databases/isolated/example/readonly_export",
+        "field": "dsn",
+        "expected_version": 0
+      }
+    },
+    {
+      "name": "example_readonly_audit",
+      "purpose": "readonly_audit",
+      "login": true,
+      "dsn_secret_ref": {
+        "kind": "kv_v2",
+        "mount": "kv",
+        "path": "fixture/databases/isolated/example/readonly_audit",
+        "field": "dsn",
+        "expected_version": 0
+      }
+    },
+    {
+      "name": "example_monitor",
+      "purpose": "monitor",
+      "login": true,
+      "dsn_secret_ref": {
+        "kind": "kv_v2",
+        "mount": "kv",
+        "path": "fixture/databases/isolated/example/monitor",
+        "field": "dsn",
+        "expected_version": 0
+      }
+    },
+    {
+      "name": "example_owner",
+      "purpose": "owner",
+      "login": false,
+      "dsn_secret_ref": null
+    }
+  ]
+}

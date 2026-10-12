@@ -1,0 +1,225 @@
+name: GCP node access owner
+description: >-
+  Authenticate to the caller-selected GCP project, reconcile one-run OS Login
+  access, scope temporary SSH ingress to the runner /32, discover cloud facts,
+  and emit the provider-neutral NodeDeployment contract.
+
+inputs:
+  phase:
+    description: open (identity, discovery and temporary access) or close (verified revocation)
+    required: true
+  contract_mode:
+    description: target resolves the declared Vault node set; source resolves the reviewed migration source
+    required: false
+    default: target
+  source_config:
+    description: Source GCP adapter JSON emitted by the declaration resolver
+    required: false
+    default: '{}'
+  provider_config:
+    description: GCP provider_config JSON selected and authorized by Toolkit
+    required: true
+  service_manifest:
+    description: Vault service declaration path inside the GitOps checkout
+    required: false
+    default: ''
+  provider_manifest:
+    description: GCPWorkloadNamespace declaration path inside the GitOps checkout
+    required: false
+    default: ''
+  xconnect_topology:
+    description: XConnect topology path inside the GitOps checkout
+    required: false
+    default: ''
+  connection_mode:
+    description: Reviewed bootstrap-public or xconnect-zero access mode
+    required: true
+  work_dir:
+    description: Private runner directory for access and discovery facts
+    required: true
+  ssh_key:
+    description: Existing one-run private key whose public half is registered with OS Login
+    required: true
+  identity_provider:
+    description: GCP Workload Identity Provider loaded by the Toolkit Vault boundary
+    required: true
+  service_account:
+    description: GCP service account loaded by the Toolkit Vault boundary
+    required: true
+  audience:
+    description: GCP WIF audience loaded by the Toolkit Vault boundary
+    required: true
+  credential_project_id:
+    description: GCP project ID loaded by the Toolkit Vault boundary
+    required: true
+
+outputs:
+  contract:
+    description: Validated NodeDeployment JSON path
+    value: ${{ steps.resolve.outputs.contract }}
+  ssh_private_key:
+    description: One-run private key path registered with OS Login
+    value: ${{ steps.access.outputs.private_key }}
+  auth_adapter:
+    description: Credential adapter prepared by this owner action
+    value: gcp-oslogin-ephemeral
+
+runs:
+  using: composite
+  steps:
+    - name: Validate the GCP target and access identity
+      id: config
+      shell: bash
+      env:
+        PROVIDER_CONFIG: ${{ inputs.provider_config }}
+        SOURCE_CONFIG: ${{ inputs.source_config }}
+        CONTRACT_MODE: ${{ inputs.contract_mode }}
+        CONNECTION_MODE: ${{ inputs.connection_mode }}
+        PHASE: ${{ inputs.phase }}
+        CREDENTIAL_PROJECT_ID: ${{ inputs.credential_project_id }}
+        PROVIDER_MANIFEST: ${{ inputs.provider_manifest }}
+      run: |
+        set -euo pipefail
+        [[ "${PHASE}" == open || "${PHASE}" == close ]] || { echo '::error::phase must be open or close' >&2; exit 1; }
+        [[ "${CONTRACT_MODE}" == target || "${CONTRACT_MODE}" == source ]] || { echo '::error::contract_mode must be target or source' >&2; exit 1; }
+        [[ "${CONNECTION_MODE}" == bootstrap-public || "${CONNECTION_MODE}" == xconnect-zero ]] || {
+          echo '::error::connection_mode must be bootstrap-public or xconnect-zero' >&2; exit 1;
+        }
+        jq -e '.provider == "gcp-cloud"' <<<"${PROVIDER_CONFIG}" >/dev/null || {
+          echo '::error::provider_config does not belong to gcp-cloud' >&2; exit 1;
+        }
+        for field in environment project_id network_name; do
+          value="$(jq -er --arg field "${field}" '.[$field]' <<<"${PROVIDER_CONFIG}")"
+          [[ "${value}" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::invalid GCP adapter field ${field}" >&2; exit 1; }
+          echo "${field}=${value}" >> "${GITHUB_OUTPUT}"
+        done
+        project_id="$(jq -er .project_id <<<"${PROVIDER_CONFIG}")"
+        [[ "${project_id}" == "${CREDENTIAL_PROJECT_ID}" ]] || {
+          echo '::error::Vault runtime identity belongs to another GCP project' >&2; exit 1;
+        }
+        echo "temp_rule=vault-$(jq -er .environment <<<"${PROVIDER_CONFIG}")-${CONTRACT_MODE}-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
+        if [[ "${PHASE}" == open ]]; then
+          if [[ "${CONTRACT_MODE}" == source ]]; then
+            jq -e . <<<"${SOURCE_CONFIG}" >/dev/null
+            echo "instance=$(jq -er .source_id <<<"${SOURCE_CONFIG}")" >> "${GITHUB_OUTPUT}"
+            echo "zone=$(jq -er .source_zone <<<"${SOURCE_CONFIG}")" >> "${GITHUB_OUTPUT}"
+          else
+            [[ -n "${PROVIDER_MANIFEST}" && -f "gitops/${PROVIDER_MANIFEST}" ]] || {
+              echo '::error::provider_manifest is required for target access' >&2; exit 1;
+            }
+            python3 - "gitops/${PROVIDER_MANIFEST}" "${GITHUB_OUTPUT}" <<'PY'
+        import sys
+        from pathlib import Path
+        import yaml
+
+        document = yaml.safe_load(Path(sys.argv[1]).read_text(encoding="utf-8"))
+        nodes = document.get("spec", {}).get("resources", {}).get("vault_nodes", [])
+        if not nodes or not nodes[0].get("name") or not nodes[0].get("zone"):
+            raise SystemExit("::error::provider_manifest has no declared GCP Vault node")
+        with Path(sys.argv[2]).open("a", encoding="utf-8") as output:
+            output.write(f"instance={nodes[0]['name']}\nzone={nodes[0]['zone']}\n")
+        PY
+          fi
+        fi
+
+    - name: Exchange the authorized identity through Google WIF
+      uses: ./iac_modules/.github/actions/auth-gcp-cloud
+      with:
+        provider: ${{ inputs.identity_provider }}
+        service-account: ${{ inputs.service_account }}
+        audience: ${{ inputs.audience }}
+        reconcile: 'false'
+        cleanup-credentials: 'true'
+        load-state-contract: 'false'
+
+    - name: Open strict one-run GCP access
+      id: access
+      if: inputs.phase == 'open'
+      shell: bash
+      env:
+        GCP_PROJECT_ID: ${{ steps.config.outputs.project_id }}
+        GCP_ZONE: ${{ steps.config.outputs.zone }}
+        GCP_INSTANCE: ${{ steps.config.outputs.instance }}
+        GCP_NETWORK: ${{ steps.config.outputs.network_name }}
+        ACCESS_RULE_NAME: ${{ steps.config.outputs.temp_rule }}
+        ACCESS_DIR: ${{ inputs.work_dir }}
+        SSH_KEY_PATH: ${{ inputs.ssh_key }}
+        OSLOGIN_KEY_TTL: 65m
+        TARGET_TAGS: vault
+        ENSURE_RUNNING: 'false'
+        OPEN_FIREWALL: ${{ inputs.connection_mode == 'bootstrap-public' }}
+      run: |
+        set -euo pipefail
+        owner_root="$(cd "${GITHUB_ACTION_PATH}/../../.." && pwd)"
+        "${owner_root}/scripts/pipeline/gcp-temporary-ssh-access.sh" open
+
+    - name: Discover GCP facts and render NodeDeployment
+      id: resolve
+      if: inputs.phase == 'open'
+      shell: bash
+      env:
+        WORK_DIR: ${{ inputs.work_dir }}
+        GCP_PROJECT_ID: ${{ steps.config.outputs.project_id }}
+        DEPLOY_ENVIRONMENT: ${{ steps.config.outputs.environment }}
+        SSH_USER: ${{ steps.access.outputs.ssh_user }}
+        SERVICE_MANIFEST: ${{ inputs.service_manifest }}
+        PROVIDER_MANIFEST: ${{ inputs.provider_manifest }}
+        XCONNECT_TOPOLOGY: ${{ inputs.xconnect_topology }}
+        CONNECTION_MODE: ${{ inputs.connection_mode }}
+        CONTRACT_MODE: ${{ inputs.contract_mode }}
+        SOURCE_CONFIG: ${{ inputs.source_config }}
+      run: |
+        set -euo pipefail
+        owner_root="$(cd "${GITHUB_ACTION_PATH}/../../.." && pwd)"
+        contract="${WORK_DIR}/nodes.json"
+        gcloud compute instances list --project="${GCP_PROJECT_ID}" --format=json > "${WORK_DIR}/instances.json"
+        gcloud compute firewall-rules list --project="${GCP_PROJECT_ID}" --format=json > "${WORK_DIR}/firewalls.json"
+        if [[ "${CONTRACT_MODE}" == source ]]; then
+          source_config="${WORK_DIR}/source-config.json"
+          jq -e . <<<"${SOURCE_CONFIG}" > "${source_config}"
+          python3 "${owner_root}/scripts/node_deploy/resolve_gcp_vault_source.py" \
+            --config "${source_config}" --instances "${WORK_DIR}/instances.json" \
+            --ssh-user "${SSH_USER}" --output "${contract}"
+        else
+          python3 "${owner_root}/scripts/node_deploy/resolve_gcp_vault.py" \
+            --manifest "gitops/${PROVIDER_MANIFEST}" \
+            --service-manifest "gitops/${SERVICE_MANIFEST}" \
+            --instances "${WORK_DIR}/instances.json" \
+            --firewalls "${WORK_DIR}/firewalls.json" \
+            --project-id "${GCP_PROJECT_ID}" \
+            --environment "${DEPLOY_ENVIRONMENT}" \
+            --ssh-user "${SSH_USER}" \
+            --xconnect-topology "gitops/${XCONNECT_TOPOLOGY}" \
+            --output "${contract}"
+        fi
+        jq -e --arg mode "${CONNECTION_MODE}" '.spec.connection.mode == $mode' "${contract}" >/dev/null || {
+          echo '::error::resolved NodeDeployment connection mode differs from the authorized caller mode' >&2; exit 1;
+        }
+        if [[ "${CONNECTION_MODE}" == xconnect-zero ]] && jq -e 'any(.spec.nodes[]; has("overlay_address"))' "${contract}" >/dev/null; then
+          python3 - "${contract}" <<'PY'
+        import json
+        import socket
+        import sys
+        from pathlib import Path
+
+        nodes = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))["spec"]["nodes"]
+        for node in nodes:
+            resolved = {item[4][0] for item in socket.getaddrinfo(node["address"], 22, family=socket.AF_INET)}
+            if node["overlay_address"] not in resolved:
+                raise SystemExit(f"{node['id']} internal DNS does not resolve to its assigned overlay IP")
+        PY
+        fi
+        echo "contract=${contract}" >> "${GITHUB_OUTPUT}"
+
+    - name: Close and verify one-run GCP access
+      if: inputs.phase == 'close'
+      shell: bash
+      env:
+        GCP_PROJECT_ID: ${{ steps.config.outputs.project_id }}
+        ACCESS_RULE_NAME: ${{ steps.config.outputs.temp_rule }}
+        ACCESS_DIR: ${{ inputs.work_dir }}
+        SSH_KEY_PATH: ${{ inputs.ssh_key }}
+      run: |
+        set -euo pipefail
+        owner_root="$(cd "${GITHUB_ACTION_PATH}/../../.." && pwd)"
+        "${owner_root}/scripts/pipeline/gcp-temporary-ssh-access.sh" close

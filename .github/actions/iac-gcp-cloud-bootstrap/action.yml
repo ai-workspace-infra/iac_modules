@@ -1,0 +1,100 @@
+name: GCP bootstrap lifecycle and credential owner
+description: Saved Terraform plan, runtime WIF verification, metadata publication and fail-closed cleanup.
+inputs:
+  target-contract-file:
+    description: Prepared exact GitOps contract path
+    required: true
+  target-id:
+    description: Declared target ID
+    required: true
+  iac-root:
+    description: Pinned IaC checkout root
+    required: true
+  gitops-root:
+    description: Pinned GitOps checkout root
+    required: true
+  evidence-dir:
+    description: Public sanitized stage evidence directory
+    required: true
+  private-dir:
+    description: Private ephemeral runner directory
+    required: true
+  dependencies-dir:
+    description: Downloaded predecessor receipts directory
+    required: true
+  reconcile:
+    description: reconcile
+    required: true
+  provider-resource:
+    description: provider-resource
+    required: true
+  service-account:
+    description: service-account
+    required: true
+  audience:
+    description: audience
+    required: true
+runs:
+  using: composite
+  steps:
+    - id: execute
+      uses: ./iac_modules/.github/actions/iac-terraform-lifecycle
+      with:
+        target-contract-file: ${{ inputs.target-contract-file }}
+        target-id: ${{ inputs.target-id }}
+        iac-root: ${{ inputs.iac-root }}
+        gitops-root: ${{ inputs.gitops-root }}
+        evidence-dir: ${{ inputs.evidence-dir }}
+        private-dir: ${{ inputs.private-dir }}
+        dependencies-dir: ${{ inputs.dependencies-dir }}
+        stage: bootstrap
+    - name: Switch to the new GCP runtime WIF identity
+      if: inputs.reconcile == 'true' && steps.execute.outcome == 'success'
+      uses: google-github-actions/auth@v2
+      with:
+        workload_identity_provider: ${{ inputs.provider-resource }}
+        service_account: ${{ inputs.service-account }}
+        audience: ${{ inputs.audience }}
+    - name: Remove bootstrap credential overrides before runtime validation
+      if: inputs.reconcile == 'true'
+      shell: bash
+      run: printf "%s\n" "CLOUDSDK_AUTH_ACCESS_TOKEN=" "GOOGLE_OAUTH_ACCESS_TOKEN=" >> "$GITHUB_ENV"
+    - name: verify-runtime
+      shell: bash
+      env:
+        IAC_CONTRACT: ${{ inputs.target-contract-file }}
+        IAC_TARGET: ${{ inputs.target-id }}
+        IAC_ROOT: ${{ inputs.iac-root }}
+        IAC_GITOPS_ROOT: ${{ inputs.gitops-root }}
+        IAC_EVIDENCE: ${{ inputs.evidence-dir }}
+        IAC_PRIVATE: ${{ inputs.private-dir }}
+        IAC_DEPENDENCIES: ${{ inputs.dependencies-dir }}
+        IAC_STAGE: bootstrap
+      run: python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/unified_cli.py" verify-runtime
+      if: inputs.reconcile == 'true' && steps.execute.outcome == 'success'
+    - name: publish-runtime
+      shell: bash
+      env:
+        IAC_CONTRACT: ${{ inputs.target-contract-file }}
+        IAC_TARGET: ${{ inputs.target-id }}
+        IAC_ROOT: ${{ inputs.iac-root }}
+        IAC_GITOPS_ROOT: ${{ inputs.gitops-root }}
+        IAC_EVIDENCE: ${{ inputs.evidence-dir }}
+        IAC_PRIVATE: ${{ inputs.private-dir }}
+        IAC_DEPENDENCIES: ${{ inputs.dependencies-dir }}
+        IAC_STAGE: bootstrap
+      run: python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/unified_cli.py" publish-runtime
+      if: inputs.reconcile == 'true' && steps.execute.outcome == 'success'
+    - name: bootstrap-cleanup
+      shell: bash
+      env:
+        IAC_CONTRACT: ${{ inputs.target-contract-file }}
+        IAC_TARGET: ${{ inputs.target-id }}
+        IAC_ROOT: ${{ inputs.iac-root }}
+        IAC_GITOPS_ROOT: ${{ inputs.gitops-root }}
+        IAC_EVIDENCE: ${{ inputs.evidence-dir }}
+        IAC_PRIVATE: ${{ inputs.private-dir }}
+        IAC_DEPENDENCIES: ${{ inputs.dependencies-dir }}
+        IAC_STAGE: bootstrap
+      run: python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/unified_cli.py" bootstrap-cleanup
+      if: always() && inputs.reconcile == 'true'

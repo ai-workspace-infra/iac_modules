@@ -1,0 +1,20 @@
+name: auth-azure-cloud
+description: GitOps-bound IaC owner action; delivery approvals and DAG belong to Toolkit.
+inputs:
+  tenant:
+    description: GitOps tenant
+    required: true
+  subscription:
+    description: GitOps subscription
+    required: true
+  client:
+    description: GitOps client
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: azure/login@v2
+      with:
+        tenant-id: ${{ inputs.tenant }}
+        subscription-id: ${{ inputs.subscription }}
+        client-id: ${{ inputs.client }}
