@@ -13,6 +13,12 @@ SECRET = "zz-credential-VALUE-9f3a"
 FAKE_VAULT = r"""#!/usr/bin/env bash
 # Minimal KV v2 CAS simulator: records argv and stdin, never prints stdin.
 state="$FAKE_VAULT_DIR/versions"; touch "$state"
+if [[ "$1 $2" == "token lookup" ]]; then [[ -z "${FAKE_VAULT_LOGGED_OUT:-}" ]]; exit; fi
+if [[ "$1 $2" == "kv metadata" ]]; then
+  path="${@: -1}"; v="$(grep -F "$path " "$state" | awk '{print $2}' || true)"
+  [[ -n "$v" ]] || exit 2
+  printf '%s\n' "$v"; exit 0
+fi
 printf '%s\n' "$*" >> "$FAKE_VAULT_DIR/argv"
 cas='' path=''
 for arg in "$@"; do
@@ -98,6 +104,26 @@ class BootstrapTest(unittest.TestCase):
         for args in bad:
             result = subprocess.run(["bash", str(SCRIPT), *args], capture_output=True, text=True, env=self.env, stdin=subprocess.DEVNULL)
             self.assertEqual(result.returncode, 2, args)
+
+    def test_preflight_is_read_only_and_non_interactive(self):
+        args = ["--env", "uat", "--workspace", "xworktech-uat", "--purpose", "management", "--preflight"]
+        result = subprocess.run(["bash", str(SCRIPT), *args], capture_output=True, text=True, env=self.env, stdin=subprocess.DEVNULL)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("first write uses CAS=0", result.stdout)
+        self.assertEqual(self.run_script(args[:-1], ["uat", SECRET])[0], 0)
+        result = subprocess.run(["bash", str(SCRIPT), *args], capture_output=True, text=True, env=self.env, stdin=subprocess.DEVNULL)
+        self.assertIn("version 1", result.stdout)
+        self.assertIn("--expected-version 1", result.stdout)
+        self.assertNotIn(SECRET, result.stdout + result.stderr)
+        puts_before = self.argv().count("kv put")
+        subprocess.run(["bash", str(SCRIPT), *args], capture_output=True, text=True, env=self.env, stdin=subprocess.DEVNULL)
+        self.assertEqual(self.argv().count("kv put"), puts_before)
+
+    def test_preflight_fails_when_not_logged_in(self):
+        env = {**self.env, "FAKE_VAULT_LOGGED_OUT": "1"}
+        result = subprocess.run(["bash", str(SCRIPT), "--env", "uat", "--workspace", "w", "--purpose", "query", "--preflight"], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("not logged in", result.stderr)
 
     def test_requires_a_terminal(self):
         result = subprocess.run(["bash", str(SCRIPT), "--env", "uat", "--workspace", "w", "--purpose", "management"], capture_output=True, text=True, env=self.env, stdin=subprocess.DEVNULL)

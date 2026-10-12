@@ -3,14 +3,15 @@ set -euo pipefail
 set +x
 
 usage() {
-  printf '%s\n' 'Usage: bootstrap-vault-kv.sh --env uat|prod --workspace ALIAS --purpose management|query|ingest [--rotate --expected-version N]' \
+  printf '%s\n' 'Usage: bootstrap-vault-kv.sh --env uat|prod --workspace ALIAS --purpose management|query|ingest [--rotate --expected-version N] [--preflight]' \
     '       bootstrap-vault-kv.sh --env uat|prod --workspace ALIAS --purpose notify --object ID [--rotate --expected-version N]' \
     'Requires: vault CLI, VAULT_ADDR, and an existing Vault login (VAULT_TOKEN or CLI token helper).' \
     'Prompts for the credential without echo. Creates KV v2 records with CAS=0 by default.' \
-    'notify stores the notify object opt_set JSON (webhook/secret/recipients) for Terraform.'
+    'notify stores the notify object opt_set JSON (webhook/secret/recipients) for Terraform.' \
+    '--preflight is read-only and non-interactive: it checks the Vault login and the record version, then exits.'
 }
 
-environment='' workspace='' purpose='' object='' rotate=false expected_version=''
+environment='' workspace='' purpose='' object='' rotate=false expected_version='' preflight=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --env|--workspace|--purpose|--object|--expected-version)
@@ -24,6 +25,7 @@ while [[ $# -gt 0 ]]; do
       esac
       shift 2 ;;
     --rotate) rotate=true; shift ;;
+    --preflight) preflight=true; shift ;;
     --help|-h) usage; exit 0 ;;
     *) usage >&2; exit 2 ;;
   esac
@@ -55,8 +57,18 @@ elif [[ -n "$expected_version" ]]; then
 fi
 command -v vault >/dev/null || { printf 'vault CLI is required.\n' >&2; exit 1; }
 [[ -n "${VAULT_ADDR:-}" ]] || { printf 'VAULT_ADDR is required.\n' >&2; exit 1; }
-[[ -t 0 ]] || { printf 'Run interactively to enter the credential securely.\n' >&2; exit 1; }
 secret_path="$environment/platform/observability/guance/$workspace/$purpose$suffix"
+if [[ "$preflight" == true ]]; then
+  # Read-only: proves login, the KV v2 mount `kv` and the current version. No credential is read or written.
+  vault token lookup >/dev/null 2>&1 || { printf 'FAIL: not logged in to %s (vault login / VAULT_TOKEN).\n' "$VAULT_ADDR" >&2; exit 1; }
+  if version="$(vault kv metadata get -mount=kv -field=current_version "$secret_path" 2>/dev/null)"; then
+    printf 'OK: kv/%s exists at version %s; use --rotate --expected-version %s to replace it.\n' "$secret_path" "$version" "$version"
+  else
+    printf 'OK: kv/%s has no record (or metadata is not readable); a first write uses CAS=0.\n' "$secret_path"
+  fi
+  exit 0
+fi
+[[ -t 0 ]] || { printf 'Run interactively to enter the credential securely.\n' >&2; exit 1; }
 printf 'Vault target: %s\nKV record: kv/%s\nCAS version: %s\n' "$VAULT_ADDR" "$secret_path" "$cas"
 read -r -p 'Type the environment name to confirm: ' confirmation
 [[ "$confirmation" == "$environment" ]] || { printf 'Cancelled.\n' >&2; exit 1; }
