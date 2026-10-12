@@ -58,7 +58,7 @@ class GenerateTest(unittest.TestCase):
         _, out = self.render_to()
         text = (out / "generated_resources.tf").read_text()
         self.assertIn('variable "guance_notify_uat_test_receiver_opt_set"', text)
-        self.assertIn("opt_set             = var.guance_notify_uat_test_receiver_opt_set", text)
+        self.assertIn("opt_set             = jsonencode(jsondecode(var.guance_notify_uat_test_receiver_opt_set))", text)
         self.assertRegex(text, r'variable "guance_notify_uat_test_receiver_opt_set" \{\n  type      = string\n  sensitive = true')
         self.assertEqual(json.loads((out / "terraform.auto.tfvars.json").read_text()), {"guance_endpoint": "https://guance.example.invalid", "guance_region": "example-region"})
         provider = (out / "provider.tf").read_text()

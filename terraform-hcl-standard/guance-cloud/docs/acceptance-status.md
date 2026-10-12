@@ -34,6 +34,7 @@
 
 ### #428
 - 离线已验证：`opt_set` 只能来自 sensitive 变量；manifest 拒绝凭据键/值；plan 文本在含凭据形态时被抑制；plan JSON 仅经 `plan_guard` 汇总（不含属性值）。
+- 依据 Provider `v0.1.0` 源码：refresh 时 `opt_set` 会按 Go `json.Marshal` 规范化，已改为渲染 `jsonencode(jsondecode(var.…))` 并实测输出一致；API 是否对 secret 打码待实测。
 - 已知限制：`opt_set` 在 Provider 0.1.0 schema 中非 sensitive 属性，apply 后明文进入 state；已在运行手册规定 state 访问与不上传 plan 的缓解措施。
 - 未验收：测试接收方的触发与恢复通知、告警 `status` 取值（`ok`/`nodata`）、`checker_uuids` 与 `alert_policy_uuids` 的真实关联行为。
 

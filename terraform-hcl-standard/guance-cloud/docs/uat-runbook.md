@@ -46,6 +46,7 @@ apply 之后立即：`bash scripts/uat-terraform.sh plan --expect-no-changes ...
 `opt_set` 在 Provider 0.1.0 schema 中不是 sensitive 属性，`template_info_export` 为 sensitive 但仍明文进入 state。Terraform 的 `sensitive` 只隐藏输出，不加密 state。因此：
 
 - state bucket 只授予 `kv/CICD/uat/iac_state` 对应凭据，禁止把 state、plan、`terraform show -json` 作为 artifact 上传或贴入 issue。
+- `opt_set` 渲染为 `jsonencode(jsondecode(var.…))`，与 Provider refresh 时的规范化结果一致；Vault 中的值必须是合法 JSON 对象（非法时 plan 报错，且不回显该值）。
 - 通知对象只用测试接收方；轮换 webhook 时先在 Vault 写新版本，再 apply，最后撤销旧 webhook。
 - CI 日志只含地址和动作；`uat-terraform.sh` 在 plan 文本含凭据形态时拒绝输出。
 

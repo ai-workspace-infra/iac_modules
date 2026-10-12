@@ -275,7 +275,9 @@ def build_model(document):
                 "attrs": {
                     "name": item["name"],
                     "type": item["type"],
-                    "opt_set": Raw("var." + notify_variable(item["id"])),
+                    # The provider refreshes opt_set as Go json.Marshal output (sorted keys, compact,
+                    # <>& escaped); jsonencode(jsondecode()) yields the same bytes, keeping re-plans empty.
+                    "opt_set": Raw(f"jsonencode(jsondecode(var.{notify_variable(item['id'])}))"),
                     "open_permission_set": False,
                 },
             }
