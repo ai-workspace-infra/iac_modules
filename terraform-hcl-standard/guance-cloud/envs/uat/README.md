@@ -1,13 +1,13 @@
 # Guance UAT workdir
 
-声明输入：GitOps `resources/xworktech.com/uat/guance/observability.yaml`。尚未部署。
+声明输入：GitOps `resources/xworktech.com/uat/guance/observability.yaml`（字段示例见 `../../tests/fixtures/uat-observability.yaml`，合成数据）。**尚未部署，尚未验收**；状态见 [../../docs/acceptance-status.md](../../docs/acceptance-status.md)。
 
 ```bash
-python3 scripts/generate.py render --resources /path/to/gitops/resources/xworktech.com/uat/guance/observability.yaml --workdir envs/uat
-terraform -chdir=envs/uat init
-terraform -chdir=envs/uat validate
+# 离线（无凭据）：渲染 + fmt + validate + 契约测试
+bash ../../scripts/offline-check.sh --manifest /path/to/observability.yaml
+
+# 受控 plan / apply（凭据由 Vault 注入环境变量，见 ../../docs/uat-runbook.md）
+bash ../../scripts/uat-terraform.sh plan --resources /path/to/observability.yaml --workdir .
 ```
 
-本批仅支持 Dashboard。Provider 固定 0.1.0；API Key 由 Vault 注入 `TF_VAR_guance_api_key`。生产执行前必须补齐组织远端 backend；当前无 backend 配置仅用于离线验证，不执行 apply。不要将凭据放入清单或命令参数。
-
-Manifest 必须有 `global`（environment=uat、workspace_alias、endpoint、region）和 `dashboards` 列表（id、name、description、tags、template）。endpoint/region 由真实工作空间确认，不提供假定免费站点默认值。
+Provider 固定 `GuanceCloud/guance = 0.1.0`；管理 API Key 经 `GUANCE_ACCESS_TOKEN`（Provider 原生变量）注入，通知对象 `opt_set` 经 `TF_VAR_guance_notify_<id>_opt_set` 注入。backend 为统一的 S3 兼容 state（`TF_STATE_*`），key 由 `generate.py state-key` 生成。不要将凭据放入清单、tfvars 或命令参数；本目录只入库 `README.md` 与 `.gitignore`。

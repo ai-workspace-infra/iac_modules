@@ -1,8 +1,3 @@
-variable "guance_api_key" {
-  type      = string
-  sensitive = true
-}
-
 variable "guance_endpoint" {
   type = string
 }

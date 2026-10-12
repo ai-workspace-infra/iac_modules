@@ -23,8 +23,8 @@ Supabase 延迟监控作为第 4 个候选 Monitor，只有数据库信号可用
 ## 声明与生成契约
 
 - GitOps 声明包含环境、站点/endpoint、工作空间标识、资源稳定名称、查询与策略配置、模块间引用；具体字段由 Provider schema 验证后定稿。
-- API Key 和通知 webhook secret 从 Vault/CI 注入；不写入 YAML、tfvars、计划文档或日志。实现时核验 Provider 支持的环境变量，禁止猜测变量名称。
-- 每个资源生成独立命名的 module/resource 块；循环仅存在于 Python/Jinja2。
+- API Key 和通知 webhook secret 从 Vault/CI 注入；不写入 YAML、tfvars、计划文档或日志。已核验 Provider 0.1.0 原生变量 `GUANCE_ACCESS_TOKEN`/`GUANCE_END_POINT`/`GUANCE_REGION`；通知 `opt_set` 经 sensitive 变量注入。
+- 每个资源生成独立命名的 resource 块（未抽取 module，原因见 README）；循环仅存在于 Python/Jinja2。
 - global 非敏感配置生成 tfvars；逐资源配置展开至 HCL；模块均声明 `required_providers`，source 为 `GuanceCloud/guance`。
 - `inventory` 子命令合并 YAML 与 Terraform 输出，生成观测资源 CMDB：资源类型、UUID、环境、名称、所属工作空间。Guance 资源没有主机 IP，不能伪造 Ansible 主机；主机 inventory 仍来自现有基础设施 CMDB。
 - UUID 是运行时事实；静态服务名、标签和职责来自 YAML。生成的 HCL、tfvars、CMDB、plan、state 和敏感输出必须忽略。
@@ -33,7 +33,7 @@ Supabase 延迟监控作为第 4 个候选 Monitor，只有数据库信号可用
 
 UAT 与 PROD 使用独立根目录、state key、凭据及批准流程。优先使用独立工作空间；如果免费专区仅有一个工作空间，首批只部署 UAT，PROD 暂不执行。
 
-state backend 沿用组织统一 S3-compatible 契约；Guance 的账号、workspace 与 namespace 如何映射到现有 key 格式，在实施前确认，不另创冲突的 state 命名规则。免费专区站点是否被 Provider 发布版本支持是上线前置条件，不能默认使用杭州等商业站点替代。
+state backend 沿用组织统一 S3-compatible 契约；Guance 的账号、workspace 与 namespace 如何映射到现有 key 格式，在实施前确认，不另创冲突的 state 命名规则。免费专区站点是否被 Provider 发布版本支持是上线前置条件，不能默认使用杭州等商业站点替代。已核验：免费专区为北京节点，不在 Provider README 的 region 列表内，且官方版本对比称免费版不支持 Open API，详见 [free-tier-constraints.md](free-tier-constraints.md)。
 
 ## 实施顺序
 
@@ -47,7 +47,7 @@ state backend 沿用组织统一 S3-compatible 契约；Guance 的账号、works
 
 ## 验证与回退
 
-实现阶段运行 `terraform fmt`、`terraform validate`、renderer render/inventory 与 CMDB 契约检查。此阶段只有 Markdown 规划，不声明 Terraform 验证或远端接入已通过。
+实现阶段运行 `terraform fmt`、`terraform validate`、renderer render/inventory 与 CMDB 契约检查（`scripts/offline-check.sh`）。这些是离线检查，不声明远端接入已通过；实测结果见 [acceptance-status.md](acceptance-status.md)。
 
 回退使用先前 GitOps 版本重新 render 和 plan，人工检查后 apply；配置恢复不等于遥测历史数据恢复。对新资源的删除、import 后对象的销毁、通知变更等操作需逐项检查。保留 Grafana 关键告警，只有 Guance 告警验证成功才调整通知主入口。
 
