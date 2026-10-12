@@ -78,6 +78,14 @@ bash scripts/bootstrap-vault-kv.sh --env uat --workspace xworktech-uat --purpose
 bash scripts/bootstrap-vault-kv.sh --env uat --workspace xworktech-uat --purpose ingest
 ```
 
+写入前先做只读预检（非交互，不读取也不写入凭据）：确认已登录 `VAULT_ADDR`、KV v2 挂载 `kv` 可用，并给出该记录当前版本，用于决定首次写入（CAS=0）还是 `--rotate --expected-version N`：
+
+```bash
+bash scripts/bootstrap-vault-kv.sh --env uat --workspace xworktech-uat --purpose management --preflight
+```
+
+预检看不到 metadata 时也会报告“无记录”，因为读取 metadata 可能不在写入者的 policy 内；此时首次写入若被 CAS 拒绝，说明记录已存在，需要向 Vault 管理员确认版本。
+
 通知对象配置：`bash scripts/bootstrap-vault-kv.sh --env uat --workspace xworktech-uat --purpose notify --object uat_test_receiver`（输入 `opt_set` JSON，校验为 JSON 对象后经 stdin 写入）。
 
 轮换时提供 Vault 当前版本，例如 `--rotate --expected-version 1`。版本不匹配则写入失败。此脚本写入专用单字段记录，轮换会替换该记录的数据；不要将其他业务字段混入此记录。脚本不会验证 Guance 凭据是否有效，也不会撤销旧 Guance Key，需按下述流程完成。
