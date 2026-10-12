@@ -11,6 +11,22 @@
 | 数据存储 7 天循环；仪表板/笔记/查看器各最多 10 个；监控器最多 10 个且仅支持“阈值检测”；不支持短信通知、数据转发/备份、快照/图表/iframe 分享 | 同上 |
 | Terraform Provider 0.1.0（发布于 2026-06-18）的 `region` 取值：`hangzhou`、`ningxia`、`guangzhou`、`vnet`、`hongkong`、`oregon`、`frankfurt`、`singapore`；`end_point` 可自定义；认证为 Workspace API Key，环境变量 `GUANCE_ACCESS_TOKEN`、`GUANCE_END_POINT`、`GUANCE_REGION` | [Registry 文档](https://registry.terraform.io/providers/GuanceCloud/guance/0.1.0/docs)、[Provider README](https://github.com/GuanceCloud/terraform-provider-guance) |
 
+## Provider 0.1.0 源码核验（tag `v0.1.0`，2026-06-16）
+
+阅读 [GuanceCloud/terraform-provider-guance](https://github.com/GuanceCloud/terraform-provider-guance) 的 `v0.1.0` 源码后确认：
+
+| 项 | 源码事实 | 本仓库处理 |
+| --- | --- | --- |
+| 认证 | 每个请求带 `DF-API-KEY: <access_token>` 头，即工作空间 API Key（OpenAPI） | 管理 Key 经 `GUANCE_ACCESS_TOKEN` 注入 |
+| endpoint | `internal/api/client.go`：默认 `https://openapi.guance.com`；`region` 只是查表，`end_point` 非空时覆盖 region。表中有 hangzhou→`openapi.guance.com`、ningxia→`aws-openapi.guance.com`、guangzhou→`cn4-openapi.guance.com`、vnet→`cn5-openapi.guance.com`、hongkong→`cn6-openapi.guance.one`、oregon→`us1-openapi.guance.com`、frankfurt→`eu1-openapi.guance.one`、singapore→`ap1-openapi.guance.one`，**没有免费专区（北京）** | manifest 必须显式给出 `endpoint`，它会覆盖 region；不使用默认杭州 |
+| `notify_object.type` | 校验器只接受 12 个值（`dingTalkRobot`…`telegramBot`）；文档完整链路示例里的 `type = "http"` 会被拒绝 | manifest 白名单与源码一致 |
+| `notify_object.opt_set` | 创建时存入配置原文；refresh 时用 Go `json.Marshal` 重新编码 API 返回值（键排序、紧凑、`<>&` 转义） | 渲染为 `jsonencode(jsondecode(var.…))`，已实测与 Go 输出逐字节一致，避免二次 plan 出现差异 |
+| `dashboard.template_info` | 只在 `template_info_export` 变化时才用导出内容覆盖 state | 远端修改会以 update 形式出现（漂移检测） |
+| `mute` | CHANGELOG：OpenAPI 要求 `startTime`/`endTime` 非空 | manifest 强制一次性窗口并要求 start/end |
+| `monitor.type` | 只允许 `trigger`、`smartMonitor` | 固定 `trigger` |
+
+仍无法从源码确定：免费空间能否签发可用的 API Key、API 是否在读取时对 webhook/secret 打码（若打码，`opt_set` 会持续出现差异，需要在实测中确认）。
+
 ## 对本方案的影响
 
 1. **阻塞性风险**：Provider 通过 OpenAPI 与 API Key 管理资源。官方版本对比写明免费版不支持通过 Open API 获取和更新工作空间数据，因此**免费工作空间很可能无法被 Terraform 管理**。需要用真实工作空间确认：能否创建 API Key、`GET`/`POST` 是否被拒绝。若被拒绝，只能改用商业版/试用工作空间做 UAT，或接受控制台手工管理（失去 IaC 目标）。
