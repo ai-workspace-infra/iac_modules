@@ -19,7 +19,12 @@ def request_json(url, headers=None, data=None, method=None):
         with urllib.request.urlopen(req, timeout=45) as response:
             return json.load(response)
     except urllib.error.HTTPError as error:
-        raise ContractError(f"remote API refused request (HTTP {error.code})") from None
+        detail = ""
+        try:
+            detail = ": " + error.read().decode("utf-8", errors="replace")
+        except Exception:
+            pass
+        raise ContractError(f"remote API refused request (HTTP {error.code}){detail}") from None
 
 
 def command_json(command):
