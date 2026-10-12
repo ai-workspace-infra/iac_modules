@@ -29,7 +29,7 @@ done
 [[ -n "$resources" && -n "$workdir" ]] || { usage >&2; exit 2; }
 [[ -n "${GUANCE_ACCESS_TOKEN:-}" ]] || { printf 'GUANCE_ACCESS_TOKEN is required (Vault management record).\n' >&2; exit 1; }
 tf="${TERRAFORM:-terraform}"
-# shellcheck source=tf-env.sh
+# shellcheck source-path=SCRIPTDIR source=tf-env.sh
 source "$here/tf-env.sh" || exit 1
 scratch="$(umask 077 && mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
