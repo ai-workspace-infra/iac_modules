@@ -1,0 +1,17 @@
+# JWT/OIDC role for the read-only plan job. Same shape as platform-ops-toolkit/.github/config/*-auth.yaml.
+role_name: github-actions-iac-modules-uat-guance-plan
+role:
+  role_type: jwt
+  user_claim: sub
+  bound_audiences: [vault]
+  bound_claims_type: string
+  bound_claims:
+    repository: [ai-workspace-infra/iac_modules, ai-workspace-infra/platform-ops-toolkit]
+    job_workflow_ref: ai-workspace-infra/iac_modules/.github/workflows/guance-uat.yml@refs/heads/main
+    ref: refs/heads/main
+    environment: uat
+  token_policies: [guance-uat-terraform]
+  token_no_default_policy: true
+  token_type: batch
+  token_ttl: 30m
+  token_max_ttl: 30m

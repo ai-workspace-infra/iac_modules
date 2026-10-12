@@ -1,0 +1,8 @@
+{# One explicit import block per existing remote object (Terraform >= 1.5). #}
+{% for item in imports %}
+import {
+  to = {{ item.address }}
+  id = {{ item.uuid | tojson }}
+}
+
+{% endfor %}
