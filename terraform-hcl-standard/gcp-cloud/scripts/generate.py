@@ -17,7 +17,10 @@ import yaml
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT.parent / "scripts"))
+shared_scripts = ROOT.parent / "scripts"
+if not shared_scripts.exists() and os.environ.get("IAC_ROOT"):
+    shared_scripts = Path(os.environ["IAC_ROOT"]) / "terraform-hcl-standard" / "scripts"
+sys.path.insert(0, str(shared_scripts))
 from cmdb_v1 import make_document, write_document  # noqa: E402
 
 TEMPLATES = ROOT / "templates"
