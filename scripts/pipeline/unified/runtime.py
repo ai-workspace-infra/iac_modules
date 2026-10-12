@@ -20,7 +20,12 @@ def run(command, private, allowed=(0,)):
     # Terraform output may contain sensitive values. Keep logs private, never upload.
     with open(Path(private) / "commands.log", "ab") as log:
         log.write(result.stdout + result.stderr)
-    require(result.returncode in allowed, f"owner command failed: {Path(command[0]).name}; inspect private runner diagnostics")
+    error_summary = ""
+    if result.returncode not in allowed:
+        lines = [line.strip() for line in (result.stderr or result.stdout).decode(errors="replace").splitlines() if line.strip()]
+        if lines:
+            error_summary = f": {lines[-1]}"
+    require(result.returncode in allowed, f"owner command failed: {Path(command[0]).name}{error_summary}; inspect private runner diagnostics")
     return result
 
 
@@ -55,6 +60,10 @@ def render(context, target, stage, iac_root, gitops_root, private):
         write_json(root / "unified.auto.tfvars.json", values)
     else:
         shutil.copytree(source_tree, tree, ignore=shutil.ignore_patterns("envs", ".terraform", "*.tfstate*", "*.tfvars*", "__pycache__"))
+        scripts_source = Path(iac_root) / "terraform-hcl-standard" / "scripts"
+        scripts_dest = Path(private) / "scripts"
+        if scripts_source.exists() and not scripts_dest.exists():
+            shutil.copytree(scripts_source, scripts_dest, ignore=shutil.ignore_patterns("__pycache__"))
         root.parent.mkdir(parents=True, exist_ok=True)
         args = [sys.executable, str(tree / "scripts" / "generate.py"), "render", "--resources", str(source), "--workdir", str(root)]
         if target["provider"] == "akamai-cloud":

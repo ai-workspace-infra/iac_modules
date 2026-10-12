@@ -32,7 +32,10 @@ import yaml
 from jinja2 import Environment, FileSystemLoader
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", "scripts")))
+shared_scripts = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", "scripts"))
+if not os.path.exists(shared_scripts) and os.environ.get("IAC_ROOT"):
+    shared_scripts = os.path.join(os.environ["IAC_ROOT"], "terraform-hcl-standard", "scripts")
+sys.path.insert(0, shared_scripts)
 from cmdb_v1 import make_document, write_document  # noqa: E402
 
 # scripts/ -> vultr-vps 根
