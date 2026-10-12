@@ -12,7 +12,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -n "$workdir" && -n "$resources" ]] || { printf 'Usage: tf-init.sh --workdir DIR --resources MANIFEST\n' >&2; exit 2; }
-# shellcheck source=tf-env.sh
+# shellcheck source-path=SCRIPTDIR source=tf-env.sh
 source "$here/tf-env.sh" || exit 1
 state_key="$(python3 "$here/generate.py" state-key --resources "$resources")"
 printf 'State key: %s\n' "$state_key"

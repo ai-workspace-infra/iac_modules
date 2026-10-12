@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Source me. Validates the unified TF_STATE_* contract and maps it to the variables the
 # Terraform S3 backend reads on EVERY command (init, plan, apply, output), so nothing
 # credential-bearing is written to .terraform/ or passed as an argument.
