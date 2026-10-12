@@ -121,6 +121,15 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(api.call_args_list[1].args[0], "DescribeUHostKeyPairs")
         self.assertEqual(api.call_args_list[2].args[1]["Offset"], 1)
 
+    def test_gcp_project_prerequisite_verifies_project_id(self):
+        target = copy.deepcopy(self.target)
+        target["provider"] = "gcp-cloud"
+        with patch.object(auth, "command_json", return_value={"projectId": "open-platform-uat"}) as cmd:
+            auth.verify_checks(target, [{"kind": "gcp-project", "name": "open-platform-uat"}])
+        cmd.assert_called_once_with(["gcloud", "projects", "describe", "open-platform-uat", "--format=json"])
+        with patch.object(auth, "command_json", return_value={"projectId": "wrong-project"}), self.assertRaises(ContractError):
+            auth.verify_checks(target, [{"kind": "gcp-project", "name": "open-platform-uat"}])
+
     def test_static_entry_summary_fails_closed_on_stale_duplicate_or_failed_job(self):
         report = self.root / "static.json"
         data = {"providers": [{"provider": p, "result": "static_checked"} for p in PROVIDERS], "run_id": "42", "run_attempt": "2", "iac_sha": git(self.iac, "rev-parse", "HEAD"), "gitops_sha": git(self.gitops, "rev-parse", "HEAD")}

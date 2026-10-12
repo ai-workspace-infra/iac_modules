@@ -187,6 +187,9 @@ def verify_checks(target, checks):
         elif kind == "gcp-artifact-registry" and target["provider"] == "gcp-cloud":
             data = command_json(["gcloud", "artifacts", "repositories", "describe", check["name"], "--location", check["location"], "--project", target["auth"]["expected_identity"], "--format=json"])
             require(data["name"].endswith("/repositories/" + check["name"]), "GCP registry mismatch")
+        elif kind == "gcp-project" and target["provider"] == "gcp-cloud":
+            data = command_json(["gcloud", "projects", "describe", check["name"], "--format=json"])
+            require(data["projectId"] == check["name"], "GCP project mismatch")
         elif kind == "ucloud-firewall" and target["provider"] == "ucloud":
             wanted = os.environ["TF_VAR_ucloud_bootstrap_security_group_id"]
             data = ucloud("DescribeFirewall", {"ProjectId": target["account"], "Region": os.environ["UCLOUD_REGION"], "FWId": wanted})
