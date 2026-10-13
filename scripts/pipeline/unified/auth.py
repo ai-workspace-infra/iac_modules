@@ -114,6 +114,12 @@ def load_credentials(context, target, stage, private_dir):
         if not bootstrap:
             require(record.get("project_id") == auth["expected_identity"], "GCP Vault project mismatch")
         export_env("TF_VAR_project_id", auth["expected_identity"], False)
+        service_account = record.get("deploy_service_account") or auth.get("service_account")
+        if service_account:
+            export_env("TF_VAR_deploy_service_account", service_account, False)
+        workload_identity_provider = record.get("gcp_workload_identity_provider") or auth.get("workload_identity_provider")
+        if workload_identity_provider:
+            export_env("TF_VAR_workload_identity_provider", workload_identity_provider, False)
         if bootstrap:
             spec = target["stages"][stage]
             import yaml
