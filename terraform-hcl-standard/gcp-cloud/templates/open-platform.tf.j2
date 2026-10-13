@@ -233,6 +233,10 @@ module "spot_{{ vm.name | tf_id }}" {
   data_disk_id = module.data_disk_{{ vm.name | tf_id }}.id
   data_disk_device_name = {{ vm.data_disk.device_name | tojson }}
 {% endif %}
+{% set vm_persistent_disks = persistent_data_disks | selectattr('instance', 'equalto', vm.name) | list %}
+{% if vm_persistent_disks %}
+  has_external_data_disk = true
+{% endif %}
 {% if vm.max_run_duration_seconds is defined %}
   max_run_duration_seconds = {{ vm.max_run_duration_seconds }}
 {% endif %}

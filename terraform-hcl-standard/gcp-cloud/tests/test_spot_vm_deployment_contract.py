@@ -273,6 +273,7 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
         self.assertIn('module "spot_web_saas_uat"', persistent_rendered)
         self.assertRegex(persistent_rendered, r'provisioning_model\s+= "STANDARD"')
         self.assertRegex(persistent_rendered, r'deletion_protection\s+= true')
+        self.assertIn("has_external_data_disk = true", persistent_rendered)
         for mutation in ("no_disk", "wrong_instance", "no_protection", "invalid_disk"):
             import copy
             candidate = copy.deepcopy(manifest)
@@ -284,6 +285,7 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
                 generator.normalize_resources(candidate)
         spot_vm_module = (ROOT / "modules" / "spot_vm" / "main.tf").read_text(encoding="utf-8")
         self.assertIn("ignore_changes = [attached_disk]", spot_vm_module)
+        self.assertIn("has_external_data_disk", spot_vm_module)
         self.assertIn("persistent_data_disks = [", rendered)
 
         runtime = {
