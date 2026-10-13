@@ -22,9 +22,10 @@ def run(command, private, allowed=(0,)):
         log.write(result.stdout + result.stderr)
     error_summary = ""
     if result.returncode not in allowed:
-        lines = [line.strip() for line in (result.stderr or result.stdout).decode(errors="replace").splitlines() if line.strip()]
-        if lines:
-            error_summary = f": {lines[-1]}"
+        lines = [line.strip() for line in (result.stderr or result.stdout).decode(errors="replace").splitlines() if line.strip("╷╵│ \t")]
+        picked = next((line for line in lines if line.lstrip("╷│ ").startswith("Error")), lines[-1] if lines else "")
+        if picked:
+            error_summary = f": {picked.lstrip('╷│ ')[:200]}"
     require(result.returncode in allowed, f"owner command failed: {Path(command[0]).name}{error_summary}; inspect private runner diagnostics")
     return result
 
@@ -41,6 +42,12 @@ def render(context, target, stage, iac_root, gitops_root, private):
     tree = Path(private) / "provider"
     # Existing renderers have fixed relative module paths: envs/<environment>/<namespace>.
     root = tree / "envs" / target["environment"] / target["workspace"]
+    if target["provider"] == "gcp-cloud":
+        # The GCP template hard-codes source = "../../modules/<name>", which only
+        # resolves from envs/<environment> (the documented gcp-cloud workdir).
+        # One isolated tree is rendered per target, so the namespace level is not
+        # needed for isolation and would leave every module source unreadable.
+        root = tree / "envs" / target["environment"]
     require(not root.exists(), "execution root already exists; reuse could select stale state/config")
     if stage == "bootstrap":
         require(target["provider"] == "gcp-cloud", "bootstrap reconciler not implemented")
