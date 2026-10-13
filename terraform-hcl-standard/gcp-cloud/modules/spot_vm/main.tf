@@ -107,6 +107,12 @@ variable "data_disk_device_name" {
   default     = "web-saas-data"
 }
 
+variable "has_external_data_disk" {
+  description = "Whether an external persistent data disk is attached to this host."
+  type        = bool
+  default     = false
+}
+
 resource "google_compute_instance" "this" {
   project                   = var.project_id
   name                      = var.name
@@ -137,7 +143,7 @@ resource "google_compute_instance" "this" {
       error_message = "A public Spot VM requires OS Login or an SSH public key from the deploy environment."
     }
     precondition {
-      condition     = var.provisioning_model != "STANDARD" || (var.deletion_protection && var.data_disk_id != "")
+      condition     = var.provisioning_model != "STANDARD" || (var.deletion_protection && (var.data_disk_id != "" || var.has_external_data_disk))
       error_message = "A STANDARD service host requires deletion protection and an independent data disk."
     }
     precondition {
