@@ -88,9 +88,11 @@ def guard_plan(target, stage, plan, action):
         for operation in counts:
             counts[operation] += operation in actions
         if "delete" in actions:
-            require(not owner_match(address, spec.get("protected", [])), "protected resource deletion/replacement")
-            require(item.get("type") not in {"google_compute_disk", "aws_ebs_volume", "linode_volume", "vultr_block_storage", "ucloud_udisk"}, "persistent disk deletion/replacement requires maintenance")
-            require(action == "destroy", "ordinary plan/apply cannot delete or replace resources")
+            change = item.get("change") or {}
+            detail = f"{address} actions={actions} replace_paths={change.get('replace_paths')} action_reason={change.get('action_reason')}"
+            require(not owner_match(address, spec.get("protected", [])), f"protected resource deletion/replacement: {detail}")
+            require(item.get("type") not in {"google_compute_disk", "aws_ebs_volume", "linode_volume", "vultr_block_storage", "ucloud_udisk"}, f"persistent disk deletion/replacement requires maintenance: {detail}")
+            require(action == "destroy", f"ordinary plan/apply cannot delete or replace resources: {detail}")
         if action == "destroy":
             require(set(actions) <= {"delete", "no-op", "read"}, "destroy plan contains forward mutations")
         if item.get("type") == "vultr_instance" and actions == ["update"]:
