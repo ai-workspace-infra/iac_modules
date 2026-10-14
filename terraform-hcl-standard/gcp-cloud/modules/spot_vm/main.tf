@@ -136,7 +136,9 @@ resource "google_compute_instance" "this" {
     # google_compute_attached_disk owns attachments declared outside this
     # module. Ignoring the instance's read-back prevents the two Terraform
     # resources from detaching or replacing one another's disks.
-    ignore_changes = [attached_disk]
+    # Ignoring scheduling prevents Terraform from replacing an existing VM
+    # when its provisioning model is promoted from SPOT to STANDARD in declarations.
+    ignore_changes = [attached_disk, scheduling]
 
     precondition {
       condition     = !var.public_ip || var.enable_oslogin || trimspace(var.ssh_public_key) != ""
