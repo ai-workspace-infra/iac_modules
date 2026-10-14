@@ -345,9 +345,27 @@ class ContractTests(unittest.TestCase):
                 runtime.execute(context, self.target["id"], "resources", self.iac, self.gitops, evidence, private, self.root)
         apply = next(args for args in calls if args[0] == "apply")
         self.assertEqual(apply[-1], str(private / "reviewed.tfplan"))
+        self.assertIn("-no-color", apply)
         self.assertEqual(json.loads((evidence / "receipt.json").read_text())["result"], "failed")
         self.assertFalse(any("import" in args or "destroy" == args[0] or any("migrate-state" in arg for arg in args) for args in calls))
+
+    def test_run_error_summary_strips_ansi_and_extracts_terraform_error(self):
+        private = self.root / "private_run_test"
+        private.mkdir(parents=True, exist_ok=True)
+        ansi_error = (
+            b"\x1b[31m\xe2\x95\xb7\x1b[0m\n"
+            b"\x1b[31m\xe2\x94\x82\x1b[0m \x1b[1m\x1b[31mError: \x1b[0m\x1b[1mError creating instance: 409 already exists\x1b[0m\n"
+            b"\x1b[31m\xe2\x94\x82\x1b[0m \n"
+            b"\x1b[31m\xe2\x95\xb5\x1b[0m\n"
+        )
+        fake = subprocess.CompletedProcess(["terraform", "apply"], 1, stdout=b"", stderr=ansi_error)
+        with patch("subprocess.run", return_value=fake):
+            with self.assertRaises(ContractError) as ctx:
+                runtime.run(["terraform", "apply"], private)
+            self.assertIn("Error creating instance: 409 already exists", str(ctx.exception))
+            self.assertNotIn("╵", str(ctx.exception))
 
 
 if __name__ == "__main__":
     unittest.main()
+
