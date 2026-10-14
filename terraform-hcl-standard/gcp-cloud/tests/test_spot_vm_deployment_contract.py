@@ -665,6 +665,44 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "enable_oslogin must be a boolean"):
             generator.normalize_resources(manifest)
 
+    def test_imports_rendered_to_generated_imports_tf(self):
+        generator = self.load_generator()
+        manifest = self.oslogin_manifest()
+        manifest["spec"]["imports"] = [
+            {"to": "module.network.google_compute_network.this", "id": "projects/open-platform-uat/global/networks/web-saas-uat-gcp"},
+            {"to": "module.spot_web_saas_uat.google_compute_instance.this", "id": "projects/open-platform-uat/zones/asia-east1-a/instances/web-saas-uat"},
+        ]
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(
+            generator, "load_resources", return_value=manifest
+        ):
+            generator.render(SimpleNamespace(resources="ignored", workdir=tempdir))
+            imports_file = Path(tempdir) / "generated_imports.tf"
+            self.assertTrue(imports_file.exists())
+            content = imports_file.read_text()
+            self.assertIn("import {", content)
+            self.assertIn("to = module.network.google_compute_network.this", content)
+            self.assertIn('id = "projects/open-platform-uat/global/networks/web-saas-uat-gcp"', content)
+            self.assertIn("to = module.spot_web_saas_uat.google_compute_instance.this", content)
+
+    def test_imports_removed_when_no_imports_declared(self):
+        generator = self.load_generator()
+        manifest = self.oslogin_manifest()
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(
+            generator, "load_resources", return_value=manifest
+        ):
+            stale_imports = Path(tempdir) / "generated_imports.tf"
+            stale_imports.write_text("import { to = module.test id = \"test\" }\n")
+            generator.render(SimpleNamespace(resources="ignored", workdir=tempdir))
+            self.assertFalse(stale_imports.exists())
+
+    def test_invalid_import_address_rejected(self):
+        generator = self.load_generator()
+        manifest = self.oslogin_manifest()
+        manifest["spec"]["imports"] = [{"to": "invalid address with spaces!", "id": "test-id"}]
+        with self.assertRaisesRegex(SystemExit, "invalid import target address"):
+            generator.normalize_resources(manifest)
+
 
 if __name__ == "__main__":
     unittest.main()
+
