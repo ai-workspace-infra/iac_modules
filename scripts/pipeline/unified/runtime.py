@@ -29,14 +29,17 @@ def run(command, private, allowed=(0,)):
         picked = ""
         for i, line in enumerate(lines):
             if "error" in line.lower():
-                picked = line
-                if (line.rstrip(":") == "Error" or len(line) <= 10) and i + 1 < len(lines):
-                    picked = f"{line} {lines[i + 1]}"
+                picked_lines = [line]
+                for j in range(i + 1, min(i + 10, len(lines))):
+                    if lines[j].lower().startswith("error:"):
+                        break
+                    picked_lines.append(lines[j])
+                picked = " ".join(picked_lines)
                 break
         if not picked and lines:
             picked = lines[-1]
         if picked:
-            error_summary = f": {picked[:300]}"
+            error_summary = f": {picked[:500]}"
     require(result.returncode in allowed, f"owner command failed: {Path(command[0]).name}{error_summary}; inspect private runner diagnostics")
     return result
 
