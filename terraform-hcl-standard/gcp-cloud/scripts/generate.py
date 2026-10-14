@@ -33,6 +33,18 @@ def tf_id(value):
     return re.sub(r"[^0-9A-Za-z_]", "_", str(value))
 
 
+def validate_imports(raw_imports, context_name):
+    imports = list(raw_imports or [])
+    for item in imports:
+        if not isinstance(item, dict) or "to" not in item or "id" not in item:
+            raise SystemExit(f"{context_name} items must be objects with 'to' and 'id'")
+        if not re.fullmatch(r"[\w.\[\]\"-]+", str(item["to"])):
+            raise SystemExit(f"invalid import target address: {item['to']}")
+        if not isinstance(item["id"], str) or not item["id"].strip():
+            raise SystemExit(f"invalid import id: {item['id']}")
+    return imports
+
+
 def load_resources(path):
     with Path(path).open(encoding="utf-8") as handle:
         return yaml.safe_load(handle) or {}
@@ -42,6 +54,7 @@ def normalize_resources(document):
     """Normalize the legacy platform manifest and namespace declarations."""
     if "global" in document:
         global_config = dict(document["global"])
+        global_config["imports"] = validate_imports(document.get("imports", []), "imports")
         cloud_run_services = list(document.get("cloud_run_services", []))
         legacy_cloud_run = bool(global_config.get("cloud_run_service_name"))
         if legacy_cloud_run:
@@ -104,6 +117,7 @@ def normalize_resources(document):
         "artifact_registry_location": spec.get("artifact_registry_location"),
         "artifact_registry_id": spec.get("artifact_registry_id"),
         "persistent_data_disks": persistent_data_disks,
+        "imports": validate_imports(spec.get("imports", []), "spec.imports"),
     }
     required_spec = (
         "gcp_account_id",
@@ -501,6 +515,16 @@ def render(args):
     generated = workdir / "generated_platform.tf"
     generated.write_text(content, encoding="utf-8")
     subprocess.run(["terraform", "fmt", str(generated)], check=True, stdout=subprocess.DEVNULL)
+    imports = global_config.get("imports", [])
+    imports_file = workdir / "generated_imports.tf"
+    if imports:
+        import_blocks = []
+        for item in imports:
+            import_blocks.append(f'import {{\n  to = {item["to"]}\n  id = {json.dumps(item["id"])}\n}}\n')
+        imports_file.write_text("\n".join(import_blocks), encoding="utf-8")
+        subprocess.run(["terraform", "fmt", str(imports_file)], check=True, stdout=subprocess.DEVNULL)
+    elif imports_file.exists():
+        imports_file.unlink()
     (workdir / "backend.tf").write_text(
         (TEMPLATES / "backend.tf").read_text(encoding="utf-8"), encoding="utf-8"
     )
