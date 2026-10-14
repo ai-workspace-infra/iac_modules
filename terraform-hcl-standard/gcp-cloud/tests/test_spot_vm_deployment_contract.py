@@ -284,7 +284,7 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
             with self.subTest(mutation=mutation), self.assertRaises(SystemExit):
                 generator.normalize_resources(candidate)
         spot_vm_module = (ROOT / "modules" / "spot_vm" / "main.tf").read_text(encoding="utf-8")
-        self.assertIn("ignore_changes = [attached_disk]", spot_vm_module)
+        self.assertIn("ignore_changes = [attached_disk, scheduling]", spot_vm_module)
         self.assertIn("has_external_data_disk", spot_vm_module)
         self.assertIn("persistent_data_disks = [", rendered)
 
