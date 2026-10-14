@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -22,10 +23,20 @@ def run(command, private, allowed=(0,)):
         log.write(result.stdout + result.stderr)
     error_summary = ""
     if result.returncode not in allowed:
-        lines = [line.strip() for line in (result.stderr or result.stdout).decode(errors="replace").splitlines() if line.strip("╷╵│ \t")]
-        picked = next((line for line in lines if line.lstrip("╷│ ").startswith("Error")), lines[-1] if lines else "")
+        raw = (result.stderr or result.stdout or b"").decode(errors="replace")
+        clean = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", raw)
+        lines = [line.strip("╷╵│ \t") for line in clean.splitlines() if line.strip("╷╵│ \t")]
+        picked = ""
+        for i, line in enumerate(lines):
+            if "error" in line.lower():
+                picked = line
+                if (line.rstrip(":") == "Error" or len(line) <= 10) and i + 1 < len(lines):
+                    picked = f"{line} {lines[i + 1]}"
+                break
+        if not picked and lines:
+            picked = lines[-1]
         if picked:
-            error_summary = f": {picked.lstrip('╷│ ')[:200]}"
+            error_summary = f": {picked[:300]}"
     require(result.returncode in allowed, f"owner command failed: {Path(command[0]).name}{error_summary}; inspect private runner diagnostics")
     return result
 
@@ -97,7 +108,7 @@ def initialize(root, private, state):
     path = Path(private) / "backend.hcl"
     path.write_text("\n".join(f"{k} = {json.dumps(v)}" for k, v in backend.items()) + "\n")
     os.chmod(path, 0o600)
-    terraform(root, private, "init", "-input=false", f"-backend-config={path}")
+    terraform(root, private, "init", "-input=false", "-no-color", f"-backend-config={path}")
     terraform(root, private, "fmt", "-no-color")
     terraform(root, private, "validate", "-no-color")
 
@@ -181,7 +192,7 @@ def execute(context, target_id, stage, iac_root, gitops_root, evidence, private,
                 receipt["result"] = "planned"
                 if context["action"] in {"apply", "destroy"}:
                     require(digest(plan) == receipt["plan_sha256"], "saved plan changed before apply")
-                    terraform(root, private, "apply", "-input=false", "-lock-timeout=5m", str(plan))
+                    terraform(root, private, "apply", "-input=false", "-lock-timeout=5m", "-no-color", str(plan))
                     args = ["plan", "-input=false", "-lock-timeout=5m", "-detailed-exitcode", "-no-color"]
                     if context["action"] == "destroy":
                         args.append("-destroy")
