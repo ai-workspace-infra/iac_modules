@@ -75,6 +75,8 @@ def main():
         name = "web-saas-prod-v2-" + suffix
         if not exists("compute", "firewall-rules", "describe", name, *common):
             gcloud("compute", "firewall-rules", "create", name, "--network=" + spec["network"], "--target-tags=prod-v2", "--allow=" + allow, "--source-ranges=" + source, *common)
+    if not exists("compute", "firewall-rules", "describe", "web-saas-prod-v2-proxy-tcp", *common):
+        gcloud("compute", "firewall-rules", "create", "web-saas-prod-v2-proxy-tcp", "--network=" + spec["network"], "--target-tags=prod-v2-edge", "--allow=tcp:1443", "--source-ranges=0.0.0.0/0", *common)
     records = []
     for item in spec["instances"]:
         name = item["name"]
@@ -84,6 +86,8 @@ def main():
         ip = gcloud("compute", "addresses", "describe", address_name, region, "--format=value(address)", *common).strip()
         if not exists("compute", "instances", "describe", name, zone, *common):
             gcloud("compute", "instances", "create", name, zone, "--machine-type=" + item["machine_type"], "--subnet=" + spec["subnet"], "--address=" + ip, "--image-family=debian-12", "--image-project=debian-cloud", "--boot-disk-size=" + str(item["boot_disk_gb"]), "--boot-disk-type=pd-balanced", "--metadata=enable-oslogin=TRUE", "--no-service-account", "--no-scopes", "--tags=prod-v2", "--labels=environment=prod,stack=prod-v2,role=" + item["role"], "--deletion-protection", *common)
+        if item["role"] in ["free", "plus", "team"]:
+            gcloud("compute", "instances", "add-tags", name, zone, "--tags=prod-v2-edge", *common)
         if item.get("data_disk_gb"):
             disk = name + "-data"
             if not exists("compute", "disks", "describe", disk, zone, *common):
