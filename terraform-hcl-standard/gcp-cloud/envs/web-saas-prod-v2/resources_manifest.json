@@ -1,0 +1,56 @@
+{
+  "environment": "prod",
+  "project_id": "open-platform-prod",
+  "vault_nodes": [],
+  "spot_vms": [
+    {
+      "name": "web-saas-prod-v2",
+      "zone": "asia-east1-a",
+      "machine_type": "e2-medium",
+      "image": "projects/debian-cloud/global/images/debian-12-bookworm-v20261014",
+      "provisioning_model": "STANDARD",
+      "deletion_protection": true,
+      "enable_oslogin": true,
+      "public_ip": true,
+      "static_ip_name": "web-saas-prod-v2-ip",
+      "boot_disk_size_gb": 30,
+      "boot_disk_auto_delete": true,
+      "network_tags": [
+        "prod-v2"
+      ],
+      "public_tcp_ports": [
+        80,
+        443
+      ],
+      "public_udp_ports": [
+        443
+      ],
+      "public_firewall_name": "web-saas-prod-v2-https",
+      "private_tcp_ports": [
+        15433
+      ],
+      "private_source_ranges": [
+        "10.74.0.0/24"
+      ],
+      "private_firewall_name": "web-saas-prod-v2-private-db",
+      "inventory_groups": [
+        "control_plane",
+        "web_saas",
+        "prod_v2"
+      ],
+      "host_vars": {
+        "node_id": "control-plane",
+        "role": "control",
+        "service_domains": [
+          "console-selfhost-prod-v2.svc.plus"
+        ]
+      },
+      "labels": {
+        "environment": "prod",
+        "stack": "prod-v2",
+        "role": "control"
+      }
+    }
+  ],
+  "cloud_run_services": []
+}

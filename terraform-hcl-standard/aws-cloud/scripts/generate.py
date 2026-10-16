@@ -62,6 +62,9 @@ NODE_METADATA_DEFAULTS = {
     "cloud_region": "",
     "location": "",
     "node_label": "",
+    "pool": "",
+    "arch": "",
+    "resource_class": "",
 }
 VALID_AWS_PROVIDER_ALIASES = {"default", "us", "hk"}
 
@@ -272,6 +275,9 @@ def cmd_inventory(args):
             "cloud_region": host_vars["cloud_region"],
             "location": host_vars["location"],
             "node_label": host_vars["node_label"],
+            "pool": host_vars["pool"],
+            "arch": host_vars["arch"],
+            "resource_class": host_vars["resource_class"],
             "billing_mode": host_vars["billing_mode"],
             "spot_instance": host_vars["spot_instance"],
             "max_runtime_minutes": host_vars["max_runtime_minutes"],

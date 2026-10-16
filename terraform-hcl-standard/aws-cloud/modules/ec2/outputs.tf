@@ -10,7 +10,7 @@ output "instance_arn" {
 
 output "public_ip" {
   description = "Public IPv4 address"
-  value       = aws_instance.this.public_ip
+  value       = var.elastic_ip ? aws_eip.this[0].public_ip : aws_instance.this.public_ip
 }
 
 output "private_ip" {

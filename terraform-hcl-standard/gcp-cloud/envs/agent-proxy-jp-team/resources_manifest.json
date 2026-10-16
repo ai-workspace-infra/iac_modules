@@ -1,0 +1,62 @@
+{
+  "environment": "prod",
+  "project_id": "open-platform-prod",
+  "vault_nodes": [],
+  "spot_vms": [
+    {
+      "name": "agent-proxy-jp-team",
+      "zone": "asia-northeast1-a",
+      "machine_type": "n2-custom-2-2048",
+      "image": "projects/debian-cloud/global/images/family/debian-12",
+      "provisioning_model": "STANDARD",
+      "deletion_protection": true,
+      "require_data_disk": false,
+      "enable_oslogin": true,
+      "public_ip": true,
+      "static_ip_name": "agent-team-prod-v2-ip",
+      "boot_disk_size_gb": 20,
+      "boot_disk_auto_delete": true,
+      "network_tags": [
+        "prod-v2-team"
+      ],
+      "public_tcp_ports": [
+        80,
+        443,
+        1443
+      ],
+      "public_udp_ports": [
+        443
+      ],
+      "inventory_groups": [
+        "edges",
+        "team",
+        "gcp_cloud",
+        "prod_v2"
+      ],
+      "pool": "team",
+      "arch": "amd64",
+      "resource_class": "standard-n2-custom",
+      "location": "jp",
+      "node_label": "jp-team",
+      "host_vars": {
+        "node_id": "jp-team",
+        "role": "edge",
+        "pool": "team",
+        "arch": "amd64",
+        "resource_class": "standard-n2-custom",
+        "logical_region": "jp",
+        "provider_region": "asia-northeast1",
+        "service_domains": [
+          "agent-team-selfhost-prod-v2.svc.plus"
+        ]
+      },
+      "labels": {
+        "environment": "prod",
+        "stack": "prod-v2",
+        "role": "team",
+        "pool": "team"
+      }
+    }
+  ],
+  "cloud_run_services": []
+}

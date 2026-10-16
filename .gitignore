@@ -56,3 +56,8 @@ offline-iac/
 offline-setup-*.tar.gz
 
 .env
+
+*.tfplan
+tfplan
+cmdb.json
+inventory.ini

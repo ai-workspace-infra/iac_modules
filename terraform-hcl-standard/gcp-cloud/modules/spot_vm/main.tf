@@ -113,6 +113,30 @@ variable "has_external_data_disk" {
   default     = false
 }
 
+variable "static_ip_address" {
+  description = "Optional reserved external IPv4 address for access_config."
+  type        = string
+  default     = null
+}
+
+variable "boot_disk_size_gb" {
+  description = "Boot disk size in GiB."
+  type        = number
+  default     = 20
+}
+
+variable "boot_disk_auto_delete" {
+  description = "Whether the boot disk auto-deletes when the instance is deleted."
+  type        = bool
+  default     = null
+}
+
+variable "require_data_disk" {
+  description = "Whether STANDARD provisioning requires a data disk. True for control plane, false for edge nodes."
+  type        = bool
+  default     = true
+}
+
 resource "google_compute_instance" "this" {
   project                   = var.project_id
   name                      = var.name
@@ -145,7 +169,7 @@ resource "google_compute_instance" "this" {
       error_message = "A public Spot VM requires OS Login or an SSH public key from the deploy environment."
     }
     precondition {
-      condition     = var.provisioning_model != "STANDARD" || (var.deletion_protection && (var.data_disk_id != "" || var.has_external_data_disk))
+      condition     = var.provisioning_model != "STANDARD" || !var.require_data_disk || (var.deletion_protection && (var.data_disk_id != "" || var.has_external_data_disk))
       error_message = "A STANDARD service host requires deletion protection and an independent data disk."
     }
     precondition {
@@ -155,10 +179,10 @@ resource "google_compute_instance" "this" {
   }
 
   boot_disk {
-    auto_delete = var.provisioning_model == "SPOT"
+    auto_delete = var.boot_disk_auto_delete != null ? var.boot_disk_auto_delete : (var.provisioning_model == "SPOT")
     initialize_params {
       image = var.image
-      size  = 20
+      size  = var.boot_disk_size_gb
       type  = "pd-balanced"
     }
   }
@@ -177,7 +201,9 @@ resource "google_compute_instance" "this" {
     subnetwork = var.subnetwork
     dynamic "access_config" {
       for_each = var.public_ip ? [1] : []
-      content {}
+      content {
+        nat_ip = var.static_ip_address
+      }
     }
   }
 

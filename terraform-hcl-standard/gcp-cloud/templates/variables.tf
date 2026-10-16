@@ -69,6 +69,18 @@ variable "subnet_cidr" {
   default = null
 }
 
+variable "subnet_name" {
+  type        = string
+  default     = ""
+  description = "Explicit subnetwork name override."
+}
+
+variable "private_ip_google_access" {
+  type        = bool
+  default     = true
+  description = "Whether VMs on this subnetwork can access Google services without external IP."
+}
+
 variable "enable_cloud_nat" {
   type        = bool
   default     = true
@@ -123,4 +135,10 @@ variable "cloud_run_service_name" {
 variable "cloud_run_image" {
   type    = string
   default = null
+}
+
+variable "create_network" {
+  type        = bool
+  default     = true
+  description = "Whether to create a new VPC network."
 }
