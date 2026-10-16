@@ -102,6 +102,9 @@ def normalize_resources(document):
         "region": spec.get("region"),
         "network_name": spec.get("network_name"),
         "subnet_cidr": spec.get("subnet_cidr"),
+        "subnet_name": spec.get("subnet_name", ""),
+        "create_network": spec.get("create_network", True),
+        "private_ip_google_access": spec.get("private_ip_google_access", True),
         "enable_cloud_nat": spec.get("enable_cloud_nat", True),
         "enable_iap_ssh": spec.get("enable_iap_ssh", False),
         "enable_oslogin": spec.get("enable_oslogin", spec.get("enable_iap_ssh", False)),
@@ -112,6 +115,7 @@ def normalize_resources(document):
         "external_ip_policy_parent_identity": spec.get("external_ip_policy_parent_identity", "project_id"),
         "manage_external_ip_policy": spec.get("manage_external_ip_policy", True),
         "spot_ssh_source_ranges": spec.get("spot_ssh_source_ranges", []),
+        "spot_ssh_firewall_name": spec.get("spot_ssh_firewall_name", ""),
         "spot_network_tags": spec.get("spot_network_tags", []),
         "ssh_username": spec.get("ssh_username", "github-actions"),
         "artifact_registry_location": spec.get("artifact_registry_location"),
@@ -248,7 +252,8 @@ def normalize_resources(document):
             and disk.get("zone") == vm["zone"] and disk.get("mount_path") == "/data"
             for disk in retained_disks
         )
-        if model == "STANDARD" and (
+        require_data_disk = vm.get("require_data_disk", True)
+        if model == "STANDARD" and require_data_disk and (
             not vm.get("deletion_protection") or (data_disk is None and not has_retained_disk)
         ):
             raise SystemExit("STANDARD service VMs require deletion_protection and durable /data storage")
@@ -359,28 +364,33 @@ def validate_spot_service_declaration(vm):
         raise SystemExit(f"Spot VM {vm['name']} public_tcp_ports requires network_tags for the firewall target")
     private_ports = vm.get("private_tcp_ports", [])
     source_tags = vm.get("private_source_tags", [])
+    source_ranges = vm.get("private_source_ranges", [])
     target_tags = vm.get("private_target_tags", [])
     if not isinstance(private_ports, list) or any(
         isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535
         for port in private_ports
     ) or len(set(private_ports)) != len(private_ports) or 22 in private_ports:
         raise SystemExit(f"Spot VM {vm['name']} private_tcp_ports must contain unique non-SSH TCP ports")
+    if source_ranges:
+        if not isinstance(source_ranges, list) or any(not isinstance(r, str) for r in source_ranges):
+            raise SystemExit(f"Spot VM {vm['name']} private_source_ranges must be a list of CIDRs")
     if not isinstance(source_tags, list) or any(
         not isinstance(tag, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,62}", tag)
         for tag in source_tags
     ) or len(set(source_tags)) != len(source_tags):
         raise SystemExit(f"Spot VM {vm['name']} private_source_tags must contain unique GCP network tags")
-    if bool(private_ports) != bool(source_tags):
-        raise SystemExit(f"Spot VM {vm['name']} private TCP ports require source tags and vice versa")
+    if bool(private_ports) != bool(source_tags or source_ranges):
+        raise SystemExit(f"Spot VM {vm['name']} private TCP ports require source tags or source ranges and vice versa")
     if private_ports and not vm.get("network_tags"):
         raise SystemExit(f"Spot VM {vm['name']} private_tcp_ports requires network_tags for the firewall target")
-    if not isinstance(target_tags, list) or any(
-        not isinstance(tag, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,62}", tag)
-        for tag in target_tags
-    ) or len(set(target_tags)) != len(target_tags):
-        raise SystemExit(f"Spot VM {vm['name']} private_target_tags must contain unique GCP network tags")
-    if private_ports and (not target_tags or not set(target_tags).issubset(vm["network_tags"])):
-        raise SystemExit(f"Spot VM {vm['name']} private_target_tags must be declared on the VM")
+    if source_tags:
+        if not isinstance(target_tags, list) or any(
+            not isinstance(tag, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,62}", tag)
+            for tag in target_tags
+        ) or len(set(target_tags)) != len(target_tags):
+            raise SystemExit(f"Spot VM {vm['name']} private_target_tags must contain unique GCP network tags")
+        if not target_tags or not set(target_tags).issubset(vm["network_tags"]):
+            raise SystemExit(f"Spot VM {vm['name']} private_target_tags must be declared on the VM")
     if target_tags and not private_ports:
         raise SystemExit(f"Spot VM {vm['name']} private_target_tags requires private_tcp_ports")
     host_vars = vm.get("host_vars", {})
@@ -510,6 +520,7 @@ def render(args):
         enable_oslogin=global_config.get("enable_oslogin", global_config.get("enable_iap_ssh", False)),
         ssh_source_ranges=global_config.get("ssh_source_ranges", []),
         spot_ssh_source_ranges=spot_ssh_sources,
+        spot_ssh_firewall_name=global_config.get("spot_ssh_firewall_name", ""),
         spot_network_tags=spot_network_tags,
     )
     generated = workdir / "generated_platform.tf"
@@ -541,7 +552,9 @@ def render(args):
         "github_owner",
         "github_repository",
         "network_name",
+        "subnet_name",
         "subnet_cidr",
+        "private_ip_google_access",
         "enable_cloud_nat",
         "ssh_source_ranges",
         "ssh_username",
@@ -549,6 +562,7 @@ def render(args):
         "artifact_registry_id",
         "cloud_run_service_name",
         "cloud_run_image",
+        "create_network",
     }
     tfvars = {key: value for key, value in global_config.items() if key in declared}
     (workdir / "terraform.auto.tfvars.json").write_text(
@@ -743,7 +757,7 @@ def inventory(args):
         host_vars.setdefault("node_id", vm.get("node_id") or vm["name"])
         host_vars.setdefault("cloud_provider", "gcp-cloud")
         host_vars.setdefault("cloud_region", global_config.get("region", ""))
-        for key in ("location", "node_label"):
+        for key in ("location", "node_label", "pool", "arch", "resource_class"):
             if vm.get(key):
                 host_vars.setdefault(key, vm[key])
         inventory_name = spot_inventory_name(vm)
@@ -757,6 +771,9 @@ def inventory(args):
             "public_ip": public_ip,
             "zone": facts.get("zone", vm["zone"]),
             "resource_id": facts.get("self_link"),
+            "pool": vm.get("pool", host_vars.get("pool", "")),
+            "arch": vm.get("arch", host_vars.get("arch", "")),
+            "resource_class": vm.get("resource_class", host_vars.get("resource_class", "")),
             "ansible_user": (
                 oslogin_username(runtime.get("project_id"), runtime.get("deploy_account"))
                 if vm.get("enable_oslogin")

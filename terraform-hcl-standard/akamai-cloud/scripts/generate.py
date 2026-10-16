@@ -68,6 +68,9 @@ def load_sources(resources):
             ports = (host.get("firewall", {}) or {}).get("additional_tcp_ports", [])
             if not isinstance(ports, list) or any(type(port) is not int or not 1 <= port <= 65535 for port in ports):
                 raise SystemExit("firewall.additional_tcp_ports must be a list of TCP ports between 1 and 65535")
+            udp_ports = (host.get("firewall", {}) or {}).get("additional_udp_ports", [])
+            if not isinstance(udp_ports, list) or any(type(port) is not int or not 1 <= port <= 65535 for port in udp_ports):
+                raise SystemExit("firewall.additional_udp_ports must be a list of UDP ports between 1 and 65535")
             host["_source"] = str(path)
             hosts.append(host)
     if not hosts:
@@ -210,6 +213,9 @@ def inventory(args):
         host_vars.setdefault("cloud_region", host.get("region", default_region))
         host_vars.setdefault("plan", host.get("type", host.get("plan", global_config.get("type"))))
         host_vars.setdefault("image", host.get("image", global_config.get("image")))
+        for key in ("pool", "arch", "resource_class", "location", "node_label"):
+            if host.get(key):
+                host_vars.setdefault(key, host[key])
         service_domains = host_vars.get("service_domains", []) or []
         fqdn = str(service_domains[0]).strip() if isinstance(service_domains, list) and service_domains else name
         ssh_user = host.get("ansible_user", "root")
@@ -224,6 +230,9 @@ def inventory(args):
             "region": host_vars["cloud_region"],
             "type": host_vars["plan"],
             "image": host_vars["image"],
+            "pool": host.get("pool", host_vars.get("pool", "")),
+            "arch": host.get("arch", host_vars.get("arch", "")),
+            "resource_class": host.get("resource_class", host_vars.get("resource_class", "")),
             # Keep deployment metadata at the top level as well as in
             # host_vars. The platform-ops bootstrap router reads groups and
             # the SSH user directly from cmdb.json.

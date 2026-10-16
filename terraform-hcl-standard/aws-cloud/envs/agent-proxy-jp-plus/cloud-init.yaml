@@ -1,0 +1,6 @@
+#cloud-config
+package_update: true
+package_upgrade: true
+runcmd:
+  - echo "Provisioned by Terraform ai-workspace env" > /etc/motd
+  - systemctl enable --now ssh || systemctl enable --now sshd || true

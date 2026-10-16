@@ -1,0 +1,20 @@
+{
+  "provider": "akamai-cloud",
+  "state_namespace": "agent-proxy-jp-free",
+  "hosts": [
+    {
+      "name": "jp-free",
+      "label": "jp-free",
+      "source": "/Users/shenlan/worktrees/gitops-prod-v2/resources/prod-v2.svc.plus/prod/akamai/agent-proxy-jp-free.yaml",
+      "region": "jp-tyo-3",
+      "type": "g6-standard-1",
+      "image": "linode/debian12",
+      "groups": [
+        "edges",
+        "free",
+        "akamai_cloud",
+        "prod_v2"
+      ]
+    }
+  ]
+}

@@ -39,13 +39,16 @@ resource "google_org_policy_policy" "vm_external_ip_access" {
 
 {% if enable_network %}
 module "network" {
-  source       = "../../modules/network"
-  depends_on   = [module.project]
-  project_id   = module.project.project_id
-  region       = var.region
-  network_name = var.network_name
-  subnet_cidr  = var.subnet_cidr
-  enable_nat   = var.enable_cloud_nat
+  source                   = "../../modules/network"
+  depends_on               = [module.project]
+  create_network           = var.create_network
+  project_id               = module.project.project_id
+  region                   = var.region
+  network_name             = var.network_name
+  subnet_name              = var.subnet_name
+  subnet_cidr              = var.subnet_cidr
+  enable_nat               = var.enable_cloud_nat
+  private_ip_google_access = var.private_ip_google_access
 }
 {% endif %}
 
@@ -211,6 +214,16 @@ module "data_disk_{{ vm.name | tf_id }}" {
   labels     = {{ vm.labels | default({}) | tojson }}
 }
 {% endif %}
+{% for vm in spot_vms if vm.static_ip_name is defined %}
+resource "google_compute_address" "spot_ip_{{ vm.name | tf_id }}" {
+  project      = module.project.project_id
+  name         = {{ vm.static_ip_name | tojson }}
+  region       = var.region
+  address_type = "EXTERNAL"
+  network_tier = "PREMIUM"
+}
+
+{% endfor %}
 module "spot_{{ vm.name | tf_id }}" {
   source          = "../../modules/spot_vm"
   depends_on      = [module.project, module.network{% if external_ip_allowed_instances and manage_external_ip_policy %}, google_org_policy_policy.vm_external_ip_access{% endif %}]
@@ -229,6 +242,18 @@ module "spot_{{ vm.name | tf_id }}" {
   enable_oslogin  = {{ vm.enable_oslogin | default(false) | tojson }}
   provisioning_model = {{ vm.provisioning_model | default('SPOT') | tojson }}
   deletion_protection = {{ vm.deletion_protection | default(false) | tojson }}
+{% if vm.static_ip_name is defined %}
+  static_ip_address = google_compute_address.spot_ip_{{ vm.name | tf_id }}.address
+{% endif %}
+{% if vm.boot_disk_size_gb is defined %}
+  boot_disk_size_gb = {{ vm.boot_disk_size_gb }}
+{% endif %}
+{% if vm.boot_disk_auto_delete is defined %}
+  boot_disk_auto_delete = {{ vm.boot_disk_auto_delete | tojson }}
+{% endif %}
+{% if vm.require_data_disk is defined %}
+  require_data_disk = {{ vm.require_data_disk | tojson }}
+{% endif %}
 {% if vm.data_disk is defined %}
   data_disk_id = module.data_disk_{{ vm.name | tf_id }}.id
   data_disk_device_name = {{ vm.data_disk.device_name | tojson }}
@@ -266,32 +291,44 @@ resource "google_iap_tunnel_instance_iam_member" "spot_iap_tunnel_{{ vm.name | t
 }
 
 {% endfor %}
-{% for vm in spot_vms if vm.public_tcp_ports | default([]) %}
+{% for vm in spot_vms if vm.public_tcp_ports | default([]) or vm.public_udp_ports | default([]) %}
 # Public service ports of this VM only. SSH stays on the spot_ssh rule below.
 resource "google_compute_firewall" "spot_public_tcp_{{ vm.name | tf_id }}" {
   project       = module.project.project_id
-  name          = "{{ vm.name }}-public-tcp"
+  name          = "{{ vm.public_firewall_name | default(vm.name ~ '-public-tcp') }}"
   network       = module.network.network
   direction     = "INGRESS"
   source_ranges = ["0.0.0.0/0"]
   target_tags   = {{ vm.network_tags | tojson }}
 
+{% if vm.public_tcp_ports | default([]) %}
   allow {
     protocol = "tcp"
     ports    = {{ vm.public_tcp_ports | map("string") | list | tojson }}
   }
+{% endif %}
+{% if vm.public_udp_ports | default([]) %}
+  allow {
+    protocol = "udp"
+    ports    = {{ vm.public_udp_ports | map("string") | list | tojson }}
+  }
+{% endif %}
 }
 
 {% endfor %}
 {% for vm in spot_vms if vm.private_tcp_ports | default([]) %}
-# Service traffic for this VM is accepted only from declared source tags.
+# Service traffic for this VM is accepted only from declared source tags or ranges.
 resource "google_compute_firewall" "spot_private_tcp_{{ vm.name | tf_id }}" {
   project     = module.project.project_id
-  name        = "{{ vm.name }}-private-tcp"
+  name        = "{{ vm.private_firewall_name | default(vm.name ~ '-private-tcp') }}"
   network     = module.network.network
   direction   = "INGRESS"
+{% if vm.private_source_ranges is defined %}
+  source_ranges = {{ vm.private_source_ranges | tojson }}
+{% else %}
   source_tags = {{ vm.private_source_tags | tojson }}
   target_tags = {{ vm.private_target_tags | tojson }}
+{% endif %}
 
   allow {
     protocol = "tcp"
@@ -303,7 +340,7 @@ resource "google_compute_firewall" "spot_private_tcp_{{ vm.name | tf_id }}" {
 {% if spot_vms and spot_ssh_source_ranges %}
 resource "google_compute_firewall" "spot_ssh" {
   project       = module.project.project_id
-  name          = "{{ network_name }}-spot-ssh"
+  name          = "{{ spot_ssh_firewall_name | default(network_name ~ '-spot-ssh') }}"
   network       = module.network.network
   direction     = "INGRESS"
   source_ranges = {{ spot_ssh_source_ranges | tojson }}
