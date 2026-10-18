@@ -225,6 +225,10 @@ def normalize_resources(document):
             raise SystemExit("VM provisioning_model must be SPOT or STANDARD")
         if not isinstance(vm.get("deletion_protection", False), bool):
             raise SystemExit("VM deletion_protection must be a boolean")
+        if not isinstance(vm.get("reserve_static_public_ip", False), bool):
+            raise SystemExit("VM reserve_static_public_ip must be a boolean")
+        if vm.get("reserve_static_public_ip") and not vm.get("public_ip"):
+            raise SystemExit("VM reserve_static_public_ip requires public_ip: true")
         data_disk = vm.get("data_disk")
         if data_disk is not None:
             if not isinstance(data_disk, dict):
@@ -342,6 +346,10 @@ def spot_inventory_name(vm):
 
 
 def validate_spot_service_declaration(vm):
+    if not isinstance(vm.get("reserve_static_public_ip", False), bool):
+        raise SystemExit("VM reserve_static_public_ip must be a boolean")
+    if vm.get("reserve_static_public_ip") and not vm.get("public_ip"):
+        raise SystemExit("VM reserve_static_public_ip requires public_ip: true")
     ports = vm.get("public_tcp_ports", [])
     if not isinstance(ports, list) or any(
         isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535 for port in ports

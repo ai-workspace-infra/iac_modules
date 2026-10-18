@@ -19,6 +19,10 @@ variable "zone" {
   type = string
 }
 
+variable "region" {
+  type = string
+}
+
 variable "machine_type" {
   type = string
 }
@@ -49,6 +53,12 @@ variable "network_tags" {
 variable "public_ip" {
   type    = bool
   default = false
+}
+
+variable "reserve_static_public_ip" {
+  description = "Reserve a durable regional external IPv4 address and attach it to this instance."
+  type        = bool
+  default     = false
 }
 
 variable "ssh_public_key" {
@@ -145,6 +155,10 @@ resource "google_compute_instance" "this" {
       error_message = "A public Spot VM requires OS Login or an SSH public key from the deploy environment."
     }
     precondition {
+      condition     = !var.reserve_static_public_ip || var.public_ip
+      error_message = "reserve_static_public_ip requires public_ip = true."
+    }
+    precondition {
       condition     = var.provisioning_model != "STANDARD" || (var.deletion_protection && (var.data_disk_id != "" || var.has_external_data_disk))
       error_message = "A STANDARD service host requires deletion protection and an independent data disk."
     }
@@ -177,7 +191,9 @@ resource "google_compute_instance" "this" {
     subnetwork = var.subnetwork
     dynamic "access_config" {
       for_each = var.public_ip ? [1] : []
-      content {}
+      content {
+        nat_ip = var.reserve_static_public_ip ? google_compute_address.public[0].address : null
+      }
     }
   }
 
@@ -194,6 +210,20 @@ resource "google_compute_instance" "this" {
         seconds = max_run_duration.value
       }
     }
+  }
+}
+
+resource "google_compute_address" "public" {
+  count = var.public_ip && var.reserve_static_public_ip ? 1 : 0
+
+  project      = var.project_id
+  name         = "${var.name}-ip"
+  region       = var.region
+  address_type = "EXTERNAL"
+  network_tier = "PREMIUM"
+
+  lifecycle {
+    prevent_destroy = true
   }
 }
 
@@ -218,7 +248,7 @@ output "provisioning_model" {
 }
 
 output "public_ip" {
-  value = try(google_compute_instance.this.network_interface[0].access_config[0].nat_ip, null)
+  value = var.reserve_static_public_ip ? google_compute_address.public[0].address : try(google_compute_instance.this.network_interface[0].access_config[0].nat_ip, null)
 }
 
 output "private_ip" {

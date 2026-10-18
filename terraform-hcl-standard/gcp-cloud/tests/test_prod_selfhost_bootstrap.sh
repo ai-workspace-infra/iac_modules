@@ -6,6 +6,7 @@ PRIVATE=$(mktemp -d)
 trap 'rm -rf -- "$PRIVATE"' EXIT
 bash -n "$ROOT/scripts/bootstrap_prod_selfhost.sh"
 bash "$ROOT/scripts/bootstrap_prod_selfhost.sh" --help >/dev/null
+[[ -s "$ROOT/.terraform.lock.hcl" ]]
 JQ=(jq -e -L "$ROOT/scripts/lib")
 jq -n -L "$ROOT/scripts/lib" 'include "prod-bootstrap";
   {resource_changes:[targets("identity")[] | . as $address |
@@ -50,6 +51,7 @@ reject "$PRIVATE/policy.json" external-ip '.resource_changes[0].change.after.spe
 reject "$PRIVATE/policy.json" external-ip '.resource_changes[0].change.after.spec[0].inherit_from_parent=true'
 reject "$PRIVATE/policy.json" external-ip '.resource_changes[0].change.after.name="projects/986070475391/policies/other"'
 reject "$PRIVATE/policy.json" external-ip '.resource_changes[0].change.before=.resource_changes[0].change.after | .resource_changes[0].change.before.spec[0].rules[0].values[0].allowed_values += ["other"]'
+reject "$PRIVATE/policy.json" external-ip '.resource_changes[0].change.after.spec[0].rules[0].values[0].allowed_values |= . + ["projects/open-platform-prod/zones/asia-east1-a/instances/other"]'
 reject "$PRIVATE/policy.json" external-ip '.resource_changes[0].change.after_unknown.spec[0].rules[0].values=[{allowed_values:true}]'
 reject "$PRIVATE/identity.json" identity '.errored=true'
 reject "$PRIVATE/identity.json" identity '.deferred_changes=[{}]'
@@ -58,6 +60,16 @@ jq -n '{lineage:"existing",serial:1,resources:[
   {mode:"managed",type:"google_iam_workload_identity_pool",name:"github",instances:[]},
   {mode:"managed",type:"google_iam_workload_identity_pool_provider",name:"github",instances:[]}]}' >"$PRIVATE/state.json"
 "${JQ[@]}" 'include "prod-bootstrap"; state_snapshot("identity")' "$PRIVATE/state.json" >/dev/null
+jq -n '{lineage:"existing",serial:8,resources:[
+  {mode:"managed",type:"google_compute_network",name:"this",module:"module.network",instances:[]},
+  {mode:"managed",type:"google_compute_subnetwork",name:"this",module:"module.network",instances:[]},
+  {mode:"managed",type:"google_compute_disk",name:"this",module:"module.data_disk_web_saas_prod",instances:[]},
+  {mode:"managed",type:"google_compute_disk",name:"this",module:"module.data_disk_web_saas_prod_v3",instances:[]}]}' >"$PRIVATE/resource-state.json"
+"${JQ[@]}" 'include "prod-bootstrap"; state_snapshot("external-ip")' "$PRIVATE/resource-state.json" >/dev/null
+jq ' .resources |= map(select(.module != "module.data_disk_web_saas_prod_v3"))' \
+  "$PRIVATE/resource-state.json" >"$PRIVATE/missing-v3-disk.json"
+if "${JQ[@]}" 'include "prod-bootstrap"; state_snapshot("external-ip")' \
+  "$PRIVATE/missing-v3-disk.json" >/dev/null 2>&1; then exit 1; fi
 jq '.resources=[]' "$PRIVATE/state.json" >"$PRIVATE/bad.json"
 if "${JQ[@]}" 'include "prod-bootstrap"; state_snapshot("identity")' "$PRIVATE/bad.json" >/dev/null 2>&1; then exit 1; fi
 echo 'Shell bootstrap guards preserve bounded targets and protected state.'

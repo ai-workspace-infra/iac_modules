@@ -36,7 +36,7 @@ It supports two separately reviewed stages:
 | Stage | Allowed write | Existing state |
 | --- | --- | --- |
 | `identity` | Project `compute.securityAdmin` and `orgpolicy.policyViewer` grants to the existing PROD deployer; enable `orgpolicy.googleapis.com` | `platform-ops-toolkit/prod/xworktech/gcp-oidc-bootstrap/terraform.tfstate` |
-| `external-ip` | Adopt the existing project policy, preserve `open-platform-prod`, and add only `web-saas-prod` | `terraform/prod/svc.plus/gcp-cloud/xworktech/web-saas/terraform.tfstate` |
+| `external-ip` | Adopt the existing project policy, preserve `open-platform-prod` and `web-saas-prod`, and add only `web-saas-prod-v3` | `terraform/prod/svc.plus/gcp-cloud/xworktech/web-saas/terraform.tfstate` |
 
 The caller pins clean IaC and GitOps checkouts by full commit SHA. The owner
 requires the existing WIF/Service Account state for the first stage and the
@@ -54,16 +54,19 @@ into the same namespace state; it is not recreated in another stack. Existing
 undeclared allowances, broad or conditional policies require separate review.
 No VM/network/disk changes are permitted by either bootstrap stage.
 
-Live inspection on 2026-10-06 found the existing V2 policy created on 2026-09-29,
-with parent `projects/986070475391` and a sole allowance for
-`projects/open-platform-prod/zones/asia-east1-a/instances/open-platform-prod`.
-The earlier `projects/open-platform-prod` parent alias forced delete/create
-after import, and removing that preexisting allowance was also prohibited.
-GitOps now explicitly selects `external_ip_policy_parent_identity: project_number`
-for this namespace and preserves that one old allowance alongside the new one.
-Other namespaces keep the existing project-ID default. Both parent and exact
-allowances remain managed; no ignore rule for parent or broad project allowance
-is introduced. Legacy permission retirement is a separate reviewed change.
+Live read-only inspection on 2026-10-18 found the existing project policy at
+`projects/986070475391`, with eight existing instance allowances across PROD
+services and regions. The desired declaration retains all eight and adds only
+`web-saas-prod-v3`; no existing allowance is removed. The earlier
+`projects/open-platform-prod` parent alias forced delete/create after import,
+so GitOps explicitly selects `external_ip_policy_parent_identity:
+project_number` for this namespace. The verifier requires the exact nine-item
+allowlist and rejects broader or conditional policy changes. It also requires
+the partially created V3 data disk to be present in the existing state and
+protects its state fingerprint during policy repair. Other namespaces keep the
+existing project-ID default. Both parent and exact allowances remain managed;
+no ignore rule for parent or broad project allowance is introduced. Legacy
+permission retirement is a separate reviewed change.
 
 `--diagnostic-plan` is a read-only owner troubleshooting option. It emits only
 resource addresses/actions/replacement paths and policy shape, then still runs

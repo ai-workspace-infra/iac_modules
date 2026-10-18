@@ -217,6 +217,7 @@ module "spot_{{ vm.name | tf_id }}" {
   project_id      = module.project.project_id
   name            = {{ vm.name | tojson }}
   zone            = {{ vm.zone | tojson }}
+  region          = var.region
   machine_type    = {{ vm.machine_type | tojson }}
   image           = {{ vm.image | default('projects/debian-cloud/global/images/family/debian-12') | tojson }}
   network         = module.network.network
@@ -224,6 +225,7 @@ module "spot_{{ vm.name | tf_id }}" {
   labels          = {{ vm.labels | default({}) | tojson }}
   network_tags    = {{ vm.network_tags | default([]) | tojson }}
   public_ip       = {{ vm.public_ip | default(false) | tojson }}
+  reserve_static_public_ip = {{ vm.reserve_static_public_ip | default(false) | tojson }}
   ssh_public_key  = var.ssh_public_key
   ssh_username    = var.ssh_username
   enable_oslogin  = {{ vm.enable_oslogin | default(false) | tojson }}
