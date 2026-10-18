@@ -58,6 +58,8 @@ verify_checkout() {
 verify_checkout "$REPO" "$IAC_REF" ai-workspace-infra/iac_modules
 verify_checkout "$GITOPS_DIR" "$GITOPS_REF" ai-workspace-infra/gitops
 WORKDIR=$(mktemp -d "$ROOT/envs/.prod-selfhost-bootstrap-XXXXXXXX") || stop 'cannot prepare private workspace'
+[[ -s "$ROOT/.terraform.lock.hcl" ]] || stop 'pinned Google provider lockfile missing'
+cp "$ROOT/.terraform.lock.hcl" "$WORKDIR/.terraform.lock.hcl" || stop 'cannot prepare pinned provider lockfile'
 # Reuse the directory's existing Shell/Ruby YAML convention; no custom Python
 # bootstrap/controller is involved. Only the shared IaC renderer remains Python.
 ruby -ryaml -rjson -e '

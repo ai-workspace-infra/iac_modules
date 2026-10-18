@@ -6,6 +6,7 @@ PRIVATE=$(mktemp -d)
 trap 'rm -rf -- "$PRIVATE"' EXIT
 bash -n "$ROOT/scripts/bootstrap_prod_selfhost.sh"
 bash "$ROOT/scripts/bootstrap_prod_selfhost.sh" --help >/dev/null
+[[ -s "$ROOT/.terraform.lock.hcl" ]]
 JQ=(jq -e -L "$ROOT/scripts/lib")
 jq -n -L "$ROOT/scripts/lib" 'include "prod-bootstrap";
   {resource_changes:[targets("identity")[] | . as $address |
