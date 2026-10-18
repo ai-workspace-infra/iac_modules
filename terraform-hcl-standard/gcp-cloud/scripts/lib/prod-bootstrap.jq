@@ -3,8 +3,14 @@ def ensure($ok; $message): if $ok then . else error($message) end;
 def project: "open-platform-prod";
 def member: "serviceAccount:github-actions-prod@open-platform-prod.iam.gserviceaccount.com";
 def allowed_instances: [
+  "projects/open-platform-prod/zones/asia-east1-a/instances/agent-server-free-prod-v2",
+  "projects/open-platform-prod/zones/asia-east1-a/instances/agent-server-plus-prod-v2",
+  "projects/open-platform-prod/zones/asia-east1-a/instances/agent-server-team-prod-v2",
   "projects/open-platform-prod/zones/asia-east1-a/instances/open-platform-prod",
   "projects/open-platform-prod/zones/asia-east1-a/instances/web-saas-prod",
+  "projects/open-platform-prod/zones/asia-east1-a/instances/web-saas-prod-v2",
+  "projects/open-platform-prod/zones/southamerica-east1-c/instances/instance-20261008-045410",
+  "projects/open-platform-prod/zones/asia-northeast1-a/instances/agent-proxy-jp-team",
   "projects/open-platform-prod/zones/asia-east1-a/instances/web-saas-prod-v3"
 ];
 def targets($stage): if $stage == "identity" then
@@ -37,8 +43,14 @@ def declarations:
       ($r.spec|if has("manage_external_ip_policy") then .manage_external_ip_policy == true else true end) and
       $r.spec.external_ip_policy_parent_identity == "project_number" and
       $r.spec.external_ip_allowed_instances == [
+        {name:"agent-server-free-prod-v2",zone:"asia-east1-a"},
+        {name:"agent-server-plus-prod-v2",zone:"asia-east1-a"},
+        {name:"agent-server-team-prod-v2",zone:"asia-east1-a"},
         {name:"open-platform-prod",zone:"asia-east1-a"},
         {name:"web-saas-prod",zone:"asia-east1-a"},
+        {name:"web-saas-prod-v2",zone:"asia-east1-a"},
+        {name:"instance-20261008-045410",zone:"southamerica-east1-c"},
+        {name:"agent-proxy-jp-team",zone:"asia-northeast1-a"},
         {name:"web-saas-prod-v3",zone:"asia-east1-a"}
       ];
       "resource namespace or policy allowance mismatch");

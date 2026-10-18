@@ -54,20 +54,19 @@ into the same namespace state; it is not recreated in another stack. Existing
 undeclared allowances, broad or conditional policies require separate review.
 No VM/network/disk changes are permitted by either bootstrap stage.
 
-Live inspection on 2026-10-06 found the existing V2 policy created on 2026-09-29,
-with parent `projects/986070475391` and a sole allowance for
-`projects/open-platform-prod/zones/asia-east1-a/instances/open-platform-prod`.
-The earlier `projects/open-platform-prod` parent alias forced delete/create
-after import, and removing that preexisting allowance was also prohibited.
-GitOps explicitly selects `external_ip_policy_parent_identity: project_number`
-for this namespace. The V3 plan must preserve the existing
-`open-platform-prod` and `web-saas-prod` instance allowances and add only
-`web-saas-prod-v3`, all in `asia-east1-a`. The verifier also requires the
-partially created V3 data disk to be present in the existing state and protects
-its state fingerprint during policy repair. Other namespaces keep the existing
-project-ID default. Both parent and exact allowances remain managed; no ignore
-rule for parent or broad project allowance is introduced. Legacy permission
-retirement is a separate reviewed change.
+Live read-only inspection on 2026-10-18 found the existing project policy at
+`projects/986070475391`, with eight existing instance allowances across PROD
+services and regions. The desired declaration retains all eight and adds only
+`web-saas-prod-v3`; no existing allowance is removed. The earlier
+`projects/open-platform-prod` parent alias forced delete/create after import,
+so GitOps explicitly selects `external_ip_policy_parent_identity:
+project_number` for this namespace. The verifier requires the exact nine-item
+allowlist and rejects broader or conditional policy changes. It also requires
+the partially created V3 data disk to be present in the existing state and
+protects its state fingerprint during policy repair. Other namespaces keep the
+existing project-ID default. Both parent and exact allowances remain managed;
+no ignore rule for parent or broad project allowance is introduced. Legacy
+permission retirement is a separate reviewed change.
 
 `--diagnostic-plan` is a read-only owner troubleshooting option. It emits only
 resource addresses/actions/replacement paths and policy shape, then still runs
