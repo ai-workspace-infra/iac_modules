@@ -12,6 +12,40 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class SpotVMDeploymentContractTest(unittest.TestCase):
+    def test_standard_service_vm_can_reserve_and_attach_static_public_ip(self):
+        spec = importlib.util.spec_from_file_location("gcp_generate", ROOT / "scripts" / "generate.py")
+        generator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generator)
+        manifest = {
+            "global": {
+                "environment": "prod", "project_id": "open-platform-prod", "region": "asia-east1",
+                "network_name": "web-saas-prod-gcp", "subnet_cidr": "10.73.0.0/24",
+                "spot_ssh_source_ranges": ["203.0.113.1/32"],
+                "spot_network_tags": ["web-saas-ssh"],
+            },
+            "service_vms": [{
+                "name": "web-saas-prod-v3", "zone": "asia-east1-a", "machine_type": "e2-medium",
+                "provisioning_model": "STANDARD", "deletion_protection": True,
+                "enable_oslogin": True, "public_ip": True, "reserve_static_public_ip": True,
+                "network_tags": ["web-saas-ssh"],
+                "data_disk": {"name": "web-saas-prod-v3-data", "device_name": "web-saas-prod-v3-data",
+                              "size_gb": 50, "type": "pd-balanced", "mount_path": "/data"},
+            }],
+        }
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(generator, "load_resources", return_value=manifest):
+            generator.render(SimpleNamespace(resources="ignored", workdir=tempdir))
+            rendered = (Path(tempdir) / "generated_platform.tf").read_text(encoding="utf-8")
+
+        vm_module = rendered.split('module "spot_web_saas_prod_v3" {', 1)[1].split("\n}", 1)[0]
+        self.assertIn("reserve_static_public_ip = true", vm_module)
+        self.assertIn('google_compute_address.public[0].address', (ROOT / "modules/spot_vm/main.tf").read_text())
+        self.assertIn('name         = "${var.name}-ip"', (ROOT / "modules/spot_vm/main.tf").read_text())
+
+        manifest["service_vms"][0]["public_ip"] = False
+        with self.assertRaises(SystemExit):
+            with tempfile.TemporaryDirectory() as tempdir, patch.object(generator, "load_resources", return_value=manifest):
+                generator.render(SimpleNamespace(resources="ignored", workdir=tempdir))
+
     def test_org_policy_api_belongs_to_bootstrap_without_org_admin_runtime_role(self):
         bootstrap = (ROOT / "bootstrap" / "identity" / "main.tf").read_text()
         self.assertIn('"orgpolicy.googleapis.com"', bootstrap)
@@ -273,7 +307,7 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
         self.assertIn('module "spot_web_saas_uat"', persistent_rendered)
         self.assertRegex(persistent_rendered, r'provisioning_model\s+= "STANDARD"')
         self.assertRegex(persistent_rendered, r'deletion_protection\s+= true')
-        self.assertIn("has_external_data_disk = true", persistent_rendered)
+        self.assertRegex(persistent_rendered, r"has_external_data_disk\s*=\s*true")
         for mutation in ("no_disk", "wrong_instance", "no_protection", "invalid_disk"):
             import copy
             candidate = copy.deepcopy(manifest)
