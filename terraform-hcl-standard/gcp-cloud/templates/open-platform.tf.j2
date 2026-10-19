@@ -317,6 +317,21 @@ resource "google_compute_firewall" "spot_ssh" {
   }
 }
 {% endif %}
+{% if iap_ssh_network_tags %}
+resource "google_compute_firewall" "spot_ssh_iap" {
+  project       = module.project.project_id
+  name          = "{{ network_name }}-spot-ssh-iap"
+  network       = module.network.network
+  direction     = "INGRESS"
+  source_ranges = ["35.235.240.0/20"]
+  target_tags   = {{ iap_ssh_network_tags | tojson }}
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+}
+{% endif %}
 {% if enable_cloud_run %}
 {% for service in cloud_run_services %}
 module "{{ service.module_name }}" {

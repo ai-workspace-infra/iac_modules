@@ -54,6 +54,8 @@ def normalize_resources(document):
     """Normalize the legacy platform manifest and namespace declarations."""
     if "global" in document:
         global_config = dict(document["global"])
+        if global_config.get("iap_ssh_targets"):
+            raise SystemExit("iap_ssh_targets require a GCPWorkloadNamespace declaration")
         global_config["imports"] = validate_imports(document.get("imports", []), "imports")
         cloud_run_services = list(document.get("cloud_run_services", []))
         legacy_cloud_run = bool(global_config.get("cloud_run_service_name"))
@@ -113,6 +115,7 @@ def normalize_resources(document):
         "manage_external_ip_policy": spec.get("manage_external_ip_policy", True),
         "spot_ssh_source_ranges": spec.get("spot_ssh_source_ranges", []),
         "spot_network_tags": spec.get("spot_network_tags", []),
+        "iap_ssh_targets": spec.get("iap_ssh_targets", []),
         "ssh_username": spec.get("ssh_username", "github-actions"),
         "artifact_registry_location": spec.get("artifact_registry_location"),
         "artifact_registry_id": spec.get("artifact_registry_id"),
@@ -266,6 +269,42 @@ def normalize_resources(document):
         ):
             raise SystemExit("Spot VM inventory_groups must contain Ansible group names")
         validate_spot_service_declaration(vm)
+
+    iap_ssh_targets = global_config["iap_ssh_targets"]
+    if not isinstance(iap_ssh_targets, list):
+        raise SystemExit("iap_ssh_targets must be a list")
+    if iap_ssh_targets and global_config["enable_iap_ssh"]:
+        raise SystemExit("scoped iap_ssh_targets cannot enable the shared enable_iap_ssh firewall")
+    target_keys = []
+    target_tags = []
+    for target in iap_ssh_targets:
+        if not isinstance(target, dict):
+            raise SystemExit("each iap_ssh_targets item must be an object")
+        instance = target.get("name")
+        zone = target.get("zone")
+        network_tag = target.get("network_tag")
+        if not re.fullmatch(r"[a-z][a-z0-9-]{0,61}[a-z0-9]", str(instance or "")):
+            raise SystemExit("iap_ssh_targets.name must be a GCP instance name")
+        if not re.fullmatch(r"[a-z]+-[a-z0-9]+-[a-z]", str(zone or "")):
+            raise SystemExit("iap_ssh_targets.zone must be a GCP zone")
+        if not re.fullmatch(r"[a-z][a-z0-9-]{0,62}", str(network_tag or "")):
+            raise SystemExit("iap_ssh_targets.network_tag must be a GCP network tag")
+        target_vm = next(
+            (vm for vm in spot_vms if vm.get("name") == instance and vm.get("zone") == zone),
+            None,
+        )
+        if target_vm is None:
+            raise SystemExit(f"IAP SSH target {instance}/{zone} must be a declared VM")
+        if not target_vm.get("enable_oslogin"):
+            raise SystemExit(f"IAP SSH target {instance} must enable OS Login")
+        if network_tag not in target_vm.get("network_tags", []):
+            raise SystemExit(f"IAP SSH target {instance} must declare network tag {network_tag}")
+        if sum(network_tag in vm.get("network_tags", []) for vm in spot_vms) != 1:
+            raise SystemExit(f"IAP SSH network tag {network_tag} must target exactly one declared VM")
+        target_keys.append((instance, zone))
+        target_tags.append(network_tag)
+    if len(target_keys) != len(set(target_keys)) or len(target_tags) != len(set(target_tags)):
+        raise SystemExit("iap_ssh_targets must not contain duplicate instances or network tags")
 
     persistent_data_disks = global_config["persistent_data_disks"]
     if not isinstance(persistent_data_disks, list):
@@ -519,6 +558,9 @@ def render(args):
         ssh_source_ranges=global_config.get("ssh_source_ranges", []),
         spot_ssh_source_ranges=spot_ssh_sources,
         spot_network_tags=spot_network_tags,
+        iap_ssh_network_tags=[
+            target["network_tag"] for target in global_config.get("iap_ssh_targets", [])
+        ],
     )
     generated = workdir / "generated_platform.tf"
     generated.write_text(content, encoding="utf-8")
