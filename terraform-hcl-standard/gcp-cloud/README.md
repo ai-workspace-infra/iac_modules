@@ -78,6 +78,15 @@ managed GCP workload states. The manifest declares the project, account,
 region, workspace, state key, network inputs, and resource list; this renderer
 turns the declaration into Terraform modules. Each namespace state may declare
 `resources.spot_vms`, `resources.cloud_run_services`, and/or `resources.vault_nodes`.
+
+For IAP SSH to a single declared service VM, use `spec.iap_ssh_targets` with
+`name`, `zone`, and `network_tag`. The tag must appear on exactly that VM,
+which must enable OS Login. The renderer creates a separate ingress rule from
+`35.235.240.0/20` to TCP 22; the existing shared SSH rule is unchanged. Do not
+combine scoped targets with the namespace-wide `enable_iap_ssh` switch. For
+example, a recovery generation can use `network_tag: web-saas-prod-v3-ssh`
+without expanding access to the preceding generation. Apply a reviewed plan
+against the existing state and regenerate CMDB/inventory afterward.
 Vault nodes default to exactly one `xconnect_role: gateway` and any number of
 `xconnect_role: one` members, plus an SSH `/32` allowlist in
 `spec.ssh_source_ranges`. A state that owns only XConnect One members may set

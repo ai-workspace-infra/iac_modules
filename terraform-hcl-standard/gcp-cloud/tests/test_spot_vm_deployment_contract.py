@@ -46,6 +46,60 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tempdir, patch.object(generator, "load_resources", return_value=manifest):
                 generator.render(SimpleNamespace(resources="ignored", workdir=tempdir))
 
+    def test_iap_ssh_firewall_is_scoped_to_one_declared_oslogin_vm(self):
+        spec = importlib.util.spec_from_file_location("gcp_generate", ROOT / "scripts" / "generate.py")
+        generator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generator)
+        manifest = {
+            "kind": "GCPWorkloadNamespace",
+            "metadata": {"name": "web-saas", "environment": "prod", "provider": "gcp"},
+            "spec": {
+                "gcp_account_id": "xworktech", "project_id": "open-platform-prod",
+                "state_project": "svc.plus",
+                "organization_id": "744119519286", "region": "asia-east1",
+                "workspace": "web-saas", "state_namespace": "web-saas",
+                "state": {"key": "terraform/prod/svc.plus/gcp-cloud/xworktech/web-saas/terraform.tfstate"},
+                "network_name": "web-saas-prod-gcp", "subnet_cidr": "10.73.0.0/24",
+                "spot_ssh_source_ranges": ["10.73.0.0/25", "10.73.0.128/25"],
+                "spot_network_tags": ["web-saas-ssh"],
+                "iap_ssh_targets": [{
+                    "name": "web-saas-prod-v3", "zone": "asia-east1-a",
+                    "network_tag": "web-saas-prod-v3-ssh",
+                }],
+                "resources": {"service_vms": [
+                    {"name": "web-saas-prod-v2", "zone": "asia-east1-a", "machine_type": "e2-medium",
+                     "provisioning_model": "STANDARD", "deletion_protection": True,
+                     "enable_oslogin": True, "public_ip": True, "network_tags": ["web-saas-ssh"],
+                     "data_disk": {"name": "v2-data", "device_name": "v2-data", "size_gb": 50,
+                                   "type": "pd-balanced", "mount_path": "/data"}},
+                    {"name": "web-saas-prod-v3", "zone": "asia-east1-a", "machine_type": "e2-medium",
+                     "provisioning_model": "STANDARD", "deletion_protection": True,
+                     "enable_oslogin": True, "public_ip": True,
+                     "network_tags": ["web-saas-ssh", "web-saas-prod-v3-ssh"],
+                     "data_disk": {"name": "v3-data", "device_name": "v3-data", "size_gb": 50,
+                                   "type": "pd-balanced", "mount_path": "/data"}},
+                ]},
+            },
+        }
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(
+            generator, "load_resources", return_value=manifest
+        ):
+            generator.render(SimpleNamespace(resources="ignored", workdir=tempdir))
+            rendered = (Path(tempdir) / "generated_platform.tf").read_text(encoding="utf-8")
+        iap_rule = rendered.split('resource "google_compute_firewall" "spot_ssh_iap" {', 1)[1].split("\n}", 1)[0]
+        self.assertIn('source_ranges = ["35.235.240.0/20"]', iap_rule)
+        self.assertIn('target_tags   = ["web-saas-prod-v3-ssh"]', iap_rule)
+        self.assertIn('ports    = ["22"]', iap_rule)
+        self.assertNotIn("web-saas-ssh", iap_rule)
+        self.assertIn('target_tags   = ["web-saas-ssh"]', rendered)
+
+        manifest["spec"]["resources"]["service_vms"][1]["network_tags"].remove("web-saas-prod-v3-ssh")
+        with self.assertRaises(SystemExit):
+            with tempfile.TemporaryDirectory() as tempdir, patch.object(
+                generator, "load_resources", return_value=manifest
+            ):
+                generator.render(SimpleNamespace(resources="ignored", workdir=tempdir))
+
     def test_org_policy_api_belongs_to_bootstrap_without_org_admin_runtime_role(self):
         bootstrap = (ROOT / "bootstrap" / "identity" / "main.tf").read_text()
         self.assertIn('"orgpolicy.googleapis.com"', bootstrap)
