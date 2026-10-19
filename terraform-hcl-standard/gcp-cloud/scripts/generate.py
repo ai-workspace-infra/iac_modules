@@ -120,6 +120,7 @@ def normalize_resources(document):
         "artifact_registry_location": spec.get("artifact_registry_location"),
         "artifact_registry_id": spec.get("artifact_registry_id"),
         "persistent_data_disks": persistent_data_disks,
+        "retained_public_tcp_rules": resources.get("retained_public_tcp_rules", []),
         "imports": validate_imports(spec.get("imports", []), "spec.imports"),
     }
     required_spec = (
@@ -514,6 +515,23 @@ def render(args):
     spot_module_names = [f"spot_{tf_id(vm['name'])}" for vm in spot_vms]
     if len(spot_module_names) != len(set(spot_module_names)):
         raise SystemExit("Spot VM names must render to unique Terraform module names")
+    retained_rules = global_config.get("retained_public_tcp_rules", [])
+    if not isinstance(retained_rules, list):
+        raise SystemExit("retained_public_tcp_rules must be a list")
+    for rule in retained_rules:
+        if not isinstance(rule, dict) or set(rule) != {"name", "network_tags", "public_tcp_ports"}:
+            raise SystemExit("retained public TCP rules require only name, network_tags and public_tcp_ports")
+        if not re.fullmatch(r"[a-z][a-z0-9-]{0,61}[a-z0-9]", str(rule["name"])):
+            raise SystemExit("retained public TCP rule name must be a GCP resource name")
+        if not rule["public_tcp_ports"]:
+            raise SystemExit("retained public TCP rule ports must not be empty")
+        validate_spot_service_declaration(dict(rule, public_ip=True))
+        if 22 in rule["public_tcp_ports"]:
+            raise SystemExit("retained public TCP rules cannot expose SSH")
+    public_tcp_rules = [vm for vm in spot_vms if vm.get("public_tcp_ports")] + retained_rules
+    public_rule_names = [tf_id(rule["name"]) for rule in public_tcp_rules]
+    if len(public_rule_names) != len(set(public_rule_names)):
+        raise SystemExit("public TCP rules must render to unique Terraform addresses")
     project_id = global_config.get("project_id")
     if not project_id:
         raise SystemExit("manifest requires project_id")
@@ -543,6 +561,7 @@ def render(args):
         manage_external_ip_policy=global_config.get("manage_external_ip_policy", True),
         external_ip_policy_parent_identity=policy_parent_identity,
         spot_vms=spot_vms,
+        public_tcp_rules=public_tcp_rules,
         persistent_data_disks=persistent_data_disks,
         cloud_run_services=cloud_run_services,
         vault_machine_type=global_config.get("vault_machine_type", ""),

@@ -12,6 +12,26 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class SpotVMDeploymentContractTest(unittest.TestCase):
+    def test_retired_host_ingress_does_not_recreate_compute_or_storage(self):
+        spec = importlib.util.spec_from_file_location("gcp_generate", ROOT / "scripts" / "generate.py")
+        generator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generator)
+        rule = {"name": "retired-host", "network_tags": ["web-saas-ssh"], "public_tcp_ports": [80, 443]}
+        manifest = {"global": {"environment": "prod", "project_id": "open-platform-prod", "region": "asia-east1",
+                               "network_name": "web-saas-prod-gcp", "subnet_cidr": "10.73.0.0/24",
+                               "retained_public_tcp_rules": [rule]}}
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(generator, "load_resources", return_value=manifest):
+            generator.render(SimpleNamespace(resources="ignored", workdir=tempdir))
+            rendered = (Path(tempdir) / "generated_platform.tf").read_text()
+        self.assertIn('resource "google_compute_firewall" "spot_public_tcp_retired_host"', rendered)
+        self.assertNotIn('module "spot_retired_host"', rendered)
+        self.assertNotIn('module "data_disk_retired_host"', rendered)
+        self.assertNotIn('spot_os_admin_login_retired_host', rendered)
+        rule["public_tcp_ports"] = [22]
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(generator, "load_resources", return_value=manifest):
+            with self.assertRaises(SystemExit):
+                generator.render(SimpleNamespace(resources="ignored", workdir=tempdir))
+
     def test_standard_service_vm_can_reserve_and_attach_static_public_ip(self):
         spec = importlib.util.spec_from_file_location("gcp_generate", ROOT / "scripts" / "generate.py")
         generator = importlib.util.module_from_spec(spec)
