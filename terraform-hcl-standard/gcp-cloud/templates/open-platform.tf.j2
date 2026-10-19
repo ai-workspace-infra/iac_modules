@@ -268,8 +268,8 @@ resource "google_iap_tunnel_instance_iam_member" "spot_iap_tunnel_{{ vm.name | t
 }
 
 {% endfor %}
-{% for vm in spot_vms if vm.public_tcp_ports | default([]) %}
-# Public service ports of this VM only. SSH stays on the spot_ssh rule below.
+{% for vm in public_tcp_rules %}
+# Declared public ingress, independently retainable when its old VM is retired.
 resource "google_compute_firewall" "spot_public_tcp_{{ vm.name | tf_id }}" {
   project       = module.project.project_id
   name          = "{{ vm.name }}-public-tcp"

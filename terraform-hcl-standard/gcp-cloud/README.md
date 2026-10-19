@@ -87,6 +87,14 @@ combine scoped targets with the namespace-wide `enable_iap_ssh` switch. For
 example, a recovery generation can use `network_tag: web-saas-prod-v3-ssh`
 without expanding access to the preceding generation. Apply a reviewed plan
 against the existing state and regenerate CMDB/inventory afterward.
+
+When a retired VM's existing public ingress must remain managed, declare it
+under `spec.resources.retained_public_tcp_rules` with `name`, `network_tags`,
+and `public_tcp_ports`. This renders only the existing
+`google_compute_firewall.spot_public_tcp_<name>` address; it does not render a
+VM, disk, or instance IAM binding. SSH port 22 and duplicate addresses are
+rejected. Verify the VM and disk are absent before removing their declarations;
+retain the shared network and review a full plan against the existing state.
 Vault nodes default to exactly one `xconnect_role: gateway` and any number of
 `xconnect_role: one` members, plus an SSH `/32` allowlist in
 `spec.ssh_source_ranges`. A state that owns only XConnect One members may set
