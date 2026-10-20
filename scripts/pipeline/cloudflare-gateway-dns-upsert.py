@@ -59,7 +59,7 @@ def record_payload(record: dict) -> dict:
     result = {key: record[key] for key in ("type", "name", "content", "ttl", "proxied")}
     result["comment"] = record.get("comment") or ""
     result["tags"] = sorted(record.get("tags") or [])
-    if "settings" in record:
+    if record.get("settings"):
         result["settings"] = record["settings"]
     return result
 
@@ -197,6 +197,18 @@ def wait_for_dns(name: str, address: str) -> bool:
             result = None
         if result is not None and result.returncode == 0 and address in result.stdout.split():
             return True
+        # A maintenance host may retain a negative DNS response. Verify through
+        # the resolver's HTTPS endpoint as well, without changing local DNS.
+        try:
+            request = Request('https://cloudflare-dns.com/dns-query?' + urlencode({'name': name, 'type': 'A'}),
+                              headers={'Accept': 'application/dns-json'})
+            with urlopen(request, timeout=5) as response:
+                answer = json.load(response)
+            if answer.get('Status') == 0 and any(row.get('type') == 1 and row.get('data') == address
+                                                for row in answer.get('Answer', [])):
+                return True
+        except (HTTPError, URLError, TimeoutError, ValueError):
+            pass
         if attempt < 12:
             time.sleep(5)
     return False

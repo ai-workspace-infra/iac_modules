@@ -47,6 +47,7 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
                 "name": "web-saas-prod-v3", "zone": "asia-east1-a", "machine_type": "e2-medium",
                 "provisioning_model": "STANDARD", "deletion_protection": True,
                 "enable_oslogin": True, "public_ip": True, "reserve_static_public_ip": True,
+                "enable_guest_attributes": True,
                 "network_tags": ["web-saas-ssh"],
                 "data_disk": {"name": "web-saas-prod-v3-data", "device_name": "web-saas-prod-v3-data",
                               "size_gb": 50, "type": "pd-balanced", "mount_path": "/data"},
@@ -58,8 +59,19 @@ class SpotVMDeploymentContractTest(unittest.TestCase):
 
         vm_module = rendered.split('module "spot_web_saas_prod_v3" {', 1)[1].split("\n}", 1)[0]
         self.assertIn("reserve_static_public_ip = true", vm_module)
+        self.assertRegex(vm_module, r"enable_guest_attributes\s*=\s*true")
         self.assertIn('google_compute_address.public[0].address', (ROOT / "modules/spot_vm/main.tf").read_text())
         self.assertIn('name         = "${var.name}-ip"', (ROOT / "modules/spot_vm/main.tf").read_text())
+
+        manifest["service_vms"][0]["enable_guest_attributes"] = "true"
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(generator, "load_resources", return_value=manifest):
+            with self.assertRaises(SystemExit):
+                generator.render(SimpleNamespace(resources="ignored", workdir=tempdir))
+        del manifest["service_vms"][0]["enable_guest_attributes"]
+        with tempfile.TemporaryDirectory() as tempdir, patch.object(generator, "load_resources", return_value=manifest):
+            generator.render(SimpleNamespace(resources="ignored", workdir=tempdir))
+            rendered = (Path(tempdir) / "generated_platform.tf").read_text()
+        self.assertRegex(rendered, r"enable_guest_attributes\s*=\s*false")
 
         manifest["service_vms"][0]["public_ip"] = False
         with self.assertRaises(SystemExit):
