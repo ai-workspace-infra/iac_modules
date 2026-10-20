@@ -96,6 +96,14 @@ def main():
                 expected = f"projects/open-platform-prod/zones/{declared[0]['zone']}/instances/{name}"
                 if set(new) != set(old) | {expected}:
                     raise RuntimeError('external-IP policy changed beyond new generation')
+        elif address == f'module.spot_{marker}.google_compute_instance.this' and actions == ['update']:
+            before_value, after_value = change['before'],change['after']
+            expected_metadata = dict(before_value.get('metadata',{}), **{'enable-guest-attributes':'TRUE'})
+            if after_value.get('metadata') != expected_metadata:
+                raise RuntimeError('unexpected target-generation metadata update')
+            for key in before_value:
+                if key not in {'metadata','metadata_fingerprint','fingerprint','label_fingerprint'} and before_value[key] != after_value.get(key):
+                    raise RuntimeError('target-generation update changed '+key)
         elif marker in address and actions == ['create']:
             pass
         else:

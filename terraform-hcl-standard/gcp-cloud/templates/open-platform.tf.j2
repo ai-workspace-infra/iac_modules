@@ -229,6 +229,7 @@ module "spot_{{ vm.name | tf_id }}" {
   ssh_public_key  = var.ssh_public_key
   ssh_username    = var.ssh_username
   enable_oslogin  = {{ vm.enable_oslogin | default(false) | tojson }}
+  enable_guest_attributes = {{ vm.enable_guest_attributes | default(false) | tojson }}
   provisioning_model = {{ vm.provisioning_model | default('SPOT') | tojson }}
   deletion_protection = {{ vm.deletion_protection | default(false) | tojson }}
 {% if vm.data_disk is defined %}

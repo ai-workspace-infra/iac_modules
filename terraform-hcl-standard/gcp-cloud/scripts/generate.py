@@ -386,6 +386,8 @@ def spot_inventory_name(vm):
 
 
 def validate_spot_service_declaration(vm):
+    if not isinstance(vm.get("enable_guest_attributes", False), bool):
+        raise SystemExit("Spot VM enable_guest_attributes must be a boolean")
     if not isinstance(vm.get("reserve_static_public_ip", False), bool):
         raise SystemExit("VM reserve_static_public_ip must be a boolean")
     if vm.get("reserve_static_public_ip") and not vm.get("public_ip"):

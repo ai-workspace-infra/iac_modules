@@ -77,6 +77,12 @@ variable "enable_oslogin" {
   default     = false
 }
 
+variable "enable_guest_attributes" {
+  description = "Publish guest-agent host keys through the authenticated GCP API."
+  type        = bool
+  default     = false
+}
+
 variable "max_run_duration_seconds" {
   description = "Optional maximum lifetime. Omit for a service host that must not expire after one hour."
   type        = number
@@ -137,6 +143,7 @@ resource "google_compute_instance" "this" {
   # the deploy principal's OS Login profile, so they carry no metadata keys.
   metadata = merge(
     var.enable_oslogin ? { "enable-oslogin" = "TRUE" } : {},
+    var.enable_guest_attributes ? { "enable-guest-attributes" = "TRUE" } : {},
     var.enable_oslogin || trimspace(var.ssh_public_key) == "" ? {} : {
       "ssh-keys" = "${var.ssh_username}:${trimspace(var.ssh_public_key)}"
     }
