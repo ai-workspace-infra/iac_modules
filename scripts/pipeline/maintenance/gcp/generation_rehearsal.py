@@ -33,6 +33,8 @@ def main():
     parser.add_argument('--gitops', required=True)
     parser.add_argument('--generation', required=True)
     parser.add_argument('--apply', action='store_true')
+    parser.add_argument('--restart-for-host-keys', action='store_true',
+                        help='Explicitly reboot only the new, not-yet-deployed generation after enabling guest attributes')
     args = parser.parse_args()
     if not re.fullmatch(r'prod-v[1-9][0-9]*', args.generation) or int(args.generation[6:]) < 4:
         raise RuntimeError('requires an explicit new generation')
@@ -48,6 +50,8 @@ def main():
     declared = [vm for vm in document['resources']['service_vms'] if vm['name'] == name]
     if len(declared) != 1 or document['project_id'] != 'open-platform-prod':
         raise RuntimeError('generation or project not declared')
+    if args.restart_for_host_keys and (not args.apply or not declared[0].get('enable_guest_attributes')):
+        raise RuntimeError('host-key bootstrap restart requires apply and declared guest attributes')
     os.umask(0o077)
     private = Path(tempfile.mkdtemp(prefix='gcp-generation-rehearsal-'))
     # Reuse the authenticated local Vault session, without exporting its token.
@@ -117,6 +121,10 @@ def main():
     if args.apply:
         runtime.terraform(root,private,'apply','-input=false','-lock-timeout=5m','-no-color',str(plan))
         runtime.terraform(root,private,'plan','-input=false','-lock-timeout=5m','-detailed-exitcode','-no-color')
+        if args.restart_for_host_keys:
+            output(['gcloud','compute','instances','reset',name,'--project=open-platform-prod',
+                    '--zone='+declared[0]['zone'],'--quiet'])
+            evidence['bootstrap_restart'] = name
         runtime.run([sys.executable,str(ROOT/'terraform-hcl-standard/gcp-cloud/scripts/generate.py'),'inventory','--resources',str(gitops/spec['manifest']),'--workdir',str(root)],private)
         evidence['result']='applied_verified'
         evidence['cmdb']=str(root/'cmdb.json')
