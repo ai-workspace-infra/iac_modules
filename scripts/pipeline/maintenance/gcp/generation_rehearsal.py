@@ -61,6 +61,11 @@ def main():
     os.environ['TF_VAR_deploy_service_account'] = 'github-actions-prod@open-platform-prod.iam.gserviceaccount.com'
     oidc = yaml.safe_load((gitops/'resources/xworktech.com/prod/gcp/github-actions-oidc.yaml').read_text())
     os.environ['TF_VAR_workload_identity_provider'] = oidc['spec']['audience'].removeprefix('https://iam.googleapis.com/')
+    profile = json.loads(output(['gcloud','compute','os-login','describe-profile','--project=open-platform-prod','--format=json']))
+    names = {p['username'] for p in profile.get('posixAccounts',[]) if p.get('operatingSystemType') == 'LINUX'}
+    if len(names) != 1:
+        raise RuntimeError('authenticated operator has no unique Linux OS Login profile')
+    os.environ['GCP_OSLOGIN_USERNAME'] = names.pop()
     root, _ = runtime.render({},target,'resources',ROOT,gitops,private)
     runtime.initialize(root,private,spec['state'])
     before = runtime.terraform(root,private,'state','pull').stdout
@@ -96,7 +101,6 @@ def main():
         else:
             raise RuntimeError('plan changes existing or unrelated resource: '+address)
         changes.append({'address':address,'actions':actions})
-    if not changes: raise RuntimeError('no new generation resources planned')
     evidence = {'generation':args.generation,'iac_sha':output(['git','-C',str(ROOT),'rev-parse','HEAD']),
                 'gitops_sha':output(['git','-C',str(gitops),'rev-parse','HEAD']),
                 'plan_sha256':hashlib.sha256(plan.read_bytes()).hexdigest(),'changes':changes,'result':'planned'}
@@ -104,8 +108,9 @@ def main():
     print(json.dumps({'evidence':str(private/'receipt.json'),**evidence}),flush=True)
     if args.apply:
         runtime.terraform(root,private,'apply','-input=false','-lock-timeout=5m','-no-color',str(plan))
+        runtime.terraform(root,private,'plan','-input=false','-lock-timeout=5m','-detailed-exitcode','-no-color')
         runtime.run([sys.executable,str(ROOT/'terraform-hcl-standard/gcp-cloud/scripts/generate.py'),'inventory','--resources',str(gitops/spec['manifest']),'--workdir',str(root)],private)
-        evidence['result']='applied'
+        evidence['result']='applied_verified'
         evidence['cmdb']=str(root/'cmdb.json')
         (private/'receipt.json').write_text(json.dumps(evidence,indent=2)+'\n')
         print(json.dumps(evidence),flush=True)
