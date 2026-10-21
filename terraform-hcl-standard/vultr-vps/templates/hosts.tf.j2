@@ -78,6 +78,25 @@ output "cmdb_runtime" {
   }
 }
 
+{% for host in hosts if host.get('data_disk') %}
+resource "vultr_block_storage" "data_{{ host.name | tf_id }}" {
+  region               = {% if host.region %}"{{ host.region }}"{% else %}var.region{% endif %}
+  label                = "{{ host.label }}-data"
+  size_gb              = {{ host.data_disk.size_gb }}
+  block_type           = "{{ host.data_disk.block_type }}"
+  attached_to_instance = module.compute_{{ host.name | tf_id }}.instance_id
+  live                 = true
+}
+
+output "data_disk_{{ host.name | tf_id }}" {
+  value = {
+    id       = vultr_block_storage.data_{{ host.name | tf_id }}.id
+    mount_id = vultr_block_storage.data_{{ host.name | tf_id }}.mount_id
+    size_gb  = vultr_block_storage.data_{{ host.name | tf_id }}.size_gb
+  }
+}
+{% endfor %}
+
 output "hosts_summary" {
   description = "name -> public_ip"
   value = {
