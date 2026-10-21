@@ -17,6 +17,7 @@ class DataDiskRender(unittest.TestCase):
         self.assertIn('size_gb              = 25', rendered)
         self.assertIn('attached_to_instance = module.compute_acceptance.instance_id', rendered)
         self.assertIn('live                 = true', rendered)
+        self.assertIn('region               = "nrt"\n', rendered)
         self.assertNotIn('for_each', rendered.split('resource "vultr_block_storage"')[1])
 
     def test_existing_hosts_do_not_get_disks(self):

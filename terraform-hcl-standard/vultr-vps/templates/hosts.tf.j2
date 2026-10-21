@@ -80,7 +80,7 @@ output "cmdb_runtime" {
 
 {% for host in hosts if host.get('data_disk') %}
 resource "vultr_block_storage" "data_{{ host.name | tf_id }}" {
-  region               = {% if host.region %}"{{ host.region }}"{% else %}var.region{% endif %}
+  region               = {{ ('"' ~ host.region ~ '"') if host.region else 'var.region' }}
   label                = "{{ host.label }}-data"
   size_gb              = {{ host.data_disk.size_gb }}
   block_type           = "{{ host.data_disk.block_type }}"
