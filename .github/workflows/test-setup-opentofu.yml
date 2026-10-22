@@ -1,0 +1,98 @@
+name: Test OpenTofu Setup Script
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/setup-opentofu.sh'
+      - '.github/workflows/test-setup-opentofu.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/setup-opentofu.sh'
+      - '.github/workflows/test-setup-opentofu.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  static-and-smoke-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify executable permissions
+        run: |
+          test -x scripts/setup-opentofu.sh || {
+            echo "Error: scripts/setup-opentofu.sh is not executable"
+            exit 1
+          }
+
+      - name: Syntax check (bash -n)
+        run: bash -n scripts/setup-opentofu.sh
+
+      - name: Static analysis (shellcheck)
+        run: shellcheck -S warning scripts/setup-opentofu.sh
+
+      - name: Test --help flag
+        run: bash scripts/setup-opentofu.sh --help
+
+      - name: Smoke test in Debian 12 (Debian Bookworm)
+        run: |
+          echo "=== Testing --help in debian:12-slim ==="
+          docker run --rm -v "$PWD:$PWD" -w "$PWD" debian:12-slim bash scripts/setup-opentofu.sh --help
+
+          echo "=== Testing Standalone --dry-run in debian:12-slim ==="
+          docker run --rm -v "$PWD:$PWD" -w "$PWD" debian:12-slim bash scripts/setup-opentofu.sh \
+            --domain state.example.com --standalone --dry-run
+
+          echo "=== Testing Team Mode --dry-run in debian:12-slim ==="
+          docker run --rm -v "$PWD:$PWD" -w "$PWD" \
+            -e TF_STATE_DOMAIN="state.example.com" \
+            -e TF_STATE_ACCESS_KEY="mock-access-key" \
+            -e TF_STATE_SECRET_KEY="mock-secret-key" \
+            debian:12-slim bash scripts/setup-opentofu.sh \
+            --domain state.example.com --with-state-backend --dry-run
+
+          echo "=== Testing --uninstall in debian:12-slim ==="
+          docker run --rm -v "$PWD:$PWD" -w "$PWD" debian:12-slim bash scripts/setup-opentofu.sh --uninstall
+
+      - name: Smoke test in Ubuntu 24.04 (Noble Numbat)
+        run: |
+          echo "=== Testing Standalone --dry-run in ubuntu:24.04 ==="
+          docker run --rm -v "$PWD:$PWD" -w "$PWD" ubuntu:24.04 bash scripts/setup-opentofu.sh \
+            --domain state.example.com --standalone --dry-run
+
+      - name: Verify Fail-Closed Validations
+        run: |
+          echo "=== Verifying team mode fails closed without credentials ==="
+          if docker run --rm -v "$PWD:$PWD" -w "$PWD" debian:12-slim bash scripts/setup-opentofu.sh \
+            --domain state.example.com --with-state-backend --dry-run; then
+            echo "Expected failure when credentials are missing"
+            exit 1
+          fi
+
+          echo "=== Verifying domain mismatch fails ==="
+          if docker run --rm -v "$PWD:$PWD" -w "$PWD" \
+            -e TF_STATE_DOMAIN="mismatch.example.com" \
+            -e TF_STATE_ACCESS_KEY="mock-access-key" \
+            -e TF_STATE_SECRET_KEY="mock-secret-key" \
+            debian:12-slim bash scripts/setup-opentofu.sh \
+            --domain state.example.com --with-state-backend --dry-run; then
+            echo "Expected failure on domain mismatch"
+            exit 1
+          fi
+
+          echo "=== Verifying missing mode fails ==="
+          if docker run --rm -v "$PWD:$PWD" -w "$PWD" debian:12-slim bash scripts/setup-opentofu.sh \
+            --domain state.example.com --dry-run; then
+            echo "Expected failure when mode is not specified"
+            exit 1
+          fi
+
+          echo "=== Verifying non-root user fails ==="
+          if docker run --rm -u 1000:1000 -v "$PWD:$PWD" -w "$PWD" debian:12-slim bash scripts/setup-opentofu.sh \
+            --domain state.example.com --standalone --dry-run; then
+            echo "Expected failure when run as non-root"
+            exit 1
+          fi
