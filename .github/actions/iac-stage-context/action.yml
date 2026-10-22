@@ -1,0 +1,59 @@
+name: Verify prepared IaC stage context
+description: Reject stale or overridden caller bindings before provider authentication.
+inputs:
+  target-contract-file:
+    description: target-contract-file
+    required: true
+  contract-sha256:
+    description: contract-sha256
+    required: true
+  target-id:
+    description: target-id
+    required: true
+  stage:
+    description: stage
+    required: true
+  action:
+    description: action
+    required: true
+  environment:
+    description: environment
+    required: true
+  provider:
+    description: provider
+    required: true
+  lock-key:
+    description: lock-key
+    required: true
+  iac-root:
+    description: iac-root
+    required: true
+  gitops-root:
+    description: gitops-root
+    required: true
+  iac-sha:
+    description: iac-sha
+    required: true
+  gitops-sha:
+    description: gitops-sha
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.2 Jinja2==3.1.6
+    - shell: bash
+      env:
+        IAC_CONTRACT: ${{ inputs.target-contract-file }}
+        IAC_CHECKSUM: ${{ inputs.contract-sha256 }}
+        IAC_TARGET: ${{ inputs.target-id }}
+        IAC_STAGE: ${{ inputs.stage }}
+        IAC_ACTION: ${{ inputs.action }}
+        IAC_ENVIRONMENT: ${{ inputs.environment }}
+        IAC_PROVIDER: ${{ inputs.provider }}
+        IAC_LOCK_KEY: ${{ inputs.lock-key }}
+        IAC_ROOT: ${{ inputs.iac-root }}
+        IAC_GITOPS_ROOT: ${{ inputs.gitops-root }}
+        IAC_SHA: ${{ inputs.iac-sha }}
+        IAC_GITOPS_SHA: ${{ inputs.gitops-sha }}
+      run: python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/unified_cli.py" stage-context

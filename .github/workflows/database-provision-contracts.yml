@@ -1,0 +1,24 @@
+name: Database provision contract fixtures
+on:
+  pull_request:
+    paths:
+      - terraform-hcl-standard/supabase-cloud/contracts/database-provision-v1/**
+      - .github/workflows/database-provision-contracts.yml
+      - terraform-hcl-standard/supabase-cloud/contract_templates/**
+      - terraform-hcl-standard/supabase-cloud/scripts/*contract*
+permissions:
+  contents: read
+jobs:
+  offline-fixtures:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies
+        run: python -m pip install 'PyYAML==6.0.3'
+      - name: Run fixtures only
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python -m unittest discover -s terraform-hcl-standard/supabase-cloud/contracts/database-provision-v1 -v

@@ -1,0 +1,18 @@
+name: Reconcile Serverless domains
+description: IaC provider owner migrated from the frozen Toolkit publisher.
+inputs:
+  config_file:
+    description: Absolute rendered GitOps Serverless config path.
+    required: true
+  dns_mode:
+    description: none, uat-records, or prod-cutover.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Reconcile Pages and qualified Worker domains in the IaC owner
+      shell: bash
+      env:
+        CLOUDFLARE_BOUNDARY_CONFIG: ${{ inputs.config_file }}
+        SERVERLESS_DNS_MODE: ${{ inputs.dns_mode }}
+      run: bash "${{ github.action_path }}/../../../scripts/pipeline/cloudflare-serverless-domains-reconcile.sh"

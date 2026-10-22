@@ -19,6 +19,10 @@ variable "zone" {
   type = string
 }
 
+variable "region" {
+  type = string
+}
+
 variable "machine_type" {
   type = string
 }
@@ -51,6 +55,12 @@ variable "public_ip" {
   default = false
 }
 
+variable "reserve_static_public_ip" {
+  description = "Reserve a durable regional external IPv4 address and attach it to this instance."
+  type        = bool
+  default     = false
+}
+
 variable "ssh_public_key" {
   type    = string
   default = ""
@@ -63,6 +73,12 @@ variable "ssh_username" {
 
 variable "enable_oslogin" {
   description = "Whether this VM uses GCP OS Login instead of instance metadata SSH keys."
+  type        = bool
+  default     = false
+}
+
+variable "enable_guest_attributes" {
+  description = "Publish guest-agent host keys through the authenticated GCP API."
   type        = bool
   default     = false
 }
@@ -107,6 +123,12 @@ variable "data_disk_device_name" {
   default     = "web-saas-data"
 }
 
+variable "has_external_data_disk" {
+  description = "Whether an external persistent data disk is attached to this host."
+  type        = bool
+  default     = false
+}
+
 resource "google_compute_instance" "this" {
   project                   = var.project_id
   name                      = var.name
@@ -121,18 +143,30 @@ resource "google_compute_instance" "this" {
   # the deploy principal's OS Login profile, so they carry no metadata keys.
   metadata = merge(
     var.enable_oslogin ? { "enable-oslogin" = "TRUE" } : {},
+    var.enable_guest_attributes ? { "enable-guest-attributes" = "TRUE" } : {},
     var.enable_oslogin || trimspace(var.ssh_public_key) == "" ? {} : {
       "ssh-keys" = "${var.ssh_username}:${trimspace(var.ssh_public_key)}"
     }
   )
 
   lifecycle {
+    # google_compute_attached_disk owns attachments declared outside this
+    # module. Ignoring the instance's read-back prevents the two Terraform
+    # resources from detaching or replacing one another's disks.
+    # Ignoring scheduling prevents Terraform from replacing an existing VM
+    # when its provisioning model is promoted from SPOT to STANDARD in declarations.
+    ignore_changes = [attached_disk, scheduling]
+
     precondition {
       condition     = !var.public_ip || var.enable_oslogin || trimspace(var.ssh_public_key) != ""
       error_message = "A public Spot VM requires OS Login or an SSH public key from the deploy environment."
     }
     precondition {
-      condition     = var.provisioning_model != "STANDARD" || (var.deletion_protection && var.data_disk_id != "")
+      condition     = !var.reserve_static_public_ip || var.public_ip
+      error_message = "reserve_static_public_ip requires public_ip = true."
+    }
+    precondition {
+      condition     = var.provisioning_model != "STANDARD" || (var.deletion_protection && (var.data_disk_id != "" || var.has_external_data_disk))
       error_message = "A STANDARD service host requires deletion protection and an independent data disk."
     }
     precondition {
@@ -164,7 +198,9 @@ resource "google_compute_instance" "this" {
     subnetwork = var.subnetwork
     dynamic "access_config" {
       for_each = var.public_ip ? [1] : []
-      content {}
+      content {
+        nat_ip = var.reserve_static_public_ip ? google_compute_address.public[0].address : null
+      }
     }
   }
 
@@ -181,6 +217,20 @@ resource "google_compute_instance" "this" {
         seconds = max_run_duration.value
       }
     }
+  }
+}
+
+resource "google_compute_address" "public" {
+  count = var.public_ip && var.reserve_static_public_ip ? 1 : 0
+
+  project      = var.project_id
+  name         = "${var.name}-ip"
+  region       = var.region
+  address_type = "EXTERNAL"
+  network_tier = "PREMIUM"
+
+  lifecycle {
+    prevent_destroy = true
   }
 }
 
@@ -205,7 +255,7 @@ output "provisioning_model" {
 }
 
 output "public_ip" {
-  value = try(google_compute_instance.this.network_interface[0].access_config[0].nat_ip, null)
+  value = var.reserve_static_public_ip ? google_compute_address.public[0].address : try(google_compute_instance.this.network_interface[0].access_config[0].nat_ip, null)
 }
 
 output "private_ip" {

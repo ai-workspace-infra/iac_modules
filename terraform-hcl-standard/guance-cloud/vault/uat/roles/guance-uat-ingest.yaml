@@ -1,0 +1,18 @@
+# The collector deployment is owned by another repository/workflow. Its workflow identity must be
+# supplied by that owner before this role is created; do not widen it to the Terraform workflow.
+pending_owner: true
+role_name: github-actions-uat-guance-ingest
+role:
+  role_type: jwt
+  user_claim: sub
+  bound_audiences: [vault]
+  bound_claims_type: string
+  bound_claims:
+    repository: ""
+    job_workflow_ref: ""
+    ref: refs/heads/main
+  token_policies: [guance-uat-ingest]
+  token_no_default_policy: true
+  token_type: batch
+  token_ttl: 15m
+  token_max_ttl: 15m

@@ -1,0 +1,123 @@
+# Synthetic fixture for offline tests. Real declarations live in GitOps:
+# resources/xworktech.com/uat/guance/observability.yaml
+global:
+  environment: uat
+  workspace_alias: xworktech-uat
+  project: xworktech.com
+  endpoint: https://guance.example.invalid
+  region: example-region
+
+dashboards:
+  - id: uat_service_overview
+    name: UAT Service Overview
+    description: Request volume, error rate, P95 latency and release version for UAT.
+    tags: [uat, service-overview]
+    template:
+      title: UAT Service Overview
+      main:
+        charts:
+          - name: Request Count
+            type: sequence
+            queries:
+              - checked: true
+                datasource: dataflux
+                qtype: dql
+                query:
+                  q: "M::`REPLACE_gateway_requests`:(count(`request_id`)) [::auto]"
+
+notify_objects:
+  - id: uat_test_receiver
+    name: UAT Test Receiver
+    type: simpleHTTPRequest
+
+alert_policies:
+  - id: uat_default
+    name: UAT Default Policy
+    description: Routes UAT monitor events to the test receiver only.
+    timezone: Asia/Shanghai
+    agg_interval: 60
+    silent_timeout: 300
+    agg_fields: [df_monitor_checker_id]
+    routes:
+      - name: Test receiver
+        notify_objects: [uat_test_receiver]
+        status: "critical,error,warning,ok"
+
+monitors:
+  - id: uat_gateway_error_rate
+    title: "[UAT] Gateway 5xx error rate"
+    message: ">Gateway 5xx ratio is above the measured UAT baseline."
+    every: 1m
+    interval: 300
+    recover_need_period_count: 2
+    group_by: [route]
+    tags: [uat, gateway]
+    alert_policies: [uat_default]
+    baseline:
+      status: pending
+    targets:
+      - alias: Result
+        qtype: dql
+        dql: "M::`REPLACE_gateway_requests`:(count(`request_id`)) BY `route`"
+    rules:
+      - status: critical
+        condition_logic: and
+        conditions:
+          - alias: Result
+            operator: ">="
+            operands: ["REPLACE_threshold"]
+  - id: uat_cloud_run_latency
+    title: "[UAT] Cloud Run P95 latency"
+    message: ">Cloud Run P95 latency is above the measured UAT baseline."
+    every: 1m
+    interval: 300
+    recover_need_period_count: 2
+    group_by: [service]
+    tags: [uat, cloud-run]
+    alert_policies: [uat_default]
+    baseline:
+      status: pending
+    targets:
+      - alias: Result
+        qtype: dql
+        dql: "M::`REPLACE_cloud_run_latency`:(p95(`latency_ms`)) BY `service`"
+    rules:
+      - status: error
+        condition_logic: and
+        conditions:
+          - alias: Result
+            operator: ">="
+            operands: ["REPLACE_threshold"]
+  - id: uat_golden_api_availability
+    title: "[UAT] Golden API availability"
+    message: ">Golden API availability is below the measured UAT baseline."
+    every: 1m
+    interval: 300
+    recover_need_period_count: 2
+    group_by: [endpoint]
+    tags: [uat, golden-api]
+    alert_policies: [uat_default]
+    baseline:
+      status: pending
+    targets:
+      - alias: Result
+        qtype: dql
+        dql: "M::`REPLACE_golden_api_probe`:(avg(`success`)) BY `endpoint`"
+    rules:
+      - status: critical
+        condition_logic: and
+        conditions:
+          - alias: Result
+            operator: "<"
+            operands: ["REPLACE_threshold"]
+
+mutes:
+  - id: uat_release_window
+    name: UAT release silence
+    description: Scoped, time-boxed silence for one UAT release; ends automatically.
+    policy: uat_default
+    timezone: Asia/Shanghai
+    start: "2026/10/20 10:00:00"
+    end: "2026/10/20 10:30:00"
+    tags:
+      service: [REPLACE_released_service]

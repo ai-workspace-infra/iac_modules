@@ -1,0 +1,54 @@
+name: iac-summary
+description: GitOps-bound IaC owner action; delivery approvals and DAG belong to Toolkit.
+inputs:
+  target-contract-file:
+    description: Prepared exact contract
+    required: true
+  iac-root:
+    description: Pinned owner source
+    required: true
+  gitops-root:
+    description: Pinned declarations
+    required: true
+  evidence-dir:
+    description: Current-run downloaded stage receipts
+    required: true
+  needs-json:
+    description: All seven predecessor results
+    required: true
+  output-dir:
+    description: Aggregate public evidence
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install exact renderer dependencies
+      shell: bash
+      run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.2 Jinja2==3.1.6
+    - name: summary
+      shell: bash
+      env:
+        IAC_CONTRACT: ${{ inputs.target-contract-file }}
+        IAC_ROOT: ${{ inputs.iac-root }}
+        IAC_GITOPS_ROOT: ${{ inputs.gitops-root }}
+        IAC_EVIDENCE: ${{ inputs.evidence-dir }}
+        IAC_NEEDS: ${{ inputs.needs-json }}
+        IAC_DESTINATION: ${{ inputs.output-dir }}
+      run: python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/unified_cli.py" summary
+      id: summary
+outputs:
+  result:
+    description: result
+    value: ${{ steps.summary.outputs.result }}
+  receipt_sha256:
+    description: receipt_sha256
+    value: ${{ steps.summary.outputs.receipt_sha256 }}
+  deploy_matrix:
+    description: deploy_matrix
+    value: ${{ steps.summary.outputs.deploy_matrix }}
+  gitops_sha:
+    description: gitops_sha
+    value: ${{ steps.summary.outputs.gitops_sha }}
+  iac_sha:
+    description: iac_sha
+    value: ${{ steps.summary.outputs.iac_sha }}

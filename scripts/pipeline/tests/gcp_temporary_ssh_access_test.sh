@@ -10,6 +10,7 @@ work="$(mktemp -d)"
 trap 'rm -rf "${work}"' EXIT
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
+mode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
 
 mkdir -p "${work}/bin"
 cat > "${work}/bin/gcloud" <<'FAKE'
@@ -96,7 +97,7 @@ jq -e --arg dir "${work}/access" '.instance == "iam-shared-0" and .target_ip == 
   and .private_key == ($dir + "/id_ed25519") and .known_hosts == ($dir + "/known_hosts")
   and .firewall_rule == "zitadel-ssh-4242-1" and .source_range == "20.30.40.50/32" and .oslogin_key_ttl == "20m"' \
   "${work}/access/access.json" >/dev/null || fail "access.json must carry the target facts"
-[[ "$(stat -c %a "${work}/access")" == 700 && "$(stat -c %a "${work}/access/access.json")" == 600 ]] || fail "access files must be private"
+[[ "$(mode "${work}/access")" == 700 && "$(mode "${work}/access/access.json")" == 600 ]] || fail "access files must be private"
 grep -qx "target_ip=34.80.12.34" "${work}/output" && grep -qx "private_key=${work}/access/id_ed25519" "${work}/output" \
   || fail "GITHUB_OUTPUT must carry the facts"
 ! grep -q 'PRIVATE-KEY-MATERIAL\|sa_112233445566778899001' "${work}/out" || fail "neither the private key nor the OS Login user may be printed"
@@ -125,6 +126,24 @@ grep -q -- '--ttl=35m$' "${work}/state/gcloud.log" || fail "the TTL override mus
 run close
 echo "PASS: stopped VM started, user masked, explicit tags/source/TTL honoured"
 
+# The Vault node adapter supplies one shared key and can use overlay transport
+# without opening a public firewall rule. The same TTL/revocation contract
+# still applies, and cleanup must not delete the caller-owned key material.
+reset_state
+printf 'SHARED-PRIVATE-KEY\n' > "${work}/shared-key"
+printf 'ssh-ed25519 AAAASHARED vault\n' > "${work}/shared-key.pub"
+run open SSH_KEY_PATH="${work}/shared-key" OPEN_FIREWALL=false TARGET_TAGS=vault OSLOGIN_KEY_TTL=65m \
+  || { cat "${work}/out" >&2; fail "existing one-run key without public ingress must succeed"; }
+[[ -z "$(ls "${work}/state/rules")" ]] || fail "OPEN_FIREWALL=false must not create a rule"
+cmp "${work}/shared-key.pub" "${work}/state/keys/registered.pub" || fail "the supplied public key must be registered"
+grep -qx "private_key=${work}/shared-key" "${work}/output" || fail "the supplied private key path must be preserved"
+jq -e '.firewall_rule == null and .source_range == null and .oslogin_key_ttl == "65m"' \
+  "${work}/access/access.json" >/dev/null || fail "overlay access facts must record no public rule and the exact TTL"
+run close SSH_KEY_PATH="${work}/shared-key" || fail "supplied key close must succeed"
+[[ -s "${work}/shared-key" && -s "${work}/shared-key.pub" ]] || fail "cleanup must retain caller-owned key files"
+[[ ! -e "${work}/state/keys/registered.pub" ]] || fail "cleanup must revoke the supplied OS Login key"
+echo "PASS: supplied one-run key and no-firewall access retain strict TTL and revocation"
+
 # --- a failed open rolls back -----------------------------------------------------
 reset_state
 run open FAKE_CREATE_FAIL=1 && fail "a failed firewall create must fail open"
@@ -152,7 +171,8 @@ reset_state
 run open FAKE_LIST_FAIL=1 && fail "an unreadable rule list must refuse open"
 [[ "$(writes)" == 0 ]] || fail "an unreadable rule list must not write"
 for case in ACCESS_RULE_NAME=Bad_Rule ACCESS_RULE_NAME= ACCESS_DIR=relative/dir ACCESS_DIR=/ GCP_ZONE=asia \
-            GCP_PROJECT_ID=X OSLOGIN_KEY_TTL=0m OSLOGIN_KEY_TTL=3h OSLOGIN_KEY_TTL=121m GCP_INSTANCE=; do
+            GCP_PROJECT_ID=X OSLOGIN_KEY_TTL=0m OSLOGIN_KEY_TTL=3h OSLOGIN_KEY_TTL=121m GCP_INSTANCE= \
+            OPEN_FIREWALL=maybe; do
   reset_state
   run open "${case}" && fail "invalid input must be refused: ${case}"
   [[ "$(writes)" == 0 ]] || fail "invalid input must be refused before any write: ${case}"

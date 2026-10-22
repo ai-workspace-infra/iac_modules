@@ -1,0 +1,120 @@
+name: iac-resources
+description: GitOps-bound IaC owner action; delivery approvals and DAG belong to Toolkit.
+inputs:
+  target-contract-file:
+    description: Prepared exact GitOps contract path
+    required: true
+  target-id:
+    description: Declared target ID
+    required: true
+  iac-root:
+    description: Pinned IaC checkout root
+    required: true
+  gitops-root:
+    description: Pinned GitOps checkout root
+    required: true
+  evidence-dir:
+    description: Public sanitized stage evidence directory
+    required: true
+  private-dir:
+    description: Private ephemeral runner directory
+    required: true
+  dependencies-dir:
+    description: Downloaded predecessor receipts directory
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install exact renderer dependencies
+      shell: bash
+      run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.2 Jinja2==3.1.6
+    - name: stage-prepare
+      shell: bash
+      env:
+        IAC_CONTRACT: ${{ inputs.target-contract-file }}
+        IAC_TARGET: ${{ inputs.target-id }}
+        IAC_ROOT: ${{ inputs.iac-root }}
+        IAC_GITOPS_ROOT: ${{ inputs.gitops-root }}
+        IAC_EVIDENCE: ${{ inputs.evidence-dir }}
+        IAC_PRIVATE: ${{ inputs.private-dir }}
+        IAC_DEPENDENCIES: ${{ inputs.dependencies-dir }}
+        IAC_STAGE: resources
+      run: python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/unified_cli.py" stage-prepare
+      id: route
+    - name: auth
+      shell: bash
+      env:
+        IAC_CONTRACT: ${{ inputs.target-contract-file }}
+        IAC_TARGET: ${{ inputs.target-id }}
+        IAC_ROOT: ${{ inputs.iac-root }}
+        IAC_GITOPS_ROOT: ${{ inputs.gitops-root }}
+        IAC_EVIDENCE: ${{ inputs.evidence-dir }}
+        IAC_PRIVATE: ${{ inputs.private-dir }}
+        IAC_DEPENDENCIES: ${{ inputs.dependencies-dir }}
+        IAC_STAGE: resources
+      run: python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/unified_cli.py" auth
+      id: auth
+    - name: Authenticate aws-cloud
+      if: steps.route.outputs.provider == 'aws-cloud'
+      uses: ./iac_modules/.github/actions/auth-aws-cloud
+      with:
+        region: ${{ steps.auth.outputs.region }}
+        role-arn: ${{ steps.auth.outputs.role_arn }}
+        audience: ${{ steps.auth.outputs.audience }}
+    - name: Authenticate gcp-cloud
+      if: steps.route.outputs.provider == 'gcp-cloud'
+      uses: ./iac_modules/.github/actions/auth-gcp-cloud
+      with:
+        provider: ${{ steps.auth.outputs.provider }}
+        service-account: ${{ steps.auth.outputs.service_account }}
+        audience: ${{ steps.auth.outputs.audience }}
+        reconcile: ${{ steps.route.outputs.reconcile }}
+    - name: Authenticate azure-cloud
+      if: steps.route.outputs.provider == 'azure-cloud'
+      uses: ./iac_modules/.github/actions/auth-azure-cloud
+      with:
+        tenant: ${{ steps.auth.outputs.tenant }}
+        subscription: ${{ steps.auth.outputs.subscription }}
+        client: ${{ steps.auth.outputs.client }}
+    - name: Authenticate vultr-vps
+      if: steps.route.outputs.provider == 'vultr-vps'
+      uses: ./iac_modules/.github/actions/auth-vultr-vps
+      with:
+        target-contract-file: ${{ inputs.target-contract-file }}
+        target-id: ${{ inputs.target-id }}
+        iac-root: ${{ inputs.iac-root }}
+        gitops-root: ${{ inputs.gitops-root }}
+        stage: resources
+    - name: Authenticate ucloud
+      if: steps.route.outputs.provider == 'ucloud'
+      uses: ./iac_modules/.github/actions/auth-ucloud
+      with:
+        target-contract-file: ${{ inputs.target-contract-file }}
+        target-id: ${{ inputs.target-id }}
+        iac-root: ${{ inputs.iac-root }}
+        gitops-root: ${{ inputs.gitops-root }}
+        stage: resources
+    - name: Authenticate akamai-cloud
+      if: steps.route.outputs.provider == 'akamai-cloud'
+      uses: ./iac_modules/.github/actions/auth-akamai-cloud
+      with:
+        target-contract-file: ${{ inputs.target-contract-file }}
+        target-id: ${{ inputs.target-id }}
+        iac-root: ${{ inputs.iac-root }}
+        gitops-root: ${{ inputs.gitops-root }}
+        stage: resources
+    - uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.10.5
+        terraform_wrapper: false
+    - id: execute
+      uses: ./iac_modules/.github/actions/iac-terraform-lifecycle
+      with:
+        target-contract-file: ${{ inputs.target-contract-file }}
+        target-id: ${{ inputs.target-id }}
+        iac-root: ${{ inputs.iac-root }}
+        gitops-root: ${{ inputs.gitops-root }}
+        evidence-dir: ${{ inputs.evidence-dir }}
+        private-dir: ${{ inputs.private-dir }}
+        dependencies-dir: ${{ inputs.dependencies-dir }}
+        stage: resources

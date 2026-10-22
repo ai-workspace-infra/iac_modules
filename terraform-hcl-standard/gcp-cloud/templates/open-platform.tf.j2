@@ -10,7 +10,11 @@ module "project" {
 {% if external_ip_allowed_instances and manage_external_ip_policy %}
 resource "google_org_policy_policy" "vm_external_ip_access" {
   name   = "projects/${module.project.project_number}/policies/compute.vmExternalIpAccess"
+{% if external_ip_policy_parent_identity == 'project_number' %}
+  parent = "projects/${module.project.project_number}"
+{% else %}
   parent = "projects/${module.project.project_id}"
+{% endif %}
 
   # The Google provider currently normalizes imported policy names to the
   # short constraint name in state. Ignore only that import representation
@@ -172,6 +176,29 @@ resource "google_compute_firewall" "vault_raft_internal" {
 }
 {% endif %}
 
+{% for disk in persistent_data_disks %}
+module "retained_data_disk_{{ disk.name | tf_id }}" {
+  source     = "../../modules/persistent_data_disk"
+  project_id = module.project.project_id
+  name       = {{ disk.name | tojson }}
+  zone       = {{ disk.zone | tojson }}
+  size_gb    = {{ disk.size_gb }}
+  disk_type  = {{ disk.type | default('pd-balanced') | tojson }}
+}
+
+# Keep attachment lifecycle separate from the existing VM resource. This lets
+# Terraform add the independent disk without changing the VM module arguments.
+resource "google_compute_attached_disk" "retained_data_disk_{{ disk.name | tf_id }}" {
+  depends_on  = [module.spot_{{ disk.instance | tf_id }}]
+  project     = module.project.project_id
+  zone        = {{ disk.zone | tojson }}
+  instance    = module.spot_{{ disk.instance | tf_id }}.self_link
+  disk        = module.retained_data_disk_{{ disk.name | tf_id }}.id
+  device_name = {{ disk.device_name | tojson }}
+  mode        = "READ_WRITE"
+}
+{% endfor %}
+
 {% for vm in spot_vms %}
 {% if vm.data_disk is defined %}
 module "data_disk_{{ vm.name | tf_id }}" {
@@ -186,10 +213,11 @@ module "data_disk_{{ vm.name | tf_id }}" {
 {% endif %}
 module "spot_{{ vm.name | tf_id }}" {
   source          = "../../modules/spot_vm"
-  depends_on      = [module.project, module.network]
+  depends_on      = [module.project, module.network{% if external_ip_allowed_instances and manage_external_ip_policy %}, google_org_policy_policy.vm_external_ip_access{% endif %}]
   project_id      = module.project.project_id
   name            = {{ vm.name | tojson }}
   zone            = {{ vm.zone | tojson }}
+  region          = var.region
   machine_type    = {{ vm.machine_type | tojson }}
   image           = {{ vm.image | default('projects/debian-cloud/global/images/family/debian-12') | tojson }}
   network         = module.network.network
@@ -197,14 +225,20 @@ module "spot_{{ vm.name | tf_id }}" {
   labels          = {{ vm.labels | default({}) | tojson }}
   network_tags    = {{ vm.network_tags | default([]) | tojson }}
   public_ip       = {{ vm.public_ip | default(false) | tojson }}
+  reserve_static_public_ip = {{ vm.reserve_static_public_ip | default(false) | tojson }}
   ssh_public_key  = var.ssh_public_key
   ssh_username    = var.ssh_username
   enable_oslogin  = {{ vm.enable_oslogin | default(false) | tojson }}
+  enable_guest_attributes = {{ vm.enable_guest_attributes | default(false) | tojson }}
   provisioning_model = {{ vm.provisioning_model | default('SPOT') | tojson }}
   deletion_protection = {{ vm.deletion_protection | default(false) | tojson }}
 {% if vm.data_disk is defined %}
   data_disk_id = module.data_disk_{{ vm.name | tf_id }}.id
   data_disk_device_name = {{ vm.data_disk.device_name | tojson }}
+{% endif %}
+{% set vm_persistent_disks = persistent_data_disks | selectattr('instance', 'equalto', vm.name) | list %}
+{% if vm_persistent_disks %}
+  has_external_data_disk = true
 {% endif %}
 {% if vm.max_run_duration_seconds is defined %}
   max_run_duration_seconds = {{ vm.max_run_duration_seconds }}
@@ -235,8 +269,8 @@ resource "google_iap_tunnel_instance_iam_member" "spot_iap_tunnel_{{ vm.name | t
 }
 
 {% endfor %}
-{% for vm in spot_vms if vm.public_tcp_ports | default([]) %}
-# Public service ports of this VM only. SSH stays on the spot_ssh rule below.
+{% for vm in public_tcp_rules %}
+# Declared public ingress, independently retainable when its old VM is retired.
 resource "google_compute_firewall" "spot_public_tcp_{{ vm.name | tf_id }}" {
   project       = module.project.project_id
   name          = "{{ vm.name }}-public-tcp"
@@ -284,6 +318,21 @@ resource "google_compute_firewall" "spot_ssh" {
   }
 }
 {% endif %}
+{% if iap_ssh_network_tags %}
+resource "google_compute_firewall" "spot_ssh_iap" {
+  project       = module.project.project_id
+  name          = "{{ network_name }}-spot-ssh-iap"
+  network       = module.network.network
+  direction     = "INGRESS"
+  source_ranges = ["35.235.240.0/20"]
+  target_tags   = {{ iap_ssh_network_tags | tojson }}
+
+  allow {
+    protocol = "tcp"
+    ports    = ["22"]
+  }
+}
+{% endif %}
 {% if enable_cloud_run %}
 {% for service in cloud_run_services %}
 module "{{ service.module_name }}" {
@@ -317,8 +366,14 @@ output "platform_runtime" {
       {{ node.name | tojson }} = module.{{ node.name | tf_id }}.public_ip
 {% endfor %}
     }
+    vault_self_links = {
+{% for node in vault_nodes %}
+      {{ node.name | tojson }} = module.{{ node.name | tf_id }}.self_link
+{% endfor %}
+    }
     spot_instances = {
 {% for vm in spot_vms %}
+{% set vm_persistent_disks = persistent_data_disks | selectattr('instance', 'equalto', vm.name) | list %}
       {{ vm.name | tojson }} = {
         name              = module.spot_{{ vm.name | tf_id }}.name
         public_ip         = module.spot_{{ vm.name | tf_id }}.public_ip
@@ -331,6 +386,19 @@ output "platform_runtime" {
         data_disk_id = module.data_disk_{{ vm.name | tf_id }}.id
         data_disk_device_name = {{ vm.data_disk.device_name | tojson }}
         data_mount_path = {{ vm.data_disk.mount_path | tojson }}
+{% endif %}
+{% if vm_persistent_disks %}
+        persistent_data_disks = [
+{% for disk in vm_persistent_disks %}
+          {
+            name = module.retained_data_disk_{{ disk.name | tf_id }}.name
+            id = module.retained_data_disk_{{ disk.name | tf_id }}.id
+            zone = {{ disk.zone | tojson }}
+            device_name = {{ disk.device_name | tojson }}
+            mount_path = {{ disk.mount_path | tojson }}
+          },
+{% endfor %}
+        ]
 {% endif %}
       }
 {% endfor %}

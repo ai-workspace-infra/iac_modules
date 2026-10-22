@@ -1,0 +1,43 @@
+name: iac-self-check
+description: GitOps-bound IaC owner action; delivery approvals and DAG belong to Toolkit.
+inputs:
+  iac-root:
+    description: Pinned owner source
+    required: true
+  gitops-root:
+    description: Pinned declarations
+    required: true
+  providers:
+    description: Comma-separated six provider IDs
+    required: true
+  report-file:
+    description: Static report destination
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install exact renderer dependencies
+      shell: bash
+      run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.2 Jinja2==3.1.6
+    - name: self-check
+      shell: bash
+      env:
+        IAC_ROOT: ${{ inputs.iac-root }}
+        IAC_GITOPS_ROOT: ${{ inputs.gitops-root }}
+        IAC_PROVIDERS: ${{ inputs.providers }}
+        IAC_REPORT: ${{ inputs.report-file }}
+      run: python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/unified_cli.py" self-check
+      id: check
+outputs:
+  result:
+    description: result
+    value: ${{ steps.check.outputs.result }}
+  report_sha256:
+    description: report_sha256
+    value: ${{ steps.check.outputs.report_sha256 }}
+  iac_sha:
+    description: iac_sha
+    value: ${{ steps.check.outputs.iac_sha }}
+  gitops_sha:
+    description: gitops_sha
+    value: ${{ steps.check.outputs.gitops_sha }}

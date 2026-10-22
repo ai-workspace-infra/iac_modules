@@ -1,0 +1,20 @@
+name: auth-aws-cloud
+description: GitOps-bound IaC owner action; delivery approvals and DAG belong to Toolkit.
+inputs:
+  role-arn:
+    description: GitOps runtime role
+    required: true
+  region:
+    description: Declared cloud region
+    required: true
+  audience:
+    description: Declared STS audience
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ inputs.role-arn }}
+        aws-region: ${{ inputs.region }}
+        audience: ${{ inputs.audience }}

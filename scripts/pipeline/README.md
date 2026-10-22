@@ -19,10 +19,12 @@ these scripts from the Terraform working directory, so every relative path in th
 | `adopt-resize-replacement.sh`, `resize-instance-apply-terraform.sh` | guarded resize flow |
 | `vultr-instance-snapshot.sh` | create or resume a Vultr instance snapshot and wait for completion |
 | `ensure-gcp-vm-running.py`, `register-gcp-oslogin-key.sh` | GCP runtime reconcile and OS Login key |
-| `gcp-temporary-ssh-access.sh open\|close` | short-lived runner SSH access to one OS Login VM: RUNNING reconcile, target facts, one-run OS Login key with TTL, runner-/32 tag-scoped tcp:22 rule; revocation with rollback |
+| `gcp-temporary-ssh-access.sh open\|close` | short-lived runner SSH access to one OS Login VM: RUNNING reconcile, target facts, one-run OS Login key with TTL, optional runner-/32 tag-scoped tcp:22 rule; revocation with rollback |
+| `../node_deploy/resolve_gcp_vault.py`, `../node_deploy/resolve_gcp_vault_source.py` | GCP instance/firewall facts → validated provider-neutral Vault `NodeDeployment` contract |
 | `verify-aws-boot-health.sh` | EC2 status-check gate |
 | `cloudflare-dns-record.py` | single A-record cutover/rollback with an environment-bound checkpoint and guarded recovery; see [contract](cloudflare-dns-record.md) |
 | `dns-reconcile.py plan\|apply\|restore` | UAT gateway single-A upsert with explicit account/zone/record identity, checkpoint recovery and exact resolver verification; see [contract](dns-reconcile.md) |
+| `cloudflare-gateway-dns-upsert.py` | guarded single-A gateway record upsert with exact-zone lookup, conflict rejection, checkpointed recovery and resolver convergence; see [contract](cloudflare-gateway-dns-upsert.md) |
 | `artifact-registry-wait.sh` | bounded wait for an exact image tag or digest in Artifact Registry |
 | `artifact-registry-promote.sh` | idempotent, same-digest image promotion into a target repository |
 
@@ -38,7 +40,9 @@ owns release provenance checks and decides when to invoke these operations.
 not-yet-existing `ACCESS_DIR`; optional `OSLOGIN_KEY_TTL` (default `20m`, at
 most `120m`), `TARGET_TAGS` (default: the VM's network tags), `SOURCE_IP`
 (default: the runner's public egress address) and `ENSURE_RUNNING` (default
-`true`). `open` writes `ACCESS_DIR/access.json` (`target_ip`, `target_tags`,
+`true`). `SSH_KEY_PATH` reuses a caller-created one-run key without removing
+its files during close; `OPEN_FIREWALL=false` registers that key without public
+ingress for an already-routed overlay. `open` writes `ACCESS_DIR/access.json` (`target_ip`, `target_tags`,
 `ssh_user`, `private_key`, `known_hosts`, `firewall_rule`, `source_range`,
 `oslogin_key_ttl`) and the same facts to `GITHUB_OUTPUT`; the OS Login user is
 masked in Actions. It refuses an existing rule or directory, and a failed open
@@ -60,6 +64,7 @@ creating another backup, plus `VULTR_SNAPSHOT_WAIT_ATTEMPTS` and
 `GITHUB_OUTPUT` when present, otherwise stdout. Approval and exact instance
 selection stay with the caller; a failed snapshot stops replacement before
 Terraform runs. The script does not delete snapshots.
+
 | `reconcile-backup-schedules.sh` | provider backup schedule reconcile |
 | `action-runner-iac.sh` | `render` / `terraform-init` / `terraform-action` / `inventory` / `build-matrix` for the runner VM |
 | `multi-cloud-load-aws-config.sh`, `multi-cloud-terraform-cli-args.sh <accounts\|resources>` | multi-cloud matrix backend config |
@@ -68,6 +73,16 @@ Terraform runs. The script does not delete snapshots.
 `lib/require-env.sh` is a byte-identical copy of the one in `playbooks` and in
 `platform-ops-toolkit/.github/scripts/lib/`; each repo keeps its own so a pinned ref
 never depends on another repo's layout.
+
+`cloudflare-gateway-dns-upsert.py` is deliberately narrower than the legacy DNS
+reconcilers: it handles one explicitly supplied public IPv4 A record in one
+explicit environment. It refuses CNAME/non-A conflicts and multiple A records,
+does not discover or delete unrelated records, and writes an environment-bound
+0600 checkpoint before changing the provider. The Toolkit remains responsible
+for target selection, approvals and evidence; this script does not read GitOps,
+write CMDB, access hosts, or restart services. The first caller must be added
+only after the owner contract is merged and its UAT acceptance evidence is
+recorded.
 
 ## Tests
 
@@ -98,3 +113,22 @@ direct entry points executable (`100755`).
 toolkit. Keep the copy local to this repository; do not source a helper through a sibling
 checkout. Release and branch rules are maintained in
 [`skills/release-branch-policy/SKILL.md`](../../skills/release-branch-policy/SKILL.md).
+# Canonical PROD Selfhost access
+
+`.github/actions/prod-selfhost-access` calls the IaC-owned
+`prod-selfhost-access.sh open|close` adapter. Its caller must first verify the
+successful resource workflow and original artifact provenance, then supply the
+approved CMDB checksum and the exact GitHub WIF deploy account. The adapter
+checks live VM/network/OS Login/protected disk facts without starting the VM.
+It reuses the temporary-access owner for a 45-minute OS Login key and a
+runner-only `/32` SSH rule; project-scoped OS Login uses an explicit `projectId`
+API request rather than guessing the service account's Linux username.
+
+The access directory is bound to this runner, run ID and attempt. It is private
+runtime state and must never be uploaded or substituted for CMDB. The caller
+must run `close` with `always()` even when opening access or host execution fails.
+Cleanup verifies firewall deletion, revokes the key and removes private files;
+failure must fail the workflow. The adapter executes no host or database commands.
+An ephemeral rule does not supersede any broader permanent firewall rule:
+public SSH isolation also requires the canonical GitOps declaration to remove
+the public catch-all rule through the normal audited IaC plan/apply path.

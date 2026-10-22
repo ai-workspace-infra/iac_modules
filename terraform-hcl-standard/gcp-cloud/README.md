@@ -78,6 +78,23 @@ managed GCP workload states. The manifest declares the project, account,
 region, workspace, state key, network inputs, and resource list; this renderer
 turns the declaration into Terraform modules. Each namespace state may declare
 `resources.spot_vms`, `resources.cloud_run_services`, and/or `resources.vault_nodes`.
+
+For IAP SSH to a single declared service VM, use `spec.iap_ssh_targets` with
+`name`, `zone`, and `network_tag`. The tag must appear on exactly that VM,
+which must enable OS Login. The renderer creates a separate ingress rule from
+`35.235.240.0/20` to TCP 22; the existing shared SSH rule is unchanged. Do not
+combine scoped targets with the namespace-wide `enable_iap_ssh` switch. For
+example, a recovery generation can use `network_tag: web-saas-prod-v3-ssh`
+without expanding access to the preceding generation. Apply a reviewed plan
+against the existing state and regenerate CMDB/inventory afterward.
+
+When a retired VM's existing public ingress must remain managed, declare it
+under `spec.resources.retained_public_tcp_rules` with `name`, `network_tags`,
+and `public_tcp_ports`. This renders only the existing
+`google_compute_firewall.spot_public_tcp_<name>` address; it does not render a
+VM, disk, or instance IAM binding. SSH port 22 and duplicate addresses are
+rejected. Verify the VM and disk are absent before removing their declarations;
+retain the shared network and review a full plan against the existing state.
 Vault nodes default to exactly one `xconnect_role: gateway` and any number of
 `xconnect_role: one` members, plus an SSH `/32` allowlist in
 `spec.ssh_source_ranges`. A state that owns only XConnect One members may set
@@ -130,6 +147,22 @@ entirely so a project-level `compute.requireOsLogin` policy is never overridden
 with `FALSE`; callers in such projects must explicitly enable OS Login and
 provide a matching deployment SSH path. A successful VM plan alone does not
 prove that Ansible can sign in.
+
+Resource-only `inventory` calls resolve a missing `GCP_OSLOGIN_USERNAME` through
+the declared project's runtime `deploy_account`, using the already authenticated
+WIF credential and the OS Login `users.getLoginProfile` API with explicit
+`projectId`. The CLI `describe-profile` implementation omits that API field
+even when `--project` is set. The owner requires one
+Linux service-account POSIX username; invalid, missing or ambiguous profiles
+stop CMDB publication. This read does not register keys, perform SSH, select a
+personal account or change IAM. Host deploy owners still register their own
+expiring key and pass the verified username through the existing contract.
+When `GOOGLE_GHA_CREDS_PATH` is supplied by GitHub authentication, the owner
+first verifies its external-account type and exact runtime service-account
+impersonation URL, then activates that same short-lived WIF credential in
+gcloud. OS Login requires a registered account even when ADC already works
+for project/instance reads. Other credential types or identities are refused;
+this does not initiate interactive login or require bootstrap credentials.
 
 A public Spot VM that serves traffic (for example a regional Agent Proxy)
 declares it on the VM:
