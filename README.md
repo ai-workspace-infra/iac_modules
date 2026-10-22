@@ -12,13 +12,13 @@ For cross-repository script moves, follow the [execution ownership migration sta
 
 ## 🚀 快速开始
 
-### 一键安装 OpenTofu CLI 与 S3 远程状态存储 (MinIO + Caddy)
+### 一键安装 OpenTofu CLI 与 S3 远程状态存储 (MinIO/Silo + Caddy)
 
-支持在 Debian 12+ / Ubuntu 22.04+ 系统上一键安装 OpenTofu CLI、S3 兼容远程状态后端（MinIO）以及 Caddy 自动 TLS 反向代理，支持原生状态锁。
+支持在 Debian 12+ / Ubuntu 22.04+ 系统上一键安装 OpenTofu CLI、S3 兼容远程状态后端（采用社区维护的 MinIO Fork 新版本 [pgsty/silo](https://github.com/pgsty/silo.git)）以及 Caddy 自动 TLS 反向代理，支持原生状态锁。
 
 #### 1. 独立单机模式 (Standalone)
 
-自动安装 OpenTofu CLI、MinIO 与 Caddy，并自动生成强密码凭据（终端仅打印一次，指引保存至 Vault）：
+自动安装 OpenTofu CLI、MinIO/Silo 与 Caddy，并自动生成强密码凭据（终端仅打印一次，指引保存至 Vault）：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ai-workspace-infra/iac_modules/main/scripts/setup-opentofu.sh | \

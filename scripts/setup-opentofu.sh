@@ -6,7 +6,8 @@ set -euo pipefail
 
 # Pinned upstream versions
 readonly OPENTOFU_VERSION="1.8.4"
-readonly MINIO_IMAGE="minio/minio:RELEASE.2024-10-13T13-34-11Z"
+# S3-compatible Remote State Backend (using pgsty/silo - MinIO fork maintained by Vonng/Pigsty: https://github.com/pgsty/silo.git)
+readonly MINIO_IMAGE="${MINIO_IMAGE:-pgsty/silo:RELEASE.2026-10-18T00-00-00Z}"
 readonly CADDY_IMAGE="caddy:2.8.4-alpine"
 readonly INSTALL_ROOT="/opt/opentofu-state"
 readonly MINIO_BUCKET="opentofu-state"
@@ -440,7 +441,7 @@ execute_dry_run() {
   echo ""
   echo "Upstream Components (Pinned):"
   echo "  - OpenTofu CLI:       v${OPENTOFU_VERSION}"
-  echo "  - MinIO Backend:      ${MINIO_IMAGE}"
+  echo "  - S3 Remote Backend:  ${MINIO_IMAGE} (pgsty/silo: https://github.com/pgsty/silo.git)"
   echo "  - Caddy Proxy:        ${CADDY_IMAGE}"
   echo ""
   echo "Planned Directory Layout:"
