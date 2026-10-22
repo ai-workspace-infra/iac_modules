@@ -198,6 +198,16 @@ def cmd_render(args):
     
     glob, ssh_keys, hosts = _merge_sources(args.resources)
 
+    for host in hosts:
+        disk = host.get("data_disk")
+        if disk is not None and (
+            not isinstance(disk, dict)
+            or not isinstance(disk.get("size_gb"), int)
+            or disk["size_gb"] < 10
+            or disk.get("block_type") not in ("high_perf", "storage_opt")
+        ):
+            raise SystemExit("data_disk requires size_gb >= 10 and an explicit supported block_type")
+
     rendered = (
         _jinja()
         .get_template("hosts.tf.j2")
