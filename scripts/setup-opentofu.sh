@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
-# setup-opentofu.sh: OpenTofu CLI + MinIO S3 Remote State + Caddy HTTPS Installer
+# setup-opentofu.sh: OpenTofu CLI + Silo S3 Remote State + Caddy HTTPS Installer
+# Silo: S3-Compatible Object Storage. A MinIO fork maintained by PGSTY (https://github.com/pgsty/silo.git),
+#       providing a self-hosted S3-compatible service to replace the unmaintained MinIO.
 # Supports Debian 12+ and Ubuntu 22.04+ in Standalone and Team (Vault-injected) modes.
 
 set -euo pipefail
 
 # Pinned upstream versions
 readonly OPENTOFU_VERSION="1.8.4"
-# S3-compatible Remote State Backend (using pgsty/silo - MinIO fork maintained by Vonng/Pigsty: https://github.com/pgsty/silo.git)
-readonly MINIO_IMAGE="${MINIO_IMAGE:-pgsty/silo:RELEASE.2026-10-18T00-00-00Z}"
+# Self-hosted S3-Compatible Object Storage (pgsty/silo: A MinIO fork maintained by PGSTY to replace unmaintained MinIO)
+readonly SILO_IMAGE="${SILO_IMAGE:-${MINIO_IMAGE:-pgsty/silo:RELEASE.2026-10-18T00-00-00Z}}"
+readonly MINIO_IMAGE="${SILO_IMAGE}"
 readonly CADDY_IMAGE="caddy:2.8.4-alpine"
 readonly INSTALL_ROOT="/opt/opentofu-state"
 readonly MINIO_BUCKET="opentofu-state"
@@ -42,8 +45,8 @@ Deployment Modes:
 
 Required for Team Mode (--with-state-backend):
   TF_STATE_DOMAIN        FQDN for state backend (must match --domain)
-  TF_STATE_ACCESS_KEY    MinIO S3 Access Key / Root User
-  TF_STATE_SECRET_KEY    MinIO S3 Secret Key / Root Password
+  TF_STATE_ACCESS_KEY    S3 Access Key / Root User (Silo)
+  TF_STATE_SECRET_KEY    S3 Secret Key / Root Password (Silo)
 
 Options:
   --domain <fqdn>        Target domain for S3 endpoint and automatic TLS
@@ -441,7 +444,7 @@ execute_dry_run() {
   echo ""
   echo "Upstream Components (Pinned):"
   echo "  - OpenTofu CLI:       v${OPENTOFU_VERSION}"
-  echo "  - S3 Remote Backend:  ${MINIO_IMAGE} (pgsty/silo: https://github.com/pgsty/silo.git)"
+  echo "  - S3 Remote Backend:  ${SILO_IMAGE} (pgsty/silo: S3-Compatible Object Storage. A MinIO fork maintained by PGSTY)"
   echo "  - Caddy Proxy:        ${CADDY_IMAGE}"
   echo ""
   echo "Planned Directory Layout:"
@@ -450,7 +453,7 @@ execute_dry_run() {
   echo "  ├── Caddyfile"
   echo "  ├── .env                (mode 0600)"
   echo "  ├── backend.tf"
-  echo "  ├── data/opentofu-state (MinIO remote state bucket)"
+  echo "  ├── data/opentofu-state (Silo S3 remote state bucket)"
   echo "  ├── caddy_data/         (automatic TLS certs)"
   echo "  └── caddy_config/"
   echo ""
@@ -646,14 +649,14 @@ echo "Status:             $([ "$health_ok" = true ] && echo "HEALTHY" || echo "S
 echo "Public S3 Endpoint: https://${DOMAIN}"
 echo "Local S3 Endpoint:  http://127.0.0.1:9000"
 echo "OpenTofu Version:   ${tofu_v}"
-echo "MinIO Health:       $([ "$health_ok" = true ] && echo "OK (live)" || echo "PENDING")"
+echo "S3 Storage Health:  $([ "$health_ok" = true ] && echo "OK (live)" || echo "PENDING")"
 echo "Install Root:       ${INSTALL_ROOT}"
 echo "Bucket Name:        ${MINIO_BUCKET}"
 echo ""
 
 if [ "$MODE" = "standalone" ]; then
   if [ "$CREDENTIALS_GENERATED" = true ]; then
-    echo "Generated MinIO S3 Credentials (save these immediately!):"
+    echo "Generated S3 Credentials (Silo - save these immediately!):"
     echo "  Access Key:       ${MINIO_ROOT_USER}"
     echo "  Secret Key:       ${MINIO_ROOT_PASSWORD}"
     echo ""
@@ -666,7 +669,7 @@ if [ "$MODE" = "standalone" ]; then
     echo "      secret_key=\"${MINIO_ROOT_PASSWORD}\""
     echo ""
   else
-    echo "MinIO S3 Credentials:"
+    echo "S3 Credentials (Silo):"
     echo "  Existing credentials preserved from ${INSTALL_ROOT}/.env"
     echo ""
   fi
