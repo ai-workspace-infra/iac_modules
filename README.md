@@ -10,6 +10,43 @@ repo on the other side of the CMDB contract.
 
 For cross-repository script moves, follow the [execution ownership migration standard](https://github.com/ai-workspace-lab/xworkspace-core-skills/blob/main/skills/engineering-standards/execution-ownership-migration/SKILL.md): this repository owns reusable IaC rendering and provider execution, while GitOps owns environment declarations. Merge and test the owner implementation before switching Toolkit callers; remove the old executor only after verifying the new route.
 
+## 🚀 快速开始
+
+### 一键安装 OpenTofu CLI 与 S3 远程状态存储 (MinIO + Caddy)
+
+支持在 Debian 12+ / Ubuntu 22.04+ 系统上一键安装 OpenTofu CLI、S3 兼容远程状态后端（MinIO）以及 Caddy 自动 TLS 反向代理，支持原生状态锁。
+
+#### 1. 独立单机模式 (Standalone)
+
+自动安装 OpenTofu CLI、MinIO 与 Caddy，并自动生成强密码凭据（终端仅打印一次，指引保存至 Vault）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ai-workspace-infra/iac_modules/main/scripts/setup-opentofu.sh | \
+  bash -s -- --domain state.example.com --standalone
+```
+
+#### 2. 团队协作模式 (Team / Vault 注入)
+
+通过环境变量注入来自 Vault 的凭据，严格遵循机密不落盘与 fail-closed 门禁：
+
+```bash
+export TF_STATE_DOMAIN="state.example.com"
+export TF_STATE_ACCESS_KEY="<runtime-secret>"
+export TF_STATE_SECRET_KEY="<runtime-secret>"
+curl -fsSL https://raw.githubusercontent.com/ai-workspace-infra/iac_modules/main/scripts/setup-opentofu.sh | \
+  bash -s -- --domain "$TF_STATE_DOMAIN" --with-state-backend
+unset TF_STATE_ACCESS_KEY TF_STATE_SECRET_KEY
+```
+
+#### 3. 服务卸载与状态数据保护
+
+安全停止并清理容器服务，默认保留 `/opt/opentofu-state/data` 中的所有 remote state 数据：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ai-workspace-infra/iac_modules/main/scripts/setup-opentofu.sh | \
+  bash -s -- --uninstall
+```
+
 ## Core paradigm
 
 ```
