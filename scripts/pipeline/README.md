@@ -23,6 +23,7 @@ these scripts from the Terraform working directory, so every relative path in th
 | `../node_deploy/resolve_gcp_vault.py`, `../node_deploy/resolve_gcp_vault_source.py` | GCP instance/firewall facts → validated provider-neutral Vault `NodeDeployment` contract |
 | `verify-aws-boot-health.sh` | EC2 status-check gate |
 | `cloudflare-dns-record.py` | single A-record cutover/rollback with an environment-bound checkpoint and guarded recovery; see [contract](cloudflare-dns-record.md) |
+| `dns-reconcile.py plan\|apply\|restore` | UAT gateway single-A upsert with explicit account/zone/record identity, checkpoint recovery and exact resolver verification; see [contract](dns-reconcile.md) |
 | `cloudflare-gateway-dns-upsert.py` | guarded single-A gateway record upsert with exact-zone lookup, conflict rejection, checkpointed recovery and resolver convergence; see [contract](cloudflare-gateway-dns-upsert.md) |
 | `artifact-registry-wait.sh` | bounded wait for an exact image tag or digest in Artifact Registry |
 | `artifact-registry-promote.sh` | idempotent, same-digest image promotion into a target repository |
