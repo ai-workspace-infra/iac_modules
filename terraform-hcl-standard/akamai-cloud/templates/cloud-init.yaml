@@ -4,3 +4,7 @@ package_upgrade: true
 runcmd:
   - echo "Provisioned by Terraform Akamai Cloud/Linode VPS env" > /etc/motd
   - systemctl enable --now ssh || systemctl enable --now sshd || true
+  - |
+      printf 'IAC_ED25519_FP_BEGIN\n'
+      ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub | awk '{print $2}' | fold -w24
+      printf 'IAC_ED25519_FP_END\n'
