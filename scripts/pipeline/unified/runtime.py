@@ -14,6 +14,7 @@ import yaml
 from .auth import verify_checks, verify_identity
 from .contracts import STAGES, ContractError, contained, digest, owner_match, read_json, require, revalidate, write_json
 from .evidence import collect, guard_plan, receipt_base, sanitize_inventory
+from .validation import isolated_states, state_digest, verify_retained
 
 
 def run(command, private, allowed=(0,)):
@@ -89,6 +90,16 @@ def render(context, target, stage, iac_root, gitops_root, private):
         args = [sys.executable, str(tree / "scripts" / "generate.py"), "render", "--resources", str(source), "--workdir", str(root)]
         if target["provider"] == "akamai-cloud":
             args += ["--namespace", target["workspace"]]
+            if context["action"] == "destroy" and target.get("validation"):
+                # The reviewed declaration remains protected. Only this private,
+                # saved-plan cleanup render uses the explicit replacement flag.
+                document = yaml.safe_load(source.read_text())
+                document["global"]["prevent_destroy"] = False
+                temporary_source = Path(private) / "validation-resources.yaml"
+                temporary_source.write_text(yaml.safe_dump(document))
+                args[args.index("--resources") + 1] = str(temporary_source)
+                if target["environment"] == "prod":
+                    args.append("--allow-prod-replacement")
         for key, value in spec.get("render_env", {}).items():
             require(key in {"TARGET_DOMAIN_BASE", "TARGET_DOMAIN", "INSTANCE_PLAN_API", "AGENT_PROXY_PLAN_API", "TF_WORKSPACE_PREFIX"}, "unreviewed renderer environment override")
             os.environ[key] = str(value)
@@ -177,6 +188,18 @@ def execute(context, target_id, stage, iac_root, gitops_root, evidence, private,
                 root, source = render(context, target, stage, iac_root, gitops_root, private)
                 write_json(private / "root.json", {"root": str(root), "stage": stage})
                 initialize(root, private, spec["state"])
+                validation = target.get("validation") if context["action"] == "destroy" else None
+                if validation:
+                    source_root = private / "source-state"
+                    source_root.mkdir()
+                    (source_root / "backend.tf").write_text('terraform {\n  backend "s3" {}\n}\n')
+                    initialize(source_root, private, validation["source_binding"]["state"])
+                    source_before = json.loads(terraform(source_root, private, "state", "pull").stdout)
+                    candidate_before = json.loads(terraform(root, private, "state", "pull").stdout)
+                    retained_before, selected_resources = isolated_states(target, candidate_before, source_before)
+                    receipt["validation"] = {"mode": "cleanroom", "source_state_sha256": state_digest(source_before),
+                        "candidate_state_sha256": state_digest(candidate_before), "selected_compute_count": len(selected_resources)}
+                    receipt["verification"]["namespace_isolation"] = True
                 if spec.get("requires_existing_state"):
                     current = terraform(root, private, "state", "list").stdout.decode().splitlines()
                     require(current and all(owner_match(address, spec["owners"]) for address in current), "existing state missing or belongs to another stage; explicit maintenance required")
@@ -187,19 +210,32 @@ def execute(context, target_id, stage, iac_root, gitops_root, evidence, private,
                     require(before, "empty state destroy requires target investigation; refusing false success")
                     require(all(owner_match(address, spec["owners"]) for address in before), "state contains resources outside selected owner")
                     args.append("-destroy")
+                    if validation:
+                        args += [f"-target={owner}" for owner in validation["destroy_owners"]]
                 terraform(root, private, *args)
                 plan_doc = json.loads(terraform(root, private, "show", "-json", str(plan)).stdout)
                 receipt["changes"] = guard_plan(target, stage, plan_doc, context["action"])
+                if validation:
+                    require(receipt["changes"]["delete"] == 1, "validation cleanup must delete exactly one candidate instance")
                 receipt["plan_sha256"] = digest(plan)
                 receipt["verification"]["ownership"] = True
                 receipt["result"] = "planned"
                 if context["action"] in {"apply", "destroy"}:
+                    if validation:
+                        require(state_digest(json.loads(terraform(source_root, private, "state", "pull").stdout)) == state_digest(source_before), "serving source state changed before cleanup")
                     require(digest(plan) == receipt["plan_sha256"], "saved plan changed before apply")
                     terraform(root, private, "apply", "-input=false", "-lock-timeout=5m", "-no-color", str(plan))
                     args = ["plan", "-input=false", "-lock-timeout=5m", "-detailed-exitcode", "-no-color"]
                     if context["action"] == "destroy":
                         args.append("-destroy")
-                        require(not terraform(root, private, "state", "list").stdout.strip(), "resources remain in target state")
+                        if validation:
+                            args += [f"-target={owner}" for owner in validation["destroy_owners"]]
+                            verify_retained(retained_before, json.loads(terraform(root, private, "state", "pull").stdout), validation["destroy_owners"])
+                            require(state_digest(json.loads(terraform(source_root, private, "state", "pull").stdout)) == state_digest(source_before), "serving source state changed during cleanup")
+                            receipt["verification"]["retained_resources"] = True
+                            receipt["verification"]["source_unchanged"] = True
+                        else:
+                            require(not terraform(root, private, "state", "list").stdout.strip(), "resources remain in target state")
                     terraform(root, private, *args)  # Exit 2 is drift, not verified success.
                     receipt["verification"]["convergence"] = True
                     receipt["result"] = "applied_verified" if context["action"] == "apply" else "destroyed_verified"

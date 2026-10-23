@@ -138,6 +138,9 @@ def validate_target(target, gitops_root):
             require(state.get("cli_workspace", "default") == "default", "legacy CLI workspace requires reviewed state migration")
             require(spec.get("ownership_reviewed") is True, "resource/stage/state ownership review is required")
             require(not spec.get("backend_migration") and not spec.get("adopt"), "maintenance must not run in ordinary lifecycle")
+    if target.get("validation") is not None:
+        from .validation import validate_candidate
+        validate_candidate(target, gitops_root)
     return target
 
 
@@ -155,6 +158,8 @@ def prepare(gitops_root, iac_root, manifest, environment, action, scope, bootstr
     require(isinstance(targets, list) and targets, "empty target set rejected")
     ids, keys = set(), set()
     selected = list(STAGES) if scope == "all" else [scope]
+    if action == "destroy" and any(target.get("validation") for target in targets):
+        require(len(targets) == 1 and scope == "resources", "validation cleanup is one target/resources only")
     if action == "destroy":
         selected.reverse()
     for target in targets:
