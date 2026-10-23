@@ -24,3 +24,13 @@ nonzero. Keep the checkpoint until the ordered service acceptance has completed.
 
 Outputs: `changed`, `record_id`, `address` through `GITHUB_OUTPUT`.
 The executor does not create records, infer topology, or operate on hosts.
+
+For production generation-only aliases, use
+`cloudflare-generation-aliases.py --resources <fixed-GitOps-YAML> --cmdb
+<IaC-generated-CMDB> --checkpoint <private-directory>` to render the four exact
+`console`, `accounts`, `billing`, and `postgresql` `-selfhost-prod-vN.svc.plus`
+records. The renderer verifies generation and service-domain agreement between
+GitOps and CMDB and takes the public IP only from that CMDB entry. It then
+preflights the exact four provider records as create/update/noop; duplicate A
+records or another record type stop the run before writes. Add `--apply` only
+after reviewing that exact preview. Root/public CNAMEs are outside this path.
