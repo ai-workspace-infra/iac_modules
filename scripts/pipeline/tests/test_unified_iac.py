@@ -155,6 +155,14 @@ class ContractTests(unittest.TestCase):
         for sample in ({"host\n[unsafe]": {"ip": "192.0.2.1"}}, {"host": {"ip": "127.0.0.1"}}, {"host": {"ip": "192.0.2.1", "groups": ["group\n[unsafe]"]}}):
             with self.subTest(sample=sample), self.assertRaises(ContractError): sanitize_inventory(sample)
 
+    def test_primary_ipv6_host_cidr_normalized_without_mutating_input(self):
+        raw = {"host": {"ip": "192.0.2.1", "ipv6": "2001:db8::1/128"}}
+        self.assertEqual(sanitize_inventory(raw)["host"]["ipv6"], "2001:db8::1")
+        self.assertEqual(raw["host"]["ipv6"], "2001:db8::1/128")
+        for address in ("2001:db8::1/64", "192.0.2.1/32", "::/128", "::1/128", "ff02::1/128"):
+            with self.subTest(address=address), self.assertRaises(ContractError):
+                sanitize_inventory({"host": {"ipv6": address}})
+
     def test_missing_gitops_source_fails(self):
         with self.assertRaises(ContractError):
             prepare(self.gitops, self.iac, "missing.yaml", "uat", "apply", "resources", "verify", "", {})
