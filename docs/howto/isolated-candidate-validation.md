@@ -1,5 +1,18 @@
 # Isolated candidate validation cleanup
 
+Before replacing a candidate, prepare its trusted new-host identity route.
+The Akamai bootstrap emits only the public Ed25519 SHA256 fingerprint in short,
+framed console lines. `scripts/pipeline/akamai-hostkey-read.py` validates the
+account/instance/region/address, reads the provider's TLS-verified Weblish endpoint
+without keyboard input, requires one complete 256-bit fingerprint, and compares
+it with the network key before emitting a protected `known_hosts` file and receipt.
+It consumes `LINODE_TOKEN` only from the runtime environment, passes the ephemeral
+console session through stdin, and never accepts key/fingerprint prefixes.
+Use a fresh evidence directory and capture boot output before host deployment;
+missing or conflicting frames block SSH. Existing instances are not restarted or
+reconfigured by this reader. A verified fingerprint does not prove host/service
+readiness or business acceptance.
+
 Owner: IaC Modules. Caller: Toolkit `iac-orchestrator.yml`, resources stage only.
 GitOps declares the serving source, candidate namespace and one compute owner.
 This mode does not change the shared Selfhost orchestrator's production destroy
