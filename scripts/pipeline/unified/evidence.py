@@ -119,6 +119,13 @@ def sanitize_inventory(raw):
     for name, facts in raw.items():
         require(isinstance(name, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,252}", name), "invalid inventory hostname")
         require(isinstance(facts, dict), "invalid inventory host")
+        facts = dict(facts)
+        # Linode reports its single primary IPv6 address as address/128.
+        # A network prefix is not a deployment address and must fail closed.
+        if isinstance(facts.get("ipv6"), str) and "/" in facts["ipv6"]:
+            interface = ipaddress.ip_interface(facts["ipv6"])
+            require(interface.version == 6 and interface.network.prefixlen == 128, "single IPv6 host address required")
+            facts["ipv6"] = str(interface.ip)
         for key in ("ip", "private_ip", "ipv6"):
             if facts.get(key):
                 address = ipaddress.ip_address(facts[key])
