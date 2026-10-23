@@ -97,4 +97,16 @@ def verify_retained(before, after, owners):
 
 
 def state_digest(state):
-    return hashlib.sha256(json.dumps(state, sort_keys=True).encode()).hexdigest()
+    # Terraform emits check_results and their objects in Go map iteration order.
+    # Only these address-keyed sets are unordered; resource attribute arrays are
+    # semantically ordered and must continue to affect the witness digest.
+    normalized = dict(state)
+    if isinstance(state.get("check_results"), list):
+        checks = []
+        for item in state["check_results"]:
+            check = dict(item)
+            if isinstance(check.get("objects"), list):
+                check["objects"] = sorted(check["objects"], key=lambda value: json.dumps(value, sort_keys=True))
+            checks.append(check)
+        normalized["check_results"] = sorted(checks, key=lambda value: json.dumps(value, sort_keys=True))
+    return hashlib.sha256(json.dumps(normalized, sort_keys=True).encode()).hexdigest()
