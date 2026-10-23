@@ -46,6 +46,9 @@ def verify_receipt(context, target, stage, receipt):
     else:
         require(receipt.get("verification", {}).get("identity") is True, "missing provider identity verification")
     if mode == "terraform" and not (stage == "bootstrap" and context["bootstrap_mode"] == "verify"):
+        if target.get("validation") and context["action"] == "destroy":
+            for check in ("namespace_isolation", "retained_resources", "source_unchanged"):
+                require(receipt.get("verification", {}).get(check) is True, "missing validation cleanup evidence: " + check)
         require(receipt.get("verification", {}).get("ownership") is True, "missing resource ownership verification")
         require(len(receipt.get("plan_sha256", "")) == 64, "missing saved plan digest")
         if context["action"] != "plan":
@@ -93,6 +96,11 @@ def guard_plan(target, stage, plan, action):
             require(not owner_match(address, spec.get("protected", [])), f"protected resource deletion/replacement: {detail}")
             require(item.get("type") not in {"google_compute_disk", "aws_ebs_volume", "linode_volume", "vultr_block_storage", "ucloud_udisk"}, f"persistent disk deletion/replacement requires maintenance: {detail}")
             require(action == "destroy", f"ordinary plan/apply cannot delete or replace resources: {detail}")
+            if target.get("validation"):
+                require(owner_match(address, target["validation"]["destroy_owners"]) and item.get("type") == "linode_instance", "validation may delete only the selected compute instance")
+                expected = target["validation"]["expected_instance"]
+                require(all(change.get("before", {}).get(key) == value for key, value in expected.items()), "live candidate label/region differs from validation declaration")
+                require(change.get("before", {}).get("backups_enabled") is False, "instance-bound provider backups must be preserved before cleanup")
         if action == "destroy":
             require(set(actions) <= {"delete", "no-op", "read"}, "destroy plan contains forward mutations")
         if item.get("type") == "vultr_instance" and actions == ["update"]:
