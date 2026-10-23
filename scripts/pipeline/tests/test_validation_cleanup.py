@@ -13,7 +13,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from unified.contracts import ContractError, digest, validate_target
 from unified.evidence import guard_plan
-from unified.validation import isolated_states, state_resources, verify_retained
+from unified.validation import isolated_states, state_resources, verify_retained, state_digest
 from unified import runtime
 
 
@@ -34,6 +34,28 @@ def source_state(overlap=False):
 
 
 class ValidationCleanupTests(unittest.TestCase):
+    def test_state_witness_ignores_only_check_set_order(self):
+        original = state("source")
+        original["resources"][0]["instances"][0]["attributes"]["ordered"] = [1, 2]
+        original["check_results"] = [
+            {"config_addr": "a", "status": "pass", "objects": [
+                {"object_addr": "a[0]", "status": "pass"},
+                {"object_addr": "a[1]", "status": "pass"}]},
+            {"config_addr": "b", "status": "pass", "objects": []}]
+        reordered = copy.deepcopy(original)
+        reordered["check_results"][0]["objects"].reverse()
+        reordered["check_results"].reverse()
+        self.assertEqual(state_digest(original), state_digest(reordered))
+        self.assertNotEqual(original["check_results"], reordered["check_results"])
+        for field in ("serial", "lineage", "status", "attribute_order"):
+            changed = copy.deepcopy(original)
+            if field == "serial": changed["serial"] += 1
+            elif field == "lineage": changed["lineage"] = "different"
+            elif field == "status": changed["check_results"][0]["status"] = "fail"
+            else:
+                changed["resources"][0]["instances"][0]["attributes"]["ordered"] = [2, 1]
+            self.assertNotEqual(state_digest(original), state_digest(changed))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
