@@ -55,7 +55,7 @@ def validate_candidate(target, gitops_root):
         "region": host.get("region", global_config.get("region"))}
     require(validation["expected_instance"]["region"], "candidate region is required")
     validation["source_binding"] = {
-        "manifest_sha256": digest(path), "state": source_spec["state"],
+        "manifest_sha256": digest(path), "state": source_spec["state"], "owners": source_spec["owners"],
         **{key: source[key] for key in ("environment", "project", "provider", "account", "workspace")},
     }
 
@@ -81,6 +81,7 @@ def isolated_states(target, candidate, source):
     require(candidate.get("lineage") and source.get("lineage") and candidate["lineage"] != source["lineage"], "candidate/source state lineage must differ")
     current, serving = state_resources(candidate), state_resources(source)
     require(current and serving, "both candidate and serving source state must exist")
+    require(all(owner_match(key, target["validation"]["source_binding"]["owners"]) for key in serving), "serving source state does not match its declared ownership")
     require(not set(current.values()) & set(serving.values()), "candidate state contains serving source resources")
     owners = target["validation"]["destroy_owners"]
     selected = {key: value for key, value in current.items() if owner_match(key, owners)}

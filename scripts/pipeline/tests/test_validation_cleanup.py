@@ -26,6 +26,13 @@ def state(lineage, instance_id="123", provider="linode/linode"):
     ]}
 
 
+def source_state(overlap=False):
+    value = state("source", "123" if overlap else "456", "linode/linode" if overlap else "hashicorp/google")
+    value["resources"] = value["resources"][:1]
+    value["resources"][0]["module"] = "module.serving"
+    return value
+
+
 class ValidationCleanupTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -113,14 +120,16 @@ class ValidationCleanupTests(unittest.TestCase):
 
     def test_state_alias_and_resource_overlap_rejected_even_with_other_provider_alias(self):
         target = self.validated()
-        candidate, source = state("candidate"), state("source", "456", "hashicorp/google")
-        source["resources"] = source["resources"][:1]
+        candidate, source = state("candidate"), source_state()
         isolated_states(target, candidate, source)
         source["lineage"] = candidate["lineage"]
         with self.assertRaises(ContractError): isolated_states(target, candidate, source)
-        source = state("source")
+        source = source_state(overlap=True)
         source["resources"][0]["provider"] += ".other_alias"
         with self.assertRaisesRegex(ContractError, "serving source resources"): isolated_states(target, candidate, source)
+        source = source_state()
+        source["resources"][0]["module"] = "module.unrelated"
+        with self.assertRaisesRegex(ContractError, "declared ownership"): isolated_states(target, candidate, source)
 
     def test_cleanup_preserves_firewall_and_refuses_identity_changes(self):
         self.validated()
@@ -150,9 +159,7 @@ class ValidationCleanupTests(unittest.TestCase):
         context = {"action": "destroy", "stages": ["resources"], "targets": [target], "bootstrap_mode": "verify",
             **{key: "fixture" for key in ("correlation_id", "run_id", "run_attempt", "workflow_ref", "workflow_sha", "gitops_sha", "iac_sha", "contract_sha256", "manifest_sha256")},
             "requested_refs": {"iac": "fixture", "gitops": "fixture"}}
-        source = state("source", "456", "hashicorp/google")
-        source["resources"] = source["resources"][:1]
-        if overlap: source = state("source")
+        source = source_state(overlap=overlap)
         candidate = state("candidate")
         after = copy.deepcopy(candidate)
         after["resources"] = after["resources"][1:]
