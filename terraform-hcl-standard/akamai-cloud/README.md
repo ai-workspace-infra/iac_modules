@@ -16,6 +16,11 @@
   `linode_instance` 上设置 `lifecycle.prevent_destroy = true`。这是 Terraform
   state 侧的保护；下线必须先通过独立代码变更和审批移除保护。UAT 的五个临时
   namespace 不使用此 module，`open-platform` 则由 Platform workflow 拒绝 destroy。
+- **显式替换授权**：PROD 默认启用删除保护；只有 GitOps YAML 明确写入
+  `global.prevent_destroy: false` 且本次 `render` / `provision.sh` 调用显式带上
+  `--allow-prod-replacement`，渲染器才会选择未保护的 `compute` module。该参数仅适用
+  `akamai-cloud` 的 PROD；provision 回执记录本次是否传入授权。`false` 必须是 YAML
+  布尔值，单独修改声明不会解除保护。
 - **GitOps 声明目录**：`resources/<project>/<env>/akamai/*.yaml`
 - **凭据**：`LINODE_TOKEN`，通过 Vault/CI 注入，不进入 YAML、tfvars 或 Git
 - **CMDB**：Terraform 只输出运行时事实，Python 将其与 GitOps 静态字段合并
