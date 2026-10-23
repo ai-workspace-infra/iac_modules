@@ -139,8 +139,21 @@ def render(args):
         raise SystemExit(
             f"Akamai namespace {namespace} must contain exactly one host; got {len(hosts)}"
         )
-    prevent_destroy = environment == "prod" or bool(
-        global_config.get("prevent_destroy", False)
+    declared_prevent_destroy = global_config.get("prevent_destroy")
+    if "prevent_destroy" in global_config and type(declared_prevent_destroy) is not bool:
+        raise SystemExit("global.prevent_destroy must be a YAML boolean")
+    allow_prod_replacement = getattr(args, "allow_prod_replacement", False) is True
+    if allow_prod_replacement and environment != "prod":
+        raise SystemExit("--allow-prod-replacement is valid only for prod resources")
+    if environment == "prod" and declared_prevent_destroy is False and not allow_prod_replacement:
+        raise SystemExit(
+            "prod global.prevent_destroy: false requires the explicit "
+            "--allow-prod-replacement authorization"
+        )
+    prevent_destroy = (
+        declared_prevent_destroy
+        if declared_prevent_destroy is not None
+        else environment == "prod"
     )
     workdir.mkdir(parents=True, exist_ok=True)
     environment = jinja()
@@ -263,6 +276,15 @@ def main():
                 + ", ".join(UAT_NAMESPACES)
             ),
         )
+        if command == "render":
+            sub.add_argument(
+                "--allow-prod-replacement",
+                action="store_true",
+                help=(
+                    "explicitly authorize rendering prod resources with "
+                    "global.prevent_destroy: false for an approved replacement"
+                ),
+            )
         sub.set_defaults(handler=handler)
     args = parser.parse_args()
     args.handler(args)

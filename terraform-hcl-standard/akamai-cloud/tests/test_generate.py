@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import yaml
 import sys
@@ -151,6 +152,88 @@ class GenerateTest(unittest.TestCase):
             self.assertEqual(content.count('module "compute_'), 2)
             self.assertIn('/compute_protected"', content)
             self.assertNotIn('/compute"', content)
+
+    def _prod_fixture_with_prevent_destroy(self, tempdir, value):
+        source = yaml.safe_load((ROOT / "tests/fixtures/linode-prod.yaml").read_text())
+        source["global"]["prevent_destroy"] = value
+        resource = Path(tempdir) / "prod.yaml"
+        resource.write_text(yaml.safe_dump(source), encoding="utf-8")
+        return resource
+
+    def test_prod_prevent_destroy_false_requires_explicit_renderer_authorization(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            resource = self._prod_fixture_with_prevent_destroy(tempdir, False)
+            workdir = Path(tempdir) / "workdir"
+            with self.assertRaisesRegex(SystemExit, "--allow-prod-replacement"):
+                generate.render(SimpleNamespace(resources=resource, workdir=workdir))
+            self.assertFalse((workdir / "generated_hosts.tf").exists())
+
+    def test_explicit_prod_replacement_authorization_honors_false(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            resource = self._prod_fixture_with_prevent_destroy(tempdir, False)
+            workdir = Path(tempdir) / "workdir"
+            generate.render(
+                SimpleNamespace(
+                    resources=resource,
+                    workdir=workdir,
+                    allow_prod_replacement=True,
+                )
+            )
+            content = (workdir / "generated_hosts.tf").read_text(encoding="utf-8")
+            self.assertIn('/compute"', content)
+            self.assertNotIn('/compute_protected"', content)
+
+    def test_prod_prevent_destroy_requires_boolean_and_defaults_protected(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            resource = self._prod_fixture_with_prevent_destroy(tempdir, "false")
+            with self.assertRaisesRegex(SystemExit, "YAML boolean"):
+                generate.render(
+                    SimpleNamespace(resources=resource, workdir=Path(tempdir) / "invalid")
+                )
+
+            resource = ROOT / "tests/fixtures/linode-prod.yaml"
+            workdir = Path(tempdir) / "default-protected"
+            generate.render(SimpleNamespace(resources=resource, workdir=workdir))
+            content = (workdir / "generated_hosts.tf").read_text(encoding="utf-8")
+            self.assertIn('/compute_protected"', content)
+
+    def test_provision_requires_and_audits_explicit_prod_replacement_authorization(self):
+        repo_root = ROOT.parents[1]
+        provision = repo_root / "scripts/selfhost/provision.sh"
+        with tempfile.TemporaryDirectory() as tempdir:
+            fake_bin = Path(tempdir) / "bin"
+            fake_bin.mkdir()
+            terraform = fake_bin / "terraform"
+            terraform.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            terraform.chmod(0o755)
+            resource = self._prod_fixture_with_prevent_destroy(tempdir, False)
+            workdir = Path(tempdir) / "workdir"
+            base_args = [
+                str(provision), "--provider", "akamai-cloud", "--env", "prod",
+                "--deployment-id", "renderer-test", "--resources", str(resource),
+                "--workdir", str(workdir), "--phase", "verify",
+            ]
+            python_bin = str(Path(sys.executable).parent)
+            env = {
+                **os.environ,
+                "PATH": f"{python_bin}:{fake_bin}:{os.environ['PATH']}",
+            }
+            denied = subprocess.run(base_args, env=env, capture_output=True, text=True)
+            self.assertNotEqual(denied.returncode, 0)
+            self.assertIn("--allow-prod-replacement", denied.stderr)
+            self.assertFalse((workdir / "generated_hosts.tf").exists())
+
+            allowed = subprocess.run(
+                [*base_args, "--allow-prod-replacement"],
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(allowed.returncode, 0, allowed.stderr)
+            receipt = json.loads(
+                (Path(tempdir) / "receipts/renderer-test-provision-verify.json").read_text()
+            )
+            self.assertTrue(receipt["allow_prod_replacement"])
 
 
 if __name__ == "__main__":
