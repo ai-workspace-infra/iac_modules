@@ -2,6 +2,7 @@ import importlib.util
 import json
 from pathlib import Path
 import tempfile
+import sys
 import unittest
 from unittest import mock
 
@@ -11,6 +12,10 @@ path = Path(__file__).resolve().parents[1] / 'cloudflare-generation-aliases.py'
 spec = importlib.util.spec_from_file_location('generation_aliases', path)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
+
+
+sys.path.insert(0, str(path.parent))
+from unified.evidence import sanitize_inventory
 
 
 class GenerationAliases(unittest.TestCase):
@@ -108,7 +113,10 @@ class GenerationAliases(unittest.TestCase):
             resources = Path(directory) / 'resource.yaml'
             cmdb_path = Path(directory) / 'cmdb.json'
             resources.write_text(yaml.safe_dump(declaration), encoding='utf-8')
-            cmdb_path.write_text(json.dumps(cmdb), encoding='utf-8')
+            cmdb[declaration['hosts'][0]['host_vars']['service_domains'][0]]['host_vars']['secret'] = 'must-not-publish'
+            published = sanitize_inventory(cmdb)
+            self.assertNotIn('must-not-publish', json.dumps(published))
+            cmdb_path.write_text(json.dumps(published), encoding='utf-8')
             rendered = module.render_sources(resources, cmdb_path)
         self.assertEqual(rendered['generation'], 'prod-v5')
         self.assertEqual(rendered['address'], '104.64.208.209')
