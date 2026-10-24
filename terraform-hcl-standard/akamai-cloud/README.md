@@ -9,12 +9,12 @@
 - **Terraform provider**：`linode/linode`
 - **自动化 provider 路由**：`akamai-cloud`
 - **UAT state 隔离**：`web-saas`、`open-platform`、`ai-workspace`、
-  `agent-proxy-jp`、`agent-proxy-us`、`agent-proxy-sg` 六个 namespace；禁止共享
+  `agent-proxy-jp`、`agent-proxy-us`、`agent-proxy-sg` 基础 namespace，以及独立的 `web-saas-k3s-v5` Kubernetes UAT namespace；禁止共享
   `selfhost` state。详见
   [`../../docs/howto/akamai-uat-six-state-migration.md`](../../docs/howto/akamai-uat-six-state-migration.md)。
 - **PROD 删除保护**：PROD 声明自动使用 `compute_protected` module，并在
   `linode_instance` 上设置 `lifecycle.prevent_destroy = true`。这是 Terraform
-  state 侧的保护；下线必须先通过独立代码变更和审批移除保护。UAT 的五个临时
+  state 侧的保护；下线必须先通过独立代码变更和审批移除保护。UAT 的临时
   namespace 不使用此 module，`open-platform` 则由 Platform workflow 拒绝 destroy。
 - **显式替换授权**：PROD 默认启用删除保护；只有 GitOps YAML 明确写入
   `global.prevent_destroy: false` 且本次 `render` / `provision.sh` 调用显式带上
@@ -116,3 +116,7 @@ typed lists and booleans. Use xconnect_region, xconnect_pool, xconnect_fqdn and
 xconnect_open_to_users for agent report metadata. firewall.additional_tcp_ports
 declares public TCP listeners such as 1443 as explicit inbound rules; each port
 must be an integer 1–65535. Declare allow_https: true for the public entry.
+
+`web-saas-k3s-v5` is a separately declared, retained Kubernetes UAT target. Its
+state cannot alias `web-saas` or the production `web-saas-prod-v5` namespace and
+is excluded from routine cleanup. The OS/region/shape remain GitOps inputs.

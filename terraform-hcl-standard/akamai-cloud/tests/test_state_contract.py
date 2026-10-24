@@ -27,16 +27,23 @@ class StateContractTest(unittest.TestCase):
             for namespace in UAT_NAMESPACES
         }
 
-        self.assertEqual(len(UAT_NAMESPACES), 11)
-        self.assertEqual(len(keys), 11)
+        self.assertEqual(len(UAT_NAMESPACES), 12)
+        self.assertEqual(len(keys), 12)
         self.assertTrue(all("/selfhost/" not in key for key in keys))
 
     def test_cleanup_excludes_persistent_open_platform(self):
         self.assertEqual(len(CLEANUP_NAMESPACES), 10)
         self.assertFalse(may_destroy("open-platform"))
+        self.assertFalse(may_destroy("web-saas-k3s-v5"))
         self.assertNotIn("open-platform", CLEANUP_NAMESPACES)
         for namespace in CLEANUP_NAMESPACES:
             self.assertTrue(may_destroy(namespace))
+
+    def test_k3s_validation_state_is_separate_from_v5(self):
+        target = canonical_state_key(environment="uat", project="svc.plus", account="manbuzhe2026", namespace="web-saas-k3s-v5")
+        source = canonical_state_key(environment="prod", project="svc.plus", account="manbuzhe2026", namespace="web-saas-prod-v5")
+        self.assertNotEqual(target, source)
+        self.assertNotIn("web-saas-k3s-v5", CLEANUP_NAMESPACES)
 
     def test_shared_namespaces_are_rejected(self):
         for namespace in ("selfhost", "all", "default", "shared"):
