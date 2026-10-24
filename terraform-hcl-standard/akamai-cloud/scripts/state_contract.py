@@ -10,6 +10,7 @@ import re
 CLOUD = "akamai-cloud"
 UAT_NAMESPACES = (
     "web-saas",
+    "web-saas-k3s-v5",
     "open-platform",
     "ai-workspace",
     "agent-proxy-jp",
@@ -21,7 +22,7 @@ UAT_NAMESPACES = (
     "ai-aggregator-cpa-claude-01",
     "ai-aggregator-cpa-grok-01",
 )
-PERSISTENT_NAMESPACES = frozenset({"open-platform"})
+PERSISTENT_NAMESPACES = frozenset({"open-platform", "web-saas-k3s-v5"})
 CLEANUP_NAMESPACES = tuple(
     namespace for namespace in UAT_NAMESPACES if namespace not in PERSISTENT_NAMESPACES
 )
