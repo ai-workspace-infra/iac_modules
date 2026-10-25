@@ -8,12 +8,14 @@ on:
     paths:
       - "scripts/pipeline/**"
       - ".github/actions/**"
+      - ".github/workflows/websaas-k3s-prod-cname-switch.yml"
       - ".github/workflows/pipeline-scripts.yml"
   push:
     branches: [main]
     paths:
       - "scripts/pipeline/**"
       - ".github/actions/**"
+      - ".github/workflows/websaas-k3s-prod-cname-switch.yml"
 
 permissions:
   contents: read
