@@ -63,36 +63,77 @@ def pages(url, headers, fetch=request_json):
 
 def compute_observation(item, project, scope):
     zone = item["zone"].rsplit("/", 1)[-1]
+    region = zone.rsplit("-", 1)[0]
     raw = item["status"]
     network = next(iter(item.get("networkInterfaces", [])), {})
     configs = network.get("accessConfigs", [])
+    public_ep = next((c["natIP"] for c in configs if c.get("natIP")), None)
+    private_ep = network.get("networkIP")
+    primary_ip = public_ep or private_ep
+    tags_items = [str(t).lower() for t in (item.get("tags") or {}).get("items", []) if t]
+    labels = {str(k).lower(): str(v) for k, v in (item.get("labels") or {}).items()}
+    is_k3s = (
+        "k3s" in str(item.get("name", "")).lower()
+        or any("k3s" in t for t in tags_items)
+        or any("k3s" in k or "k3s" in v.lower() for k, v in labels.items())
+    )
+    runtime_form = "k3s_node" if is_k3s else "vm"
+    native_id = f"projects/{project}/zones/{zone}/instances/{item['id']}"
+    observed_ts = now()
+    attrs = {"zone": zone, "machine_type": item.get("machineType", "").rsplit("/", 1)[-1]}
+    if is_k3s:
+        attrs["deployment_mode"] = "kubernetes"
     return {
         "provider": "gcp", "account_ref": project, "project_ref": project,
         "resource_kind": "compute",
-        "native_resource_id": f"projects/{project}/zones/{zone}/instances/{item['id']}",
-        "region": zone.rsplit("-", 1)[0], "scope": scope, "name": item["name"],
+        "runtime_form": runtime_form,
+        "native_resource_id": native_id,
+        "resource_key": f"gcp:{project}:{region}:{native_id}",
+        "region": region, "scope": scope, "environment": scope, "name": item["name"],
         "provider_state": {"RUNNING": "running", "TERMINATED": "stopped", "SUSPENDED": "suspended"}.get(raw, "unknown"),
-        "provider_state_raw": raw, "source": "provider_api", "observed_at": now(),
-        "public_endpoint": next((c["natIP"] for c in configs if c.get("natIP")), None),
-        "private_endpoint": network.get("networkIP"),
-        "attributes": {"zone": zone, "machine_type": item.get("machineType", "").rsplit("/", 1)[-1]},
+        "provider_state_raw": raw, "source": "provider_api",
+        "observed_at": observed_ts, "last_observed_at": observed_ts,
+        "public_endpoint": public_ep,
+        "private_endpoint": private_ep,
+        "primary_ip": primary_ip,
+        "ssh_host": primary_ip,
+        "service": item["name"],
+        "cluster": labels.get("cluster", item["name"] if is_k3s else ""),
+        "namespace": labels.get("namespace", ""),
+        "node": item["name"],
+        "attributes": attrs,
     }
 
 
 def run_observation(item, project, region, scope):
+    if not region or region == "all-zones":
+        raise APIError("missing_region")
     condition = item.get("terminalCondition", {})
     state = condition.get("state", "CONDITION_STATE_UNSPECIFIED")
     uid = item.get("uid")
     if not uid:
         raise APIError("missing_service_uid")
+    short_name = item["name"].rsplit("/", 1)[-1]
+    native_id = f"projects/{project}/locations/{region}/services/{uid}"
+    observed_ts = now()
     return {
         "provider": "gcp", "account_ref": project, "project_ref": project,
         "resource_kind": "serverless_service",
-        "native_resource_id": f"projects/{project}/locations/{region}/services/{uid}",
-        "region": region, "scope": scope, "name": item["name"].rsplit("/", 1)[-1],
+        "runtime_form": "serverless",
+        "native_resource_id": native_id,
+        "resource_key": f"gcp:{project}:{region}:{native_id}",
+        "region": region, "scope": scope, "environment": scope, "name": short_name,
         "provider_state": {"CONDITION_SUCCEEDED": "ready", "CONDITION_FAILED": "failed", "CONDITION_PENDING": "pending", "CONDITION_RECONCILING": "pending"}.get(state, "unknown"),
-        "provider_state_raw": state, "source": "provider_api", "observed_at": now(),
+        "provider_state_raw": state, "source": "provider_api",
+        "observed_at": observed_ts, "last_observed_at": observed_ts,
         "public_endpoint": item.get("uri"),
+        "private_endpoint": None,
+        "primary_ip": None,
+        "ssh_host": None,
+        "service": short_name,
+        "cluster": "",
+        "namespace": project,
+        "node": "",
         "attributes": {"service_name": item["name"], "latest_ready_revision": item.get("latestReadyRevision", "")},
     }
 
@@ -100,13 +141,15 @@ def run_observation(item, project, region, scope):
 def collect(project, scope, kind, region, owner_sha, auth, fetch=request_json):
     run = {
         "run_id": str(uuid.uuid4()), "collector": f"gcp-{kind}", "owner_sha": owner_sha,
-        "scope": scope, "account_ref": project, "project_ref": project,
+        "scope": scope, "environment": scope, "account_ref": project, "project_ref": project,
         "region_ref": region if kind == "cloudrun" else "all-zones",
         "resource_kind": "compute" if kind == "compute" else "serverless_service",
         "started_at": now(),
     }
-    observations = []
+    by_resource_key = {}
     try:
+        if kind == "cloudrun" and (not region or region == "all-zones"):
+            raise APIError("missing_region")
         headers = {"Authorization": "Bearer " + access_token(auth)}
         if kind == "compute":
             url = f"https://compute.googleapis.com/compute/v1/projects/{project}/aggregated/instances?maxResults=500&returnPartialSuccess=true"
@@ -116,19 +159,23 @@ def collect(project, scope, kind, region, owner_sha, auth, fetch=request_json):
                 for group in page.get("items", {}).values():
                     if group.get("warning", {}).get("code") not in (None, "NO_RESULTS_ON_PAGE"):
                         raise APIError("incomplete_zone")
-                    observations.extend(compute_observation(item, project, scope) for item in group.get("instances", []))
+                    for item in group.get("instances", []):
+                        obs = compute_observation(item, project, scope)
+                        by_resource_key[obs["resource_key"]] = obs
         else:
             url = f"https://run.googleapis.com/v2/projects/{project}/locations/{region}/services?pageSize=100"
             for page in pages(url, headers, fetch):
                 if page.get("unreachable"):
                     raise APIError("incomplete_region")
-                observations.extend(run_observation(item, project, region, scope) for item in page.get("services", []))
+                for item in page.get("services", []):
+                    obs = run_observation(item, project, region, scope)
+                    by_resource_key[obs["resource_key"]] = obs
         run.update(outcome="success", scope_complete=True)
     except (APIError, KeyError, TypeError, subprocess.TimeoutExpired) as error:
-        run.update(outcome="partial" if observations else "failed", scope_complete=False,
+        run.update(outcome="partial" if by_resource_key else "failed", scope_complete=False,
                    error_class=str(error) if isinstance(error, APIError) else "invalid_response_or_identity")
     run["completed_at"] = now()
-    return {"schema_version": "cmdb.observations.v1", "run": run, "observations": observations}
+    return {"schema_version": "cmdb.observations.v1", "run": run, "observations": list(by_resource_key.values())}
 
 
 def main():

@@ -783,6 +783,12 @@ def inventory(args):
         ansible_host = public_ip or private_ip
         if not ansible_host:
             raise SystemExit(f"Vault VM {node['name']} has no reachable IP for deployment")
+        node_zone = str(node.get("zone") or "").strip()
+        node_region = (
+            node_zone.rsplit("-", 1)[0]
+            if "-" in node_zone and len(node_zone.split("-")) >= 3
+            else global_config.get("region", "")
+        )
         vault_record = {
             "name": node["name"],
             "fqdn": node.get("service_domain", node["name"]),
@@ -794,7 +800,7 @@ def inventory(args):
             "ansible_host": ansible_host,
             "ansible_user": global_config.get("ssh_username", "github-actions"),
             "cloud_provider": "gcp-cloud",
-            "cloud_region": global_config.get("region", ""),
+            "cloud_region": node_region,
             "project_id": runtime.get("project_id"),
             "groups": node.get("inventory_groups", ["vault"]),
             "tags": node.get("tags", []) or [],
@@ -810,10 +816,17 @@ def inventory(args):
         if not address:
             address_type = "public IP" if vm.get("public_ip") else "private IP"
             raise SystemExit(f"Spot VM {vm['name']} has no {address_type} for deployment")
+        vm_zone = str(facts.get("zone", vm["zone"]) or "").strip()
         host_vars = dict(vm.get("host_vars") or {})
+        vm_region = (
+            host_vars.get("provider_region")
+            or host_vars.get("cloud_region")
+            or (vm_zone.rsplit("-", 1)[0] if "-" in vm_zone and len(vm_zone.split("-")) >= 3 else "")
+            or global_config.get("region", "")
+        )
         host_vars.setdefault("node_id", vm.get("node_id") or vm["name"])
         host_vars.setdefault("cloud_provider", "gcp-cloud")
-        host_vars.setdefault("cloud_region", global_config.get("region", ""))
+        host_vars.setdefault("cloud_region", vm_region)
         for key in ("location", "node_label"):
             if vm.get(key):
                 host_vars.setdefault(key, vm[key])
@@ -836,7 +849,7 @@ def inventory(args):
             "groups": vm.get("inventory_groups", []),
             "provider": "gcp-cloud",
             "cloud_provider": "gcp-cloud",
-            "cloud_region": global_config.get("region", ""),
+            "cloud_region": vm_region,
             "project_id": runtime.get("project_id"),
             "provisioning_model": facts.get("provisioning_model"),
             "iap_tunnel": not vm.get("public_ip") and global_config.get("enable_iap_ssh", False),

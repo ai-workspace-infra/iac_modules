@@ -26,9 +26,26 @@ The artifact uses `schema_version: cmdb.v1` and has this canonical shape:
 }
 ```
 
-`hosts` is the only new canonical consumer interface. Provider renderers keep
-legacy top-level host keys during the migration so existing receipts and
-read-only data-operation helpers continue to work. Playbooks consumes the
+`hosts` is the canonical SSH-capable compute consumer interface (`vm` and `k3s_node`).
+Serverless resources (Cloud Run, Cloudflare Workers/Pages, Supabase, etc.) allow
+`ssh_host: null` and `primary_ip: null` and are emitted under `serverless_resources`
+without fabricating SSH hosts or placeholder IPs. All resources (both compute and
+serverless) are indexed and deduplicated idempotently in `resource_index` by the
+authoritative `resource_key`:
+
+```
+{provider}:{account_or_project}:{region}:{resource_id}
+```
+
+Each normalized resource record in `resource_index` carries:
+- `resource_key`: `{provider}:{account_or_project}:{region}:{resource_id}`
+- `runtime_form`: `vm` | `k3s_node` | `serverless`
+- Extended dimensions: `environment`, `service`, `cluster`, `namespace`, `node`
+- Timestamps: `observed_at` and `last_observed_at` (ISO-8601 UTC)
+- Status: `active` | `unobserved` | `collection_failed` | `deleted`
+
+Provider renderers keep legacy top-level host keys during the migration so existing
+receipts and read-only data-operation helpers continue to work. Playbooks consumes the
 artifact through `inventory/terraform_cmdb.py`; it does not read Terraform
 state directly and it rejects unknown CMDB schema versions.
 
