@@ -52,9 +52,17 @@ collector.
 - A successful run must have a completion timestamp and `scope_complete: true`.
   Partial/failed runs must remain incomplete; zero observations are acceptable
   only when the provider adapter proves the declared scope was completely read.
-- Resource keys use native provider identity, not mutable name or IP. Shared
-  resources remain `scope: shared`; unresolved environment mappings remain
-  `unknown` rather than being inferred as production.
+- Resource keys use native provider identity, not mutable name or IP. Every
+  validated observation carries the authoritative `resource_key`
+  (`{provider}:{account_or_project}:{region}:{resource_id}`), `runtime_form`
+  (`vm`, `k3s_node`, or `serverless`), extended dimensions (`environment`,
+  `service`, `cluster`, `namespace`, `node`), and `last_observed_at`.
+  Shared resources remain `scope: shared`; unresolved environment mappings remain
+  `unknown` rather than being inferred as production. Cross-environment or
+  cross-region mismatches between `run` and `observations` are rejected.
+- Serverless observations (`Cloud Run`, `Cloudflare Workers/Pages`, `Supabase`)
+  keep `ssh_host: null` and `primary_ip: null`; placeholder or fabricated IPs/hosts
+  are rejected.
 - `provider_state_raw` preserves provider wording. `provider_state` is a
   normalized state used for summaries and never replaces the raw value.
 - `source` is `provider_api` or `external_inventory`. UCloud lightweight-host
@@ -63,8 +71,16 @@ collector.
 - Arbitrary credentials, user data, startup scripts, and environment values are
   prohibited. Provider adapters must filter payloads before creating
   `attributes`; the validator rejects secret-like keys as a second guard.
-- A partial/failed run cannot prove resources were deleted. Deletion requires
-  later complete runs and provider-specific confirmation in persistence logic.
+- Lifecycle and observation status distinguish `active`, `unobserved`,
+  `collection_failed`, and `deleted`. A partial/failed run (`scope_complete: false`)
+  marks the affected scope's unseen existing assets as `collection_failed` while
+  retaining `lifecycle: present`; it never marks existing assets as `deleted`.
+  Transition to `deleted` (`lifecycle: deletion_confirmed`) requires a completed
+  scope run (`outcome: success` and `scope_complete: true`).
+- `reconcile_observations` and `cmdb_collect_scope.py --reconciliation-report`
+  emit a deterministic `cmdb.reconciliation.v1` report comparing desired
+  declarations against observed active inventory, excluding `deleted` and
+  duplicate snapshots from `active_count`.
 
 Cloud APIs, runtime identities, PostgreSQL transactional upsert/locking,
 retention, and Toolkit orchestration are not implemented by this contract.
