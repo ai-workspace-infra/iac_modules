@@ -25,6 +25,11 @@ shared origins fail closed and require separate scope catalogs. Any number of
 target namespaces may be inspected. Historical target manifests may omit SSH and
 business configuration because the inspection path only reads resource identity.
 
+Catalog CI also compares the base declaration: dropping or renaming a domain must
+retain its old state identity as a migration/retired target. Namespace removal cannot
+silently hide state from preflight. Final ownership retirement is a separate reviewed
+maintenance change after state evidence is verified.
+
 `unified_cli.py catalog-check` validates all referenced target files without
 credentials. Prepare/revalidate records the catalog and referenced file digests,
 selected targets, source SHAs and canonical state keys. The query path verifies the

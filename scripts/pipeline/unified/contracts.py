@@ -222,6 +222,27 @@ def load_targets(gitops_root, manifest, *, environment=None, provider=None, acco
     require(chosen, "no matching declared IaC targets")
     return chosen, [m for m in migrations if selected(m)], files
 
+def validate_catalog_transition(before_root, after_root, catalog):
+    """A removed runtime domain must remain inspectable under a migration lifecycle."""
+    current, sources, _ = load_targets(after_root, catalog, include_migrations=True)
+    def keys(targets):
+        return {stage["state"]["key"] for target in targets for stage in target["stages"].values() if stage.get("mode") == "terraform"}
+    retained = keys(current) | {source["state"]["key"] for source in sources}
+    if (Path(before_root) / catalog).is_file():
+        previous, origins, _ = load_targets(before_root, catalog, include_migrations=True)
+        previous_keys = keys(previous) | {source["state"]["key"] for source in origins}
+    else:
+        # One-time catalog adoption: read old declarations only to prove that no
+        # existing state identity vanished. This is never a deployment selector.
+        previous_keys = set()
+        for path in (Path(before_root) / "iac" / "targets").glob("*.yaml"):
+            document = yaml.safe_load(source_file(before_root, str(path.relative_to(before_root))).read_text())
+            require(document.get("kind") == "IaCPipelineTargets", "invalid historical target declaration")
+            previous_keys.update(keys(document.get("targets", [])))
+    require(previous_keys <= retained, "state ownership removed from catalog; retain a migration/retired target until reviewed state retirement")
+    return len(previous_keys)
+
+
 def prepare(gitops_root, iac_root, manifest, environment, action, scope, bootstrap_mode, correlation, requested_refs, selectors=None):
     require(action in {"check", "plan", "apply", "destroy"}, "invalid action")
     require(scope in {"all", *STAGES}, "invalid stage scope")

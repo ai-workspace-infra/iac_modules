@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from unified.auth import load_credentials, request_json, verify_identity
-from unified.contracts import PROVIDERS, STAGES, ContractError, checkout_sha, contained, digest, output, prepare, read_json, require, state_lock_key, revalidate, source_file, load_targets, validate_target, write_json
+from unified.contracts import PROVIDERS, STAGES, ContractError, checkout_sha, contained, digest, output, prepare, read_json, require, state_lock_key, revalidate, source_file, load_targets, validate_catalog_transition, validate_target, write_json
 from unified.evidence import receipt_base, summarize, verify_summary
 from unified.runtime import cleanup, execute
 
@@ -31,6 +31,8 @@ def context_target():
 def main(command):
     if command == "catalog-check":
         targets, sources, files = load_targets(env("GITOPS_ROOT"), env("MANIFEST"), include_migrations=True)
+        if env("BASE_ROOT", ""):
+            validate_catalog_transition(env("BASE_ROOT"), env("GITOPS_ROOT"), env("MANIFEST"))
         print(f"Validated {len(targets)} IaC targets and {len(sources)} historical sources across {len(files)} declaration files; no credentials were read")
     elif command == "prepare":
         selectors = json.loads(env("NORMALIZED_SELECTORS", "{}"))

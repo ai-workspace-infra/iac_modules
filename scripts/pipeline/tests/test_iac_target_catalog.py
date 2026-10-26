@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import shutil
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -14,7 +15,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / 'scripts/pipeline'))
-from unified.contracts import ContractError, canonical_state_key, load_targets, prepare, revalidate
+from unified.contracts import ContractError, canonical_state_key, load_targets, prepare, revalidate, validate_catalog_transition
 SPEC = importlib.util.spec_from_file_location('catalog_preflight', ROOT / 'scripts/akamai_state_preflight.py')
 PREFLIGHT = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(PREFLIGHT)
@@ -169,6 +170,17 @@ class CatalogTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('selectors conflict', result.stderr)
         self.assertFalse(Path(env['IAC_CONTRACT']).exists())
+
+    def test_removing_or_renaming_a_domain_retains_old_state_for_inspection(self):
+        before = Path(self.tmp.name) / 'before'
+        shutil.copytree(self.root, before)
+        self.targets = [self.target('replacement')]
+        self.publish()
+        with self.assertRaisesRegex(ContractError, 'state ownership removed'):
+            validate_catalog_transition(before, self.root, 'iac/catalog.yaml')
+        self.targets += [self.target('alpha', 'migration'), self.target('previous', 'retired', True)]
+        self.publish()
+        self.assertEqual(validate_catalog_transition(before, self.root, 'iac/catalog.yaml'), 2)
 
     def test_historical_source_provenance_and_exact_key_required(self):
         self.catalog['migration_sources'] = [dict(id='old-shared', environment='uat', project='historical',
