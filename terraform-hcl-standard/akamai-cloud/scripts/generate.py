@@ -3,6 +3,7 @@
 
 import argparse
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -118,14 +119,14 @@ def render(args):
     global_config, ssh_keys, hosts = load_sources(resources)
     declared_environment = str(global_config.get("environment", "")).strip().lower()
     environment = declared_environment
-    path_match = re.search(r"/resources/[^/]+/(uat|prod)/akamai/", str(resources))
+    path_match = re.search(r"/resources/[^/]+/(dev|uat|prod)/akamai/", str(resources))
     if path_match:
         environment = path_match.group(1)
     envs_root = (ROOT / "envs").resolve()
     resolved_workdir = workdir.resolve()
     if resolved_workdir.is_relative_to(envs_root):
         relative_parts = resolved_workdir.relative_to(envs_root).parts
-        if relative_parts and relative_parts[0] in {"uat", "prod"}:
+        if relative_parts and relative_parts[0] in {"dev", "uat", "prod"}:
             environment = relative_parts[0]
 
     namespace = getattr(args, "namespace", None) or os.environ.get("TF_STATE_WORKSPACE")
@@ -138,7 +139,7 @@ def render(args):
         raise SystemExit(
             f"Akamai workdir must end with /{namespace}; shared {workdir} is forbidden"
         )
-    if environment == "uat" and len(hosts) != 1:
+    if environment in {"dev", "uat"} and len(hosts) != 1:
         raise SystemExit(
             f"Akamai namespace {namespace} must contain exactly one host; got {len(hosts)}"
         )
@@ -213,7 +214,30 @@ def terraform_output(workdir: Path):
 def inventory(args):
     resources, workdir = Path(args.resources), Path(args.workdir)
     global_config, _, hosts = load_sources(resources)
+    if global_config.get("environment") == "dev":
+        # Only derived deployment artifacts are invalidated. Never leave an
+        # earlier address available if the runtime read or validation fails.
+        for artifact in ("cmdb.json", "inventory.ini"):
+            (workdir / artifact).unlink(missing_ok=True)
     runtime = terraform_output(workdir)
+    # Dev is disposable: never publish an inventory from missing/other-host
+    # output or retain an old address when its runtime identity is incomplete.
+    if global_config.get("environment") == "dev":
+        expected = {host["name"] for host in hosts}
+        if not isinstance(runtime, dict) or set(runtime) != expected:
+            raise SystemExit("dev CMDB runtime hosts must exactly match the selected declaration")
+        for name, facts in runtime.items():
+            instance_id = facts.get("instance_id") if isinstance(facts, dict) else None
+            if isinstance(instance_id, bool) or not str(instance_id or "").isdigit() or int(instance_id) <= 0:
+                raise SystemExit(f"dev CMDB requires a positive instance_id for {name}")
+            try:
+                if not isinstance(facts.get("ip"), str):
+                    raise ValueError("runtime IPv4 must be a string")
+                address = ipaddress.IPv4Address(facts["ip"])
+            except (ValueError, TypeError):
+                raise SystemExit(f"dev CMDB requires a runtime IPv4 address for {name}") from None
+            if address.is_unspecified or address.is_loopback or address.is_link_local or address.is_multicast:
+                raise SystemExit(f"dev CMDB rejects an unusable runtime IPv4 address for {name}")
     cmdb = {}
     groups = {}
     lines = {}

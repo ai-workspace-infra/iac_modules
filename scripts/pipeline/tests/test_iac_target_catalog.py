@@ -99,6 +99,69 @@ class CatalogTests(unittest.TestCase):
             self.context(action='destroy')
         self.assertEqual(len(self.context(action='check')['targets']), 2)
 
+    def dev_target(self, name='dev-box', on_demand=True):
+        identity = dict(environment='dev', project='example.net', provider='akamai-cloud', account='tenant-a', namespace=name)
+        return dict(id='dev-' + name, **identity, workspace=name,
+            lifecycle=dict(status='active', persistent=False, on_demand=on_demand), auth=dict(expected_identity='tenant-a'),
+            stages=dict(bootstrap=dict(mode='verify'), account=dict(mode='not_applicable', reason='No account resources'),
+                resources=dict(mode='terraform', manifest=f'resources/example.net/dev/akamai/{name}.yaml',
+                    state=dict(key=canonical_state_key(**identity), cli_workspace='default'),
+                    owners=['module.compute_' + name], protected=[], destroy_allowed=True, ownership_reviewed=True)))
+
+    def publish_dev(self, target, prevent_destroy=False, hosts=None):
+        self.targets = [target]
+        self.publish()
+        glob = {k: target[k] for k in ('provider', 'environment', 'project', 'account', 'workspace')}
+        glob.update(state_namespace=target['namespace'], prevent_destroy=prevent_destroy)
+        self.write(target['stages']['resources']['manifest'], {'global': glob, 'ssh_keys': [{'public': 'fixture-public-key'}],
+            'hosts': hosts if hosts is not None else [{'name': target['namespace'], 'type': 'g6-standard-4'}]})
+        git(self.root, 'add', '.')
+        git(self.root, 'commit', '--allow-empty', '-qm', 'dev declarations')
+
+    def dev_context(self, action):
+        return prepare(self.root, self.iac, 'iac/catalog.yaml', 'dev', action, 'resources', 'verify', 'test', {})
+
+    def test_on_demand_dev_target_can_be_created_and_destroyed(self):
+        self.publish_dev(self.dev_target())
+        for action in ('plan', 'apply', 'destroy'):
+            self.assertEqual([t['namespace'] for t in self.dev_context(action)['targets']], ['dev-box'])
+
+    def test_on_demand_guards_reject_non_dev_persistent_or_protected(self):
+        target = self.dev_target(on_demand=False)
+        self.publish_dev(target)
+        with self.assertRaisesRegex(ContractError, 'on_demand: true'):
+            self.dev_context('destroy')
+        target = self.dev_target(); target['lifecycle']['persistent'] = True
+        self.publish_dev(target)
+        with self.assertRaisesRegex(ContractError, 'cannot be persistent'):
+            self.dev_context('destroy')
+        self.publish_dev(self.dev_target(), prevent_destroy=True)
+        with self.assertRaisesRegex(ContractError, 'prevent_destroy: false'):
+            self.dev_context('destroy')
+        self.publish_dev(self.dev_target(), hosts=[{'name': 'web-saas-k3s-v5', 'type': 'g6-standard-4'}])
+        with self.assertRaisesRegex(ContractError, 'host name must equal'):
+            self.dev_context('destroy')
+        self.publish_dev(self.dev_target(), hosts=[{'name': 'dev-box'}, {'name': 'other'}])
+        with self.assertRaisesRegex(ContractError, 'exactly one host'):
+            self.dev_context('destroy')
+        # on_demand can never be attached to uat/prod targets.
+        self.targets = [self.target('alpha')]
+        self.targets[0]['lifecycle']['on_demand'] = True
+        self.publish()
+        with self.assertRaisesRegex(ContractError, 'limited to dev'):
+            self.context(action='destroy')
+
+    def test_dev_selection_never_reaches_uat_or_prod_targets(self):
+        dev = self.dev_target()
+        self.publish_dev(dev)
+        self.targets = [dev, self.target('alpha')]
+        self.publish()
+        glob = {k: dev[k] for k in ('provider', 'environment', 'project', 'account', 'workspace')}
+        glob.update(state_namespace='dev-box', prevent_destroy=False)
+        self.write(dev['stages']['resources']['manifest'], {'global': glob, 'ssh_keys': [{'public': 'k'}], 'hosts': [{'name': 'dev-box'}]})
+        git(self.root, 'add', '.'); git(self.root, 'commit', '-qm', 'mixed')
+        self.assertEqual([t['id'] for t in self.dev_context('destroy')['targets']], ['dev-dev-box'])
+
     def test_duplicate_keys_alias_mismatch_and_resource_identity_fail_before_io(self):
         changes = [lambda t: t.update(namespace='different'),
                    lambda t: t['stages']['resources']['state'].update(key='terraform/prod/wrong.tfstate'),
