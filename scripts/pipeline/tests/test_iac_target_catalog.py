@@ -1,6 +1,7 @@
 """Exercise shared selection, canonical keys and read-only lifecycle boundaries."""
 import copy
 import importlib.util
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -152,6 +153,22 @@ class CatalogTests(unittest.TestCase):
         row = PREFLIGHT._classify_namespace(expected, [{'id':'99','label':'previous'}], [], [], state)
         self.assertEqual(row['status'], 'ambiguous')
         self.assertEqual(row['state_binding_count'], 1)
+
+    def test_legacy_catalog_selectors_cannot_expand_deployment_scope(self):
+        output = Path(self.tmp.name) / 'outputs'
+        values = dict(action='plan', environment='uat', cloud_provider='akamai-cloud', account='tenant-a', target_manifest='iac/catalog.yaml')
+        env = dict(os.environ, IAC_ROOT=str(self.iac), IAC_GITOPS_ROOT=str(self.root), IAC_STAGE='resources', IAC_PROVIDER='akamai-cloud', IAC_INPUTS=json.dumps(values), GITHUB_OUTPUT=str(output))
+        command = [sys.executable, str(ROOT / 'scripts/pipeline/unified_cli.py')]
+        result = subprocess.run(command + ['normalize-legacy'], env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        fields = dict(line.split('=', 1) for line in output.read_text().splitlines())
+        self.assertEqual(fields['target_manifest'], 'iac/catalog.yaml')
+        self.assertEqual(json.loads(fields['selectors'])['account'], 'tenant-a')
+        env.update(IAC_MANIFEST='iac/catalog.yaml', IAC_ENVIRONMENT='uat', IAC_ACTION='plan', IAC_SCOPE='resources', IAC_REF='fixture', IAC_GITOPS_REF='fixture', IAC_NORMALIZED_SELECTORS=fields['selectors'], IAC_SELECTORS='{"account":"other-account"}', IAC_CONTRACT=str(Path(self.tmp.name)/'context.json'))
+        result = subprocess.run(command + ['prepare'], env=env, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('selectors conflict', result.stderr)
+        self.assertFalse(Path(env['IAC_CONTRACT']).exists())
 
     def test_historical_source_provenance_and_exact_key_required(self):
         self.catalog['migration_sources'] = [dict(id='old-shared', environment='uat', project='historical',

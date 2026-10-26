@@ -32,7 +32,7 @@ actual provider username before inspecting state, retains every managed binding,
 and distinguishes ID/label disagreement from an empty state. It never suggests
 create/import for a migration target and never authorizes state removal.
 
-Consumer rollout order is declaration PR, owner PR, then Toolkit consumer pin.
+Consumer rollout order is owner implementation PR, GitOps catalog PR, then Toolkit consumer pin.
 Use immutable reviewed commits, run offline contracts, then run read-only UAT
 preflight. Historical workdirs remain until the state is verified empty or a
 separately reviewed state handoff is complete. This implementation does not apply
