@@ -7,6 +7,9 @@ on:
         description: Target environment (only uat is supported)
         required: true
         type: string
+      catalog:
+        required: true
+        type: string
       account:
         description: Akamai account identifier used in Vault role and state keys
         required: true
@@ -106,6 +109,7 @@ jobs:
           TF_STATE_ACCESS_KEY: ${{ steps.vault.outputs.TF_STATE_ACCESS_KEY }}
           TF_STATE_SECRET_KEY: ${{ steps.vault.outputs.TF_STATE_SECRET_KEY }}
           TF_STATE_REGION: ${{ steps.vault.outputs.TF_STATE_REGION }}
+          PREFLIGHT_CATALOG: ${{ inputs.catalog }}
           PREFLIGHT_JSON_PATH: ${{ runner.temp }}/akamai-state-preflight.json
           PREFLIGHT_ACCOUNT: ${{ inputs.account }}
           PREFLIGHT_ENVIRONMENT: ${{ inputs.environment }}
@@ -115,6 +119,7 @@ jobs:
           python "$GITHUB_WORKSPACE/iac_modules/scripts/akamai_state_preflight.py" \
             --gitops-root "$GITHUB_WORKSPACE/gitops" \
             --iac-root "$GITHUB_WORKSPACE/iac_modules" \
+            --catalog "$PREFLIGHT_CATALOG" \
             --environment "$PREFLIGHT_ENVIRONMENT" \
             --account "$PREFLIGHT_ACCOUNT" \
             --correlation-id "$PREFLIGHT_CORRELATION_ID" \

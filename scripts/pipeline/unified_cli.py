@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from unified.auth import load_credentials, request_json, verify_identity
-from unified.contracts import PROVIDERS, STAGES, ContractError, checkout_sha, contained, digest, output, prepare, read_json, require, state_lock_key, revalidate, source_file, validate_target, write_json
+from unified.contracts import PROVIDERS, STAGES, ContractError, checkout_sha, contained, digest, output, prepare, read_json, require, state_lock_key, revalidate, source_file, load_targets, validate_target, write_json
 from unified.evidence import receipt_base, summarize, verify_summary
 from unified.runtime import cleanup, execute
 
@@ -29,11 +29,14 @@ def context_target():
 
 
 def main(command):
-    if command == "prepare":
+    if command == "catalog-check":
+        targets, sources, files = load_targets(env("GITOPS_ROOT"), env("MANIFEST"), include_migrations=True)
+        print(f"Validated {len(targets)} IaC targets and {len(sources)} historical sources across {len(files)} declaration files; no credentials were read")
+    elif command == "prepare":
+        selectors = json.loads(env("SELECTORS", "{}"))
         context = prepare(env("GITOPS_ROOT"), env("ROOT"), env("MANIFEST"), env("ENVIRONMENT"), env("ACTION"),
                           env("SCOPE"), env("BOOTSTRAP_MODE", "verify"), env("CORRELATION", ""),
-                          {"gitops": env("GITOPS_REF"), "iac": env("REF")})
-        selectors = json.loads(env("SELECTORS", "{}"))
+                          {"gitops": env("GITOPS_REF"), "iac": env("REF")}, selectors=selectors)
         for key, value in selectors.items():
             if value:
                 require(all(t.get(key) == value for t in context["targets"]), f"legacy selector conflicts with declaration: {key}")
@@ -58,13 +61,16 @@ def main(command):
             for path in (gitops / "iac" / "targets").glob("*.yaml"):
                 declaration = yaml.safe_load(source_file(gitops, str(path.relative_to(gitops))).read_text())
                 targets = declaration.get("targets", [])
-                if len(targets) == 1 and all(not v or targets[0].get(k) == v for k, v in selectors.items()):
+                if len(targets) == 1 and targets[0].get("lifecycle", {}).get("status", "active") == "active" and all(not v or targets[0].get(k) == v for k, v in selectors.items()):
                     matches.append(str(path.relative_to(gitops)))
             require(len(matches) == 1, "no unique reviewed GitOps target; supply target_manifest instead of falling back to legacy state")
             manifest = matches[0]
-        declaration = yaml.safe_load(source_file(gitops, manifest).read_text())
-        require(declaration.get("kind") == "IaCPipelineTargets", "caller needs pipeline target declaration")
-        for target in declaration["targets"]:
+        selected, _, _ = load_targets(gitops, manifest, environment=selectors.get("environment") or None,
+            provider=selectors.get("provider") or None, account=selectors.get("account") or None,
+            namespace=selectors.get("workspace") or selectors.get("namespace") or None,
+            project=selectors.get("project") or None)
+        declaration = {"targets": selected}
+        for target in selected:
             require(all(not v or target.get(k) == v for k, v in selectors.items()), "caller selector disagrees with declared identity")
         state_key = env("STATE_KEY", "")
         if state_key:
