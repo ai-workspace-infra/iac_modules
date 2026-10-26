@@ -7,12 +7,14 @@ on:
   pull_request:
     paths:
       - "scripts/pipeline/**"
+      - "terraform-hcl-standard/scripts/iac_identity.py"
       - ".github/actions/**"
       - ".github/workflows/pipeline-scripts.yml"
   push:
     branches: [main]
     paths:
       - "scripts/pipeline/**"
+      - "terraform-hcl-standard/scripts/iac_identity.py"
       - ".github/actions/**"
 
 permissions:

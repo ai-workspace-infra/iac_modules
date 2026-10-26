@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from unified.auth import load_credentials, request_json, verify_identity
-from unified.contracts import PROVIDERS, STAGES, ContractError, checkout_sha, contained, digest, output, prepare, read_json, require, state_lock_key, revalidate, source_file, validate_target, write_json
+from unified.contracts import PROVIDERS, STAGES, ContractError, checkout_sha, contained, digest, output, prepare, read_json, require, state_lock_key, revalidate, source_file, load_targets, validate_catalog_transition, validate_target, write_json
 from unified.evidence import receipt_base, summarize, verify_summary
 from unified.runtime import cleanup, execute
 
@@ -29,11 +29,20 @@ def context_target():
 
 
 def main(command):
-    if command == "prepare":
+    if command == "catalog-check":
+        targets, sources, files = load_targets(env("GITOPS_ROOT"), env("MANIFEST"), include_migrations=True)
+        if env("BASE_ROOT", ""):
+            validate_catalog_transition(env("BASE_ROOT"), env("GITOPS_ROOT"), env("MANIFEST"))
+        print(f"Validated {len(targets)} IaC targets and {len(sources)} historical sources across {len(files)} declaration files; no credentials were read")
+    elif command == "prepare":
+        selectors = json.loads(env("NORMALIZED_SELECTORS", "{}"))
+        for key, value in json.loads(env("SELECTORS", "{}")).items():
+            require(not value or not selectors.get(key) or selectors[key] == value, "explicit/normalized target selectors conflict")
+            if value:
+                selectors[key] = value
         context = prepare(env("GITOPS_ROOT"), env("ROOT"), env("MANIFEST"), env("ENVIRONMENT"), env("ACTION"),
                           env("SCOPE"), env("BOOTSTRAP_MODE", "verify"), env("CORRELATION", ""),
-                          {"gitops": env("GITOPS_REF"), "iac": env("REF")})
-        selectors = json.loads(env("SELECTORS", "{}"))
+                          {"gitops": env("GITOPS_REF"), "iac": env("REF")}, selectors=selectors)
         for key, value in selectors.items():
             if value:
                 require(all(t.get(key) == value for t in context["targets"]), f"legacy selector conflicts with declaration: {key}")
@@ -53,18 +62,17 @@ def main(command):
             require(not manifest or not declared or manifest == declared, "caller target conflicts with serverless topology")
             manifest = manifest or declared
             require(manifest, "serverless infrastructure target must be declared by GitOps")
-        if not manifest:
-            matches = []
-            for path in (gitops / "iac" / "targets").glob("*.yaml"):
-                declaration = yaml.safe_load(source_file(gitops, str(path.relative_to(gitops))).read_text())
-                targets = declaration.get("targets", [])
-                if len(targets) == 1 and all(not v or targets[0].get(k) == v for k, v in selectors.items()):
-                    matches.append(str(path.relative_to(gitops)))
-            require(len(matches) == 1, "no unique reviewed GitOps target; supply target_manifest instead of falling back to legacy state")
-            manifest = matches[0]
-        declaration = yaml.safe_load(source_file(gitops, manifest).read_text())
-        require(declaration.get("kind") == "IaCPipelineTargets", "caller needs pipeline target declaration")
-        for target in declaration["targets"]:
+        implicit_catalog = not manifest
+        manifest = manifest or "iac/catalog.yaml"
+        selected, _, _ = load_targets(gitops, manifest, environment=selectors.get("environment") or None,
+            provider=selectors.get("provider") or None, account=selectors.get("account") or None,
+            namespace=selectors.get("workspace") or selectors.get("namespace") or None,
+            project=selectors.get("project") or None)
+        if implicit_catalog:
+            require(len(selected) == 1, "no unique reviewed GitOps target; supply a catalog selector")
+            selectors["workspace"] = selected[0]["workspace"]
+        declaration = {"targets": selected}
+        for target in selected:
             require(all(not v or target.get(k) == v for k, v in selectors.items()), "caller selector disagrees with declared identity")
         state_key = env("STATE_KEY", "")
         if state_key:
@@ -104,18 +112,16 @@ def main(command):
             if value:
                 selectors[key] = value
         stage = env("STAGE")
-        candidates = []
-        for path in (Path(env("GITOPS_ROOT")) / "iac" / "targets").glob("*.yaml"):
-            document = yaml.safe_load(source_file(env("GITOPS_ROOT"), str(path.relative_to(env("GITOPS_ROOT")))).read_text())
-            targets = document.get("targets", [])
-            if targets and all(target["stages"][stage]["mode"] != "unsupported" and all(not v or target.get(k) == v for k, v in selectors.items()) and (not resource or target["stages"][stage].get("manifest") == resource) for target in targets):
-                candidates.append(str(path.relative_to(env("GITOPS_ROOT"))))
-        if not manifest:
-            require(len(candidates) == 1, "legacy selection needs a unique reviewed target_manifest")
-            manifest = candidates[0]
-        else:
-            require(manifest in candidates, "new/legacy manifest or identity selectors conflict")
-        declared = yaml.safe_load(source_file(env("GITOPS_ROOT"), manifest).read_text())["targets"]
+        implicit_catalog = not manifest
+        manifest = manifest or "iac/catalog.yaml"
+        declared, _, _ = load_targets(env("GITOPS_ROOT"), manifest, environment=environment,
+            provider=provider or None, account=account or None, namespace=selectors.get("workspace") or None,
+            project=selectors.get("project") or None)
+        declared = [t for t in declared if not resource or t["stages"][stage].get("manifest") == resource]
+        require(declared and all(t["stages"][stage]["mode"] != "unsupported" for t in declared), "requested stage/resource is not supported by selected targets")
+        if implicit_catalog or resource:
+            require(len(declared) == 1, "legacy selection needs one reviewed target")
+            selectors["workspace"] = declared[0]["workspace"]
         for target in declared:
             for legacy, field in (("aws_region", "region"), ("aws_role_arn", "role_arn")):
                 if values.get(legacy):
@@ -256,12 +262,9 @@ def main(command):
         registry = yaml.safe_load(registry_path.read_text())
         require(registry.get("kind") == "IaCCapabilityDeclarations" and set(registry.get("providers", {})) == set(PROVIDERS), "six-provider GitOps capability declaration required")
         target_counts = {p: 0 for p in PROVIDERS}
-        for path in (gitops / "iac" / "targets").glob("*.yaml"):
-            declaration = yaml.safe_load(source_file(gitops, str(path.relative_to(gitops))).read_text())
-            require(declaration.get("kind") == "IaCPipelineTargets" and declaration.get("targets"), "invalid static target declaration")
-            for target in declaration["targets"]:
-                validate_target(target, gitops)
-                target_counts[target["provider"]] += 1
+        catalog_targets, _, _ = load_targets(gitops, env("CATALOG", "iac/catalog.yaml"), include_migrations=True)
+        for target in catalog_targets:
+            target_counts[target["provider"]] += 1
         reports = []
         selected = env("PROVIDERS", ",".join(PROVIDERS)).split(",")
         require(selected and len(set(selected)) == len(selected) and all(p in PROVIDERS for p in selected), "invalid static provider set")

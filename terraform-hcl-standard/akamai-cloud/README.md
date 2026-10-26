@@ -8,10 +8,9 @@
 
 - **Terraform provider**：`linode/linode`
 - **自动化 provider 路由**：`akamai-cloud`
-- **UAT state 隔离**：`web-saas`、`open-platform`、`ai-workspace`、
-  `agent-proxy-jp`、`agent-proxy-us`、`agent-proxy-sg` 基础 namespace，以及独立的 `web-saas-k3s-v5` Kubernetes UAT namespace；禁止共享
-  `selfhost` state。详见
-  [`../../docs/howto/akamai-uat-six-state-migration.md`](../../docs/howto/akamai-uat-six-state-migration.md)。
+- **State identity**: GitOps `iac/catalog.yaml` and its target declarations select namespaces,
+  lifecycle and exact state keys. Deployment and preflight share the same loader and
+  provider-neutral canonical key generator; there is no provider-local namespace registry.
 - **PROD 删除保护**：PROD 声明自动使用 `compute_protected` module，并在
   `linode_instance` 上设置 `lifecycle.prevent_destroy = true`。这是 Terraform
   state 侧的保护；下线必须先通过独立代码变更和审批移除保护。UAT 的临时
@@ -117,6 +116,6 @@ xconnect_open_to_users for agent report metadata. firewall.additional_tcp_ports
 declares public TCP listeners such as 1443 as explicit inbound rules; each port
 must be an integer 1–65535. Declare allow_https: true for the public entry.
 
-`web-saas-k3s-v5` is a separately declared, retained Kubernetes UAT target. Its
-state cannot alias `web-saas` or the production `web-saas-prod-v5` namespace and
-is excluded from routine cleanup. The OS/region/shape remain GitOps inputs.
+Historical UAT targets remain read-only migration entries in the GitOps catalog until
+state ownership is verified empty or explicitly handed off. Removing a GitOps active
+manifest never grants state deletion or causes automatic retirement.

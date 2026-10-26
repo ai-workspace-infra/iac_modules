@@ -20,10 +20,23 @@ PREFLIGHT = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader is not None
 SPEC.loader.exec_module(PREFLIGHT)
 ACCOUNT = "acct-test"
+NAMESPACES = ("web-saas", "open-platform", "ai-workspace", "agent-proxy-jp", "agent-proxy-us", "agent-proxy-sg")
+
+def candidates(account=ACCOUNT):
+    return [{"state_key": f"terraform/uat/platform-ops-toolkit/akamai-cloud/{account}/selfhost/terraform.tfstate", "source_commit": "77d3a51f5b39f420ebee4fe07a22b442ddd3b206", "source_path": "historical/router.sh"}]
+
+def fixture_targets(account=ACCOUNT):
+    return [{"id": f"uat-{n}", "auth": {"expected_identity": account}, "namespace": n, "lifecycle": {"status": "active", "persistent": n == "open-platform"},
+        "stages": {"resources": {"manifest": f"resources/svc.plus/uat/akamai/{n}.yaml", "state": {"key": f"terraform/uat/svc.plus/akamai-cloud/{account}/{n}/terraform.tfstate"}, "owners": [], "destroy_allowed": n != "open-platform"}}} for n in NAMESPACES]
+
+def fixture_report(*args, **kwargs):
+    kwargs.setdefault("migration_sources", candidates(kwargs.get("account", ACCOUNT)))
+    return PREFLIGHT.build_report(*args, **kwargs)
+
 
 
 def legacy_state_key(account: str = ACCOUNT) -> str:
-    return PREFLIGHT.legacy_state_candidates(account)[0]["state_key"]
+    return candidates(account)[0]["state_key"]
 
 
 def identity(resource_type: str, resource_id: str, label: str) -> str:
@@ -35,13 +48,16 @@ def expected_rows() -> list[dict[str, str]]:
     return [
         {
             "namespace": namespace,
+            "lifecycle": {"status": "active", "persistent": namespace == "open-platform"},
+            "state_key": f"terraform/uat/svc.plus/akamai-cloud/{ACCOUNT}/{namespace}/terraform.tfstate",
+            "destroy_allowed": namespace != "open-platform",
             "manifest": f"resources/svc.plus/uat/akamai/{namespace}.yaml",
             "label": f"{namespace}-host",
             "firewall_label": f"{namespace}-host-firewall",
             "region": "",
             "type": "g6-standard-1",
         }
-        for namespace in PREFLIGHT.NAMESPACES
+        for namespace in NAMESPACES
     ]
 
 
@@ -60,7 +76,7 @@ def state_record(address: str, namespace: str, resource_type: str, resource_id: 
 
 class PreflightContractTests(unittest.TestCase):
     def test_exact_legacy_key_is_historically_derived(self) -> None:
-        candidate = PREFLIGHT.legacy_state_candidates(ACCOUNT)[0]
+        candidate = candidates(ACCOUNT)[0]
         self.assertEqual(
             candidate["state_key"],
             f"terraform/uat/platform-ops-toolkit/akamai-cloud/{ACCOUNT}/selfhost/terraform.tfstate",
@@ -204,7 +220,7 @@ class PreflightContractTests(unittest.TestCase):
 
         class Generator:
             @staticmethod
-            def load_sources(source):
+            def load_sources(source, **_):
                 if not isinstance(source, str):
                     raise TypeError("expected a path string")
                 namespace = Path(source).stem
@@ -218,10 +234,10 @@ class PreflightContractTests(unittest.TestCase):
             gitops = Path(temporary)
             manifest_dir = gitops / "resources/svc.plus/uat/akamai"
             manifest_dir.mkdir(parents=True)
-            for namespace in PREFLIGHT.NAMESPACES:
+            for namespace in NAMESPACES:
                 (manifest_dir / f"{namespace}.yaml").write_text("{}\n", encoding="utf-8")
             with patch.object(PREFLIGHT, "_load_generator", return_value=Generator()):
-                expectations = PREFLIGHT.load_manifest_expectations(gitops, Path("unused"))
+                expectations = PREFLIGHT.load_manifest_expectations(gitops, Path("unused"), fixture_targets())
         self.assertEqual(len(expectations), 6)
         self.assertEqual(expectations[0]["label"], "web-saas-host")
 
@@ -230,7 +246,7 @@ class PreflightContractTests(unittest.TestCase):
             protected_identity = False
 
             @classmethod
-            def load_sources(cls, source):
+            def load_sources(cls, source, **_):
                 namespace = Path(source).stem
                 host = {
                     "name": PREFLIGHT.PROTECTED_SOURCE if cls.protected_identity and namespace == "open-platform" else namespace,
@@ -248,15 +264,15 @@ class PreflightContractTests(unittest.TestCase):
             gitops = Path(temporary)
             manifest_dir = gitops / "resources/svc.plus/uat/akamai"
             manifest_dir.mkdir(parents=True)
-            for namespace in PREFLIGHT.NAMESPACES:
+            for namespace in NAMESPACES:
                 (manifest_dir / f"{namespace}.yaml").write_text(
                     f"service_domains: [{PREFLIGHT.PROTECTED_SOURCE}]\n", encoding="utf-8"
                 )
             with patch.object(PREFLIGHT, "_load_generator", return_value=Generator()):
-                self.assertEqual(len(PREFLIGHT.load_manifest_expectations(gitops, Path("unused"))), 6)
+                self.assertEqual(len(PREFLIGHT.load_manifest_expectations(gitops, Path("unused"), fixture_targets())), 6)
                 Generator.protected_identity = True
                 with self.assertRaisesRegex(PREFLIGHT.PreflightError, "protected_source_as_managed_host:open-platform"):
-                    PREFLIGHT.load_manifest_expectations(gitops, Path("unused"))
+                    PREFLIGHT.load_manifest_expectations(gitops, Path("unused"), fixture_targets())
 
     def test_linode_client_uses_get_only_and_allowlisted_paths(self) -> None:
         captured = []
@@ -284,7 +300,7 @@ class PreflightContractTests(unittest.TestCase):
 
     def test_absent_and_unmanaged_statuses(self) -> None:
         expected = expected_rows()
-        report = PREFLIGHT.build_report(
+        report = fixture_report(
             expected,
             [{"id": 9, "label": expected[0]["label"], "region": "jp-tyo-3"}],
             [],
@@ -311,7 +327,7 @@ class PreflightContractTests(unittest.TestCase):
             }
             for row in expected
         ]
-        report = PREFLIGHT.build_report(expected, [], [], [old, *targets], account=ACCOUNT)
+        report = fixture_report(expected, [], [], [old, *targets], account=ACCOUNT)
         mapping = report["retirement_plan"]["resource_mappings"][0]
         self.assertEqual(mapping["mapping_status"], "one-to-one")
         self.assertEqual(mapping["target_namespace"], "web-saas")
@@ -332,9 +348,9 @@ class PreflightContractTests(unittest.TestCase):
                 "resources": [state_record(f"linode_instance.{namespace}", namespace, "linode_instance", "55", expected[0]["label"])] if namespace in {"web-saas", "ai-workspace"} else [],
                 "protected_text": False,
             }
-            for namespace in PREFLIGHT.NAMESPACES
+            for namespace in NAMESPACES
         ]
-        report = PREFLIGHT.build_report(expected, [], [], [old, *targets], account=ACCOUNT)
+        report = fixture_report(expected, [], [], [old, *targets], account=ACCOUNT)
         self.assertEqual(report["retirement_plan"]["mapping_counts"]["duplicate"], 1)
         self.assertIn("legacy_resource_maps_to_multiple_target_states", report["failures"])
 
@@ -342,7 +358,7 @@ class PreflightContractTests(unittest.TestCase):
         expected = expected_rows()
         legacy_key = legacy_state_key()
         old = {"state_key": legacy_key, "present": True, "resources": [], "protected_text": True}
-        report = PREFLIGHT.build_report(expected, [], [], [old], account=ACCOUNT)
+        report = fixture_report(expected, [], [], [old], account=ACCOUNT)
         self.assertIn("protected_source_present_in_akamai_state", report["failures"])
         self.assertNotIn("open-platform", report["future_cleanup_namespaces"])
 
@@ -388,9 +404,12 @@ class PreflightContractTests(unittest.TestCase):
                     iac_root="unused-iac",
                     account=account,
                     correlation_id="test-run-1",
+                    environment="uat", catalog="iac/catalog.yaml",
                 )
                 with (
-                    patch.object(PREFLIGHT, "load_manifest_expectations", return_value=[]),
+                    patch.object(PREFLIGHT, "load_preflight_targets", return_value=(fixture_targets(account), candidates(account), {})),
+                    patch.object(PREFLIGHT, "load_manifest_expectations", return_value=expected_rows()),
+                    patch.object(PREFLIGHT, "verify_identity"),
                     patch.object(PREFLIGHT, "inspect_terraform_state", side_effect=inspect_state),
                     patch.object(PREFLIGHT, "inspect_legacy_object_versions", side_effect=inspect_versions),
                     patch.object(PREFLIGHT, "linode_get_pages", return_value=[]),

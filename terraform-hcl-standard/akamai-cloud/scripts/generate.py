@@ -15,7 +15,7 @@ from pathlib import Path
 import yaml
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, Template
 
-from state_contract import UAT_NAMESPACES, validate_namespace
+from state_contract import validate_namespace
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = ROOT / "templates"
@@ -47,7 +47,7 @@ def _load_yaml(path: Path):
     return yaml.safe_load(rendered) or {}
 
 
-def load_sources(resources):
+def load_sources(resources, *, require_ssh=True):
     global_config = {}
     ssh_keys = []
     hosts = []
@@ -72,7 +72,7 @@ def load_sources(resources):
             hosts.append(host)
     if not hosts:
         raise SystemExit("至少需要一个 hosts 声明")
-    if not ssh_keys:
+    if require_ssh and not ssh_keys:
         raise SystemExit("Akamai Cloud/Linode image 部署至少需要一个 ssh_keys 公钥")
     return global_config, ssh_keys, hosts
 
@@ -129,7 +129,10 @@ def render(args):
             environment = relative_parts[0]
 
     namespace = getattr(args, "namespace", None) or os.environ.get("TF_STATE_WORKSPACE")
-    namespace = namespace or resources.stem
+    declared_namespace = global_config.get("state_namespace") or global_config.get("workspace")
+    if namespace and declared_namespace and namespace != declared_namespace:
+        raise SystemExit("requested namespace differs from GitOps declaration")
+    namespace = declared_namespace or namespace or resources.stem
     namespace = validate_namespace(namespace, environment=environment)
     if resolved_workdir.is_relative_to(envs_root) and workdir.name != namespace:
         raise SystemExit(
@@ -272,8 +275,7 @@ def main():
         sub.add_argument(
             "--namespace",
             help=(
-                "isolated Terraform state namespace; UAT is restricted to: "
-                + ", ".join(UAT_NAMESPACES)
+                "isolated Terraform state namespace declared by the selected GitOps target"
             ),
         )
         if command == "render":

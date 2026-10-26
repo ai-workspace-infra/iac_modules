@@ -25,9 +25,9 @@ def main():
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    for namespace in module.NAMESPACES:
-        source_file(os.environ['GITOPS_ROOT'], f'resources/svc.plus/uat/akamai/{namespace}.yaml')
-    module.load_manifest_expectations(Path(os.environ['GITOPS_ROOT']), Path(os.environ['IAC_ROOT']))
+    catalog = os.environ['PREFLIGHT_CATALOG']
+    targets, _, _ = module.load_preflight_targets(Path(os.environ['GITOPS_ROOT']), catalog, os.environ['PREFLIGHT_ENVIRONMENT'], os.environ['PREFLIGHT_ACCOUNT'])
+    module.load_manifest_expectations(Path(os.environ['GITOPS_ROOT']), Path(os.environ['IAC_ROOT']), targets)
     if phase == 'validate':
         return 0
     output = Path(os.environ['PREFLIGHT_JSON_PATH'])
@@ -35,7 +35,7 @@ def main():
         '--environment', 'uat', '--account', os.environ['PREFLIGHT_ACCOUNT'],
         '--correlation-id', os.environ['PREFLIGHT_CORRELATION_ID'],
         '--iac-root', os.environ['IAC_ROOT'], '--gitops-root', os.environ['GITOPS_ROOT'],
-        '--output', str(output),
+        '--output', str(output), '--catalog', catalog,
     ])
     report = json.loads(output.read_text())
     report.update(owner_repository='ai-workspace-infra/iac_modules', owner_commit=owner_sha,

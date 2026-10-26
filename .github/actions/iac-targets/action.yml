@@ -8,7 +8,7 @@ inputs:
     description: Pinned GitOps checkout
     required: true
   target-manifest:
-    description: GitOps IaCPipelineTargets path
+    description: GitOps IaCTargetCatalog or IaCPipelineTargets path
     required: true
   environment:
     description: Declared environment selector
@@ -34,6 +34,10 @@ inputs:
   contract-file:
     description: Output validated contract file
     required: true
+  normalized-selectors:
+    description: Prepared caller constraints; explicit selectors cannot override these
+    required: false
+    default: "{}"
   selectors:
     description: Legacy selectors as JSON; mismatches fail
     required: true
@@ -57,6 +61,7 @@ runs:
         IAC_REF: ${{ inputs.iac-ref }}
         IAC_CORRELATION: ${{ inputs.correlation-id }}
         IAC_CONTRACT: ${{ inputs.contract-file }}
+        IAC_NORMALIZED_SELECTORS: ${{ inputs.normalized-selectors }}
         IAC_SELECTORS: ${{ inputs.selectors }}
       run: python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/unified_cli.py" prepare
       id: prepare

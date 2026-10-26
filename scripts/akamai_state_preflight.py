@@ -20,33 +20,24 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 
-NAMESPACES = (
-    "web-saas",
-    "open-platform",
-    "ai-workspace",
-    "agent-proxy-jp",
-    "agent-proxy-us",
-    "agent-proxy-sg",
-)
-CLEANUP_NAMESPACES = (
-    "web-saas",
-    "ai-workspace",
-    "agent-proxy-jp",
-    "agent-proxy-us",
-    "agent-proxy-sg",
-)
+sys.path.insert(0, str(Path(__file__).resolve().parent / "pipeline"))
+from unified.contracts import ContractError, load_targets, owner_match
+from unified.auth import verify_identity
+
 PROTECTED_SOURCE = "observability.svc.plus"
 
 
-def legacy_state_candidates(account: str) -> tuple[dict[str, str], ...]:
-    return (
-        {
-            "state_key": f"terraform/uat/platform-ops-toolkit/akamai-cloud/{account}/selfhost/terraform.tfstate",
-            "source_commit": "77d3a51f5b39f420ebee4fe07a22b442ddd3b206",
-            "source_path": ".github/scripts/platform-ops/provision/platform-ops_provision_route-ref-to-an-explicit-profile.sh",
-            "derivation": "historical UAT Akamai target_domains=all -> selfhost",
-        },
-    )
+def load_preflight_targets(gitops_root, catalog, environment, account):
+    targets, sources, files = load_targets(gitops_root, catalog, environment=environment,
+        provider="akamai-cloud", account=account, include_migrations=True)
+    # The existing legacy-to-namespace mapping report handles one historical shared
+    # state per selected account. Separate source migrations need separate catalogs.
+    if len(sources) > 1:
+        raise PreflightError("multiple_historical_sources_require_separate_scope")
+    candidates = [{"state_key": item["state"]["key"],
+                   "source_commit": item["provenance"]["commit"],
+                   "source_path": item["provenance"]["path"]} for item in sources]
+    return targets, candidates, files
 
 
 LINODE_API = "https://api.linode.com/v4"
@@ -90,17 +81,18 @@ def _load_generator(iac_root: Path):
     return module
 
 
-def load_manifest_expectations(gitops_root: Path, iac_root: Path) -> list[dict[str, Any]]:
+def load_manifest_expectations(gitops_root: Path, iac_root: Path, targets) -> list[dict[str, Any]]:
     """Use the checked-out main-branch renderer to derive the exact Linode labels."""
     generator = _load_generator(iac_root)
     expectations = []
-    for namespace in NAMESPACES:
-        relative = Path("resources/svc.plus/uat/akamai") / f"{namespace}.yaml"
+    for target in targets:
+        namespace = target["namespace"]
+        relative = Path(target["stages"]["resources"]["manifest"])
         manifest = gitops_root / relative
         if not manifest.is_file():
             raise PreflightError(f"manifest_missing:{namespace}")
         try:
-            global_config, _ssh_keys, hosts = generator.load_sources(str(manifest))
+            global_config, _ssh_keys, hosts = generator.load_sources(str(manifest), require_ssh=False)
         except Exception as exc:  # Renderer errors can include expanded YAML values.
             raise PreflightError(f"manifest_parse_failed:{namespace}") from exc
         if len(hosts) != 1:
@@ -126,6 +118,11 @@ def load_manifest_expectations(gitops_root: Path, iac_root: Path) -> list[dict[s
         expectations.append(
             {
                 "namespace": namespace,
+                "target_id": target["id"],
+                "lifecycle": target["lifecycle"],
+                "state_key": target["stages"]["resources"]["state"]["key"],
+                "owners": target["stages"]["resources"]["owners"],
+                "destroy_allowed": target["stages"]["resources"]["destroy_allowed"],
                 "manifest": relative.as_posix(),
                 "label": label,
                 "firewall_label": firewall_label,
@@ -362,7 +359,7 @@ def inspect_legacy_object_versions(state_key: str, env: dict[str, str], account:
             "current_version": None,
             "previous_version_count": 0,
             "versions": [],
-            "suggested_archive_key": f"terraform/archive/uat/platform-ops-toolkit/akamai-cloud/{account}/selfhost/terraform.tfstate",
+            "suggested_archive_key": "terraform/archive/" + state_key.removeprefix("terraform/"),
             "archive_object": {"present": False, "matches_current_version_metadata": False},
             "backup_prerequisite_satisfied": False,
         }
@@ -378,7 +375,7 @@ def inspect_legacy_object_versions(state_key: str, env: dict[str, str], account:
             "current_version": None,
             "previous_version_count": 0,
             "versions": [],
-            "suggested_archive_key": f"terraform/archive/uat/platform-ops-toolkit/akamai-cloud/{account}/selfhost/terraform.tfstate",
+            "suggested_archive_key": "terraform/archive/" + state_key.removeprefix("terraform/"),
             "archive_object": {"present": False, "matches_current_version_metadata": False},
             "backup_prerequisite_satisfied": False,
         }
@@ -396,10 +393,7 @@ def inspect_legacy_object_versions(state_key: str, env: dict[str, str], account:
     versions.sort(key=lambda item: (not item["is_latest"], item["last_modified"]))
     current = next((item for item in versions if item["is_latest"]), versions[0] if versions else None)
     versioning_enabled = any(item["version_id"] not in {"", "null"} for item in versions)
-    archive_key = (
-        "terraform/archive/uat/platform-ops-toolkit/akamai-cloud/"
-        f"{account}/selfhost/terraform.tfstate"
-    )
+    archive_key = "terraform/archive/" + state_key.removeprefix("terraform/")
     archive = {
         "present": False,
         "matches_current_version_metadata": False,
@@ -557,6 +551,19 @@ def _classify_namespace(
         if item.get("resource_type") == "linode_firewall" and item.get("label") == expected["firewall_label"]
     ]
     failures = []
+    if expected.get("owners") and any(not owner_match(item["address"], expected["owners"]) for item in namespace_resources):
+        failures.append("state_resource_outside_declared_owners")
+    for resource_type, label, live in (("linode_instance", expected["label"], live_instances), ("linode_firewall", expected["firewall_label"], live_firewalls)):
+        for record in namespace_resources:
+            if record.get("resource_type") != resource_type:
+                continue
+            if record.get("label") != label:
+                failures.append("namespace_state_label_differs_from_declaration")
+            same_id = [item for item in live if item["id"] == record.get("id")]
+            if same_id and same_id[0]["label"] != record.get("label"):
+                failures.append("live_resource_id_label_mismatch")
+    if namespace_resources and not target_instances and not target_firewalls:
+        failures.append("namespace_state_contains_unmatched_bindings")
     expected_live_instance_ids = {record["id"] for record in live_instance}
     expected_live_firewall_ids = {record["id"] for record in live_firewall}
     if any(
@@ -630,7 +637,10 @@ def _classify_namespace(
         failures.append("partial_resource_set")
     else:
         status = "absent"
-        recommendation = "plan-create-in-namespace-after-review"
+        recommendation = "plan-create-in-namespace-after-review" if expected["lifecycle"]["status"] == "active" else "retain-until-reviewed-state-retirement"
+
+    if expected["lifecycle"]["status"] != "active":
+        recommendation = "retain-for-reviewed-state-handoff" if namespace_resources or live_instance or live_firewall else "eligible-for-declaration-retirement-review"
 
     return {
         "namespace": namespace,
@@ -640,8 +650,13 @@ def _classify_namespace(
         "region": expected["region"],
         "type": expected["type"],
         "status": status,
-        "persistent": namespace == "open-platform",
-        "cleanup_eligible": namespace in CLEANUP_NAMESPACES,
+        "target_id": expected.get("target_id", namespace),
+        "lifecycle": expected["lifecycle"],
+        "persistent": expected["lifecycle"]["persistent"],
+        "cleanup_eligible": expected["lifecycle"]["status"] == "active" and not expected["lifecycle"]["persistent"] and expected.get("destroy_allowed") is True,
+        "state_key": expected["state_key"],
+        "state_binding_count": len(namespace_resources),
+        "state_resources": namespace_resources,
         "live_instances": live_instance,
         "live_firewalls": live_firewall,
         "legacy_state_instances": state_instances,
@@ -661,21 +676,21 @@ def build_report(
     legacy_object_versions: dict[str, Any] | None = None,
     account: str = "",
     correlation_id: str = "",
+    migration_sources=(),
 ) -> dict[str, Any]:
-    candidates = legacy_state_candidates(account)
+    candidates = list(migration_sources)
+    historical = candidates[0] if candidates else {"state_key": ""}
     live_instances = _project_live(live_instances_raw, "linode_instance")
     live_firewalls = _project_live(live_firewalls_raw, "linode_firewall")
     legacy_state = next(
-        (result for result in state_results if result["state_key"] == candidates[0]["state_key"]),
-        {"state_key": candidates[0]["state_key"], "present": False, "resources": [], "protected_text": False},
+        (result for result in state_results if result["state_key"] == historical["state_key"]),
+        {"state_key": historical["state_key"], "present": False, "resources": [], "protected_text": False},
     )
     namespace_states = {
         result["namespace"]: result for result in state_results if result.get("namespace")
     }
     state_resources = legacy_state["resources"]
     failures: list[str] = []
-    if "open-platform" in CLEANUP_NAMESPACES:
-        failures.append("open_platform_in_cleanup_scope")
     labels = [item["label"] for item in expectations]
     fw_labels = [item["firewall_label"] for item in expectations]
     if len(set(labels)) != len(labels) or len(set(fw_labels)) != len(fw_labels):
@@ -720,8 +735,8 @@ def build_report(
                 item["status"] = "ambiguous"
                 item["recommendation"] = "stop-and-reconcile-manually"
                 item["findings"].append("resource_id_maps_to_multiple_namespaces")
-    if any(item["namespace"] == "open-platform" and item["cleanup_eligible"] for item in items):
-        failures.append("open_platform_in_cleanup_scope")
+    if any(item["persistent"] and item["cleanup_eligible"] for item in items):
+        failures.append("persistent_target_in_cleanup_scope")
 
     expected_owner = {
         ("linode_instance", item["label"]): item["namespace"] for item in expectations
@@ -812,19 +827,20 @@ def build_report(
         failures.append("legacy_resource_mapped_to_wrong_namespace")
 
     object_versions = legacy_object_versions or {
-        "state_key": candidates[0]["state_key"],
+        "state_key": historical["state_key"],
         "version_inventory_status": "not-checked",
         "object_present": False,
         "versioning_enabled": False,
         "current_version": None,
         "previous_version_count": 0,
         "versions": [],
-        "suggested_archive_key": f"terraform/archive/uat/platform-ops-toolkit/akamai-cloud/{account}/selfhost/terraform.tfstate",
+        "suggested_archive_key": "terraform/archive/" + historical["state_key"].removeprefix("terraform/"),
         "archive_object": {"present": False, "matches_current_version_metadata": False, "check_status": "not-checked"},
         "backup_prerequisite_satisfied": False,
     }
     retirement_plan = {
-        "legacy_state_key": candidates[0]["state_key"],
+        "applicable": bool(candidates),
+        "legacy_state_key": historical["state_key"],
         "legacy_state_present": legacy_state["present"] or bool(object_versions["object_present"]),
         "object_versions": object_versions,
         "resource_mappings": mappings,
@@ -836,7 +852,7 @@ def build_report(
             "namespace_mismatch": namespace_mismatches,
         },
         "retirement_prerequisites": {
-            "all_six_namespace_plans_zero_add_change_destroy": "required",
+            "all_selected_active_namespace_plans_zero_add_change_destroy": "required",
             "every_legacy_resource_has_one_to_one_namespace_mapping": "required",
             "migration_acceptance_complete": "required",
             "old_observability_source_unchanged_through_acceptance": "required",
@@ -867,7 +883,7 @@ def build_report(
             }
             for candidate in candidates
         ],
-        "future_cleanup_namespaces": list(CLEANUP_NAMESPACES),
+        "future_cleanup_namespaces": [item["namespace"] for item in items if item["cleanup_eligible"]],
         "namespaces": items,
         "retirement_plan": retirement_plan,
     }
@@ -916,32 +932,32 @@ def write_outputs(report: dict[str, Any], output_path: Path, summary_path: str |
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
-    expectations = load_manifest_expectations(Path(args.gitops_root), Path(args.iac_root))
-    token = os.environ.get("LINODE_TOKEN", "")
+    targets, candidates, files = load_preflight_targets(Path(args.gitops_root), args.catalog, args.environment, args.account)
+    expectations = load_manifest_expectations(Path(args.gitops_root), Path(args.iac_root), targets)
+    token = os.environ.get("LINODE_TOKEN", "").strip()
     if not token:
         raise PreflightError("linode_token_missing")
+    os.environ["LINODE_TOKEN"] = token
+    if len({target["auth"]["expected_identity"] for target in targets}) != 1:
+        raise PreflightError("conflicting_provider_identity_in_catalog")
+    verify_identity(targets[0])
     backend_env = dict(os.environ)
     state_results = []
-    candidates = legacy_state_candidates(args.account)
     for candidate in candidates:
         legacy_state = inspect_terraform_state(candidate["state_key"], backend_env)
         legacy_state["scope"] = "legacy"
         state_results.append(legacy_state)
-    state_project = "svc.plus"
-    provider = "akamai-cloud"
-    account = args.account
-    namespace_state_keys = {
-        namespace: f"terraform/uat/{state_project}/{provider}/{account}/{namespace}/terraform.tfstate"
-        for namespace in NAMESPACES
-    }
-    for namespace, state_key in namespace_state_keys.items():
-        state = inspect_terraform_state(state_key, backend_env)
-        state["namespace"] = namespace
+    for target in targets:
+        state = inspect_terraform_state(target["stages"]["resources"]["state"]["key"], backend_env)
+        state["namespace"] = target["namespace"]
         state_results.append(state)
-    object_versions = inspect_legacy_object_versions(candidates[0]["state_key"], backend_env, account)
+    object_versions = inspect_legacy_object_versions(candidates[0]["state_key"], backend_env, args.account) if candidates else None
     instances = linode_get_pages("linode/instances", token)
     firewalls = linode_get_pages("networking/firewalls", token)
-    return build_report(expectations, instances, firewalls, state_results, object_versions, account, args.correlation_id)
+    report = build_report(expectations, instances, firewalls, state_results, object_versions,
+        args.account, args.correlation_id, migration_sources=candidates)
+    report.update(catalog=args.catalog, declaration_files=files, provider_identity_verified=True)
+    return report
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -949,6 +965,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--gitops-root", required=True)
     parser.add_argument("--iac-root", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--catalog", required=True)
     parser.add_argument("--environment", required=True, choices=("uat",))
     parser.add_argument("--account", required=True)
     parser.add_argument("--correlation-id", required=True)
@@ -961,7 +978,7 @@ def main(argv: list[str] | None = None) -> int:
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     try:
         report = run(args)
-    except PreflightError as exc:
+    except (PreflightError, ContractError, ValueError) as exc:
         report = {
             "schema_version": 1,
             "mode": "read-only",
@@ -970,7 +987,7 @@ def main(argv: list[str] | None = None) -> int:
             "correlation_id": args.correlation_id,
             "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
             "status": "failed",
-            "failures": [exc.code],
+            "failures": [exc.code if isinstance(exc, PreflightError) else "target_catalog_validation_failed"],
             "namespaces": [],
         }
     write_outputs(report, output, summary)

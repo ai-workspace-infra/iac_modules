@@ -39,6 +39,7 @@ class ContractTests(unittest.TestCase):
         self.target = {
             "id": "uat-akamai-web-saas", "environment": "uat", "project": "svc.plus",
             "provider": "akamai-cloud", "account": "concrete-account", "workspace": "web-saas",
+            "namespace": "web-saas", "lifecycle": {"status": "active", "persistent": False},
             "auth": {"expected_identity": "concrete-account", "vault_role": "github-actions-platform-ops-toolkit-uat"},
             "stages": {
                 "bootstrap": {"mode": "verify"},
@@ -61,7 +62,12 @@ class ContractTests(unittest.TestCase):
                 if spec.get("manifest"):
                     path = self.gitops / spec["manifest"]
                     path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_text("hosts: []\n")
+                    if target["provider"] == "akamai-cloud" and spec is target["stages"]["resources"]:
+                        glob = {k: target[k] for k in ("provider", "environment", "project", "account", "workspace")}
+                        glob["state_namespace"] = target["namespace"]
+                        path.write_text(yaml.safe_dump({"global": glob, "hosts": [{"name": target["namespace"]}]}))
+                    else:
+                        path.write_text("hosts: []\n")
         git(self.gitops, "add", ".")
         git(self.gitops, "commit", "--allow-empty", "-qm", "declare fixture")
 

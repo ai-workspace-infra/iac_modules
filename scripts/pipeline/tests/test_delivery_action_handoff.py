@@ -28,7 +28,7 @@ class DeliveryHandoff(unittest.TestCase):
                                          'spec': {'runtime': {'mode': 'serverless'}}}))
         fake = self.iac / 'scripts/akamai_state_preflight.py'
         fake.parent.mkdir()
-        fake.write_text("import json\nfrom pathlib import Path\nNAMESPACES=('web-saas',)\ndef load_manifest_expectations(gitops,iac):\n    if (gitops/'resources/svc.plus/uat/akamai/web-saas.yaml').read_text()!='reviewed':\n        raise ValueError('manifest_namespace_mismatch')\n    return []\ndef main(args):\n    Path(args[args.index('--output')+1]).write_text(json.dumps({'status':'passed','mode':'read-only'}))\n    return 0\n")
+        fake.write_text("import json\nfrom pathlib import Path\ndef load_preflight_targets(gitops,catalog,environment,account):\n    return [],[],{}\ndef load_manifest_expectations(gitops,iac,targets):\n    if (gitops/'resources/svc.plus/uat/akamai/web-saas.yaml').read_text()!='reviewed':\n        raise ValueError('manifest_namespace_mismatch')\n    return []\ndef main(args):\n    Path(args[args.index('--output')+1]).write_text(json.dumps({'status':'passed','mode':'read-only'}))\n    return 0\n")
         manifest = self.gitops/'resources/svc.plus/uat/akamai/web-saas.yaml'
         manifest.parent.mkdir(parents=True)
         manifest.write_text('reviewed')
@@ -42,7 +42,7 @@ class DeliveryHandoff(unittest.TestCase):
                         GITHUB_REPOSITORY='ai-workspace-infra/platform-ops-toolkit',
                         GITHUB_WORKFLOW_REF='ai-workspace-infra/platform-ops-toolkit/.github/workflows/serverless-orchestrator.yml@refs/heads/main',
                         GITHUB_RUN_ID='42', GITHUB_RUN_ATTEMPT='2', PREFLIGHT_ENVIRONMENT='uat', PREFLIGHT_ACCOUNT='account-one',
-                        PREFLIGHT_CORRELATION_ID='42:2', PREFLIGHT_JSON_PATH=str(self.base/'preflight.json'))
+                        PREFLIGHT_CATALOG='iac/catalog.yaml', PREFLIGHT_CORRELATION_ID='42:2', PREFLIGHT_JSON_PATH=str(self.base/'preflight.json'))
 
     def sha(self, root):
         return subprocess.check_output(['git', '-C', str(root), 'rev-parse', 'HEAD'], text=True).strip()
