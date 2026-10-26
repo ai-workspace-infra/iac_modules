@@ -92,6 +92,16 @@ class ContractTests(unittest.TestCase):
                 result[job] = {"result": "success" if selected and job == ("destroy-" + stage if context["action"] == "destroy" else stage) else "skipped"}
         return result
 
+    def test_dev_runtime_bundle_preserves_only_public_bootstrap_inputs(self):
+        variables = {"k3s_platform_node_name": "dev-node", "k3s_platform_cluster_name": "dev-node",
+                     "k3s_platform_k3s_version": "v1.37.1+k3s1", "k3s_platform_write_kubeconfig_mode": "0600",
+                     "k3s_platform_git_private_key": "must-not-copy", "ansible_connection": "local"}
+        clean = sanitize_inventory({"dev-node": {"groups": ["dev"], "host_vars": variables}})["dev-node"]["host_vars"]
+        self.assertEqual(set(clean), {"k3s_platform_node_name", "k3s_platform_cluster_name", "k3s_platform_k3s_version", "k3s_platform_write_kubeconfig_mode"})
+        self.assertNotIn("must-not-copy", json.dumps(clean))
+        other = sanitize_inventory({"host": {"groups": ["prod"], "host_vars": variables}})["host"]["host_vars"]
+        self.assertFalse(other)
+
     def test_namespace_lock_survives_target_id_alias(self):
         renamed = copy.deepcopy(self.target)
         renamed["id"] = "other-manifest-id"
