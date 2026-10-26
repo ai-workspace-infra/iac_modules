@@ -116,9 +116,9 @@ class GenerateTest(unittest.TestCase):
     def test_dev_inventory_rejects_missing_or_other_host_runtime_before_publish(self):
         source = yaml.safe_load((ROOT / "tests/fixtures/linode.yaml").read_text())
         source["global"]["environment"] = "dev"
-        invalid = [{}, {"production": {"instance_id": 123, "ip": "198.51.100.10"}}]
+        invalid = [None, [], {}, {"production": {"instance_id": 123, "ip": "198.51.100.10"}}]
         invalid += [{"web-node": facts} for facts in [
-            {}, {"instance_id": True, "ip": "198.51.100.10"},
+            None, [], {}, {"instance_id": True, "ip": "198.51.100.10"},
             {"instance_id": 0, "ip": "198.51.100.10"},
             {"instance_id": 123}, {"instance_id": 123, "ip": "not-an-ip"},
             {"instance_id": 123, "ip": "127.0.0.1"},
@@ -130,11 +130,33 @@ class GenerateTest(unittest.TestCase):
             workdir = Path(tempdir) / "workdir"
             generate.render(SimpleNamespace(resources=resource, workdir=workdir, namespace="web-node"))
             for runtime in invalid:
+                # Reuse a successfully published workdir, as a retry would.
+                with mock.patch.object(generate, "terraform_output", return_value={"web-node": {"instance_id": 123, "ip": "198.51.100.10"}}):
+                    generate.inventory(SimpleNamespace(resources=resource, workdir=workdir))
+                self.assertTrue((workdir / "cmdb.json").exists())
                 with self.subTest(runtime=runtime), mock.patch.object(generate, "terraform_output", return_value=runtime):
                     with self.assertRaisesRegex(SystemExit, "dev CMDB"):
                         generate.inventory(SimpleNamespace(resources=resource, workdir=workdir))
                     self.assertFalse((workdir / "cmdb.json").exists())
                     self.assertFalse((workdir / "inventory.ini").exists())
+
+    def test_dev_inventory_runtime_read_failure_invalidates_only_derived_outputs(self):
+        source = yaml.safe_load((ROOT / "tests/fixtures/linode.yaml").read_text())
+        source["global"]["environment"] = "dev"
+        with tempfile.TemporaryDirectory() as tempdir:
+            resource = Path(tempdir) / "dev.yaml"
+            resource.write_text(yaml.safe_dump(source))
+            workdir = Path(tempdir) / "workdir"
+            generate.render(SimpleNamespace(resources=resource, workdir=workdir, namespace="web-node"))
+            for artifact in ("cmdb.json", "inventory.ini", "terraform.tfstate", "unrelated.txt"):
+                (workdir / artifact).write_text("preserve-unless-derived")
+            with mock.patch.object(generate, "terraform_output", side_effect=SystemExit("read failed")):
+                with self.assertRaisesRegex(SystemExit, "read failed"):
+                    generate.inventory(SimpleNamespace(resources=resource, workdir=workdir))
+            self.assertFalse((workdir / "cmdb.json").exists())
+            self.assertFalse((workdir / "inventory.ini").exists())
+            self.assertEqual((workdir / "terraform.tfstate").read_text(), "preserve-unless-derived")
+            self.assertEqual((workdir / "unrelated.txt").read_text(), "preserve-unless-derived")
 
     def test_invalid_additional_tcp_ports_are_rejected(self):
         for port in [True, 0, 65536, "1443"]:

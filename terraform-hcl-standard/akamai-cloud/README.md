@@ -124,7 +124,10 @@ manifest never grants state deletion or causes automatic retirement.
 
 For `environment: dev`, inventory generation requires exactly the declared host
 set, a positive runtime Linode `instance_id`, and a usable runtime IPv4 address.
-Missing or unrelated output aborts before publishing CMDB/inventory. Re-run the
+Before reading runtime facts, the Dev inventory phase invalidates only its prior
+`cmdb.json` and `inventory.ini` derived artifacts. Missing or unrelated output
+then aborts without leaving an earlier address available; state and unrelated
+files are untouched. Re-run the
 inventory phase after every successful create/replacement so both artifacts use
 the latest Terraform `cmdb_runtime`; historical IPs are not connection targets.
 A successful offline renderer test does not prove the instance exists or its
