@@ -132,7 +132,13 @@ def sanitize_inventory(raw):
                 require(not address.is_unspecified and not address.is_loopback and not address.is_multicast, "invalid deployment address")
         require(all(isinstance(group, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,126}", group) for group in facts.get("groups", [])), "invalid inventory group")
         clean[name] = {key: value for key, value in facts.items() if key in permitted}
-        clean[name]["host_vars"] = {key: value for key, value in facts.get("host_vars", {}).items() if key in vars_allowed}
+        allowed_host_vars = set(vars_allowed)
+        if "dev" in facts.get("groups", []):
+            # Non-sensitive bootstrap inputs must survive the real public
+            # runtime bundle; never copy arbitrary role or connection values.
+            allowed_host_vars.update({"k3s_platform_node_name", "k3s_platform_cluster_name",
+                                      "k3s_platform_k3s_version", "k3s_platform_write_kubeconfig_mode"})
+        clean[name]["host_vars"] = {key: value for key, value in facts.get("host_vars", {}).items() if key in allowed_host_vars}
     return clean
 
 
