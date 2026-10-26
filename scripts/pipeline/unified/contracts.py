@@ -95,6 +95,21 @@ def state_lock_key(target):
     return hashlib.sha256(key.encode()).hexdigest()
 
 
+def reject_inline_resource_secrets(value):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            name = str(key).lower()
+            sensitive = re.search(r"token|password|secret|private[_-]?key|api[_-]?key", name)
+            reference = name.endswith(("_ref", "_refs", "_path", "_paths"))
+            require(not sensitive or reference, "inline credential field is forbidden in resource declarations")
+            reject_inline_resource_secrets(child)
+    elif isinstance(value, list):
+        for child in value:
+            reject_inline_resource_secrets(child)
+    elif isinstance(value, str):
+        require(not re.search(r"-----BEGIN [^-]*PRIVATE KEY-----", value), "private key material is forbidden in resource declarations")
+
+
 def validate_target(target, gitops_root):
     require(isinstance(target, dict), "target must be a mapping")
     for key in ("id", "environment", "project", "provider", "account", "workspace"):
@@ -150,7 +165,12 @@ def validate_target(target, gitops_root):
                 require(key == canonical, "state key does not match declared identity")
             require(state.get("cli_workspace", "default") == "default", "legacy CLI workspace requires reviewed state migration")
             if stage == "resources" and target["provider"] == "akamai-cloud" and "namespace" in target:
-                global_config = yaml.safe_load(source_file(gitops_root, manifest).read_text()).get("global", {})
+                resource_document = yaml.safe_load(source_file(gitops_root, manifest).read_text())
+                require(isinstance(resource_document, dict), "resource manifest must be a mapping")
+                reject_inline_resource_secrets(resource_document)
+                if target["environment"] == "uat":
+                    require(isinstance(resource_document.get("hosts"), list) and len(resource_document["hosts"]) == 1, "UAT target must own exactly one host")
+                global_config = resource_document.get("global", {})
                 for field, expected in (("provider", target["provider"]), ("environment", target["environment"]), ("project", target["project"]), ("account", target["account"]), ("state_namespace", namespace), ("workspace", namespace)):
                     require(global_config.get(field) == expected, f"resource manifest identity mismatch: {field}")
             require(spec.get("ownership_reviewed") is True, "resource/stage/state ownership review is required")

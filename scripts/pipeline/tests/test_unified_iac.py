@@ -65,7 +65,7 @@ class ContractTests(unittest.TestCase):
                     if target["provider"] == "akamai-cloud" and spec is target["stages"]["resources"]:
                         glob = {k: target[k] for k in ("provider", "environment", "project", "account", "workspace")}
                         glob["state_namespace"] = target["namespace"]
-                        path.write_text(yaml.safe_dump({"global": glob, "hosts": []}))
+                        path.write_text(yaml.safe_dump({"global": glob, "hosts": [{"name": target["namespace"]}]}))
                     else:
                         path.write_text("hosts: []\n")
         git(self.gitops, "add", ".")

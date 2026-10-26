@@ -182,6 +182,16 @@ class CatalogTests(unittest.TestCase):
         self.publish()
         self.assertEqual(validate_catalog_transition(before, self.root, 'iac/catalog.yaml'), 2)
 
+    def test_resource_validation_preserves_inline_credential_rejection(self):
+        path = self.root / self.targets[0]['stages']['resources']['manifest']
+        doc = yaml.safe_load(path.read_text()); doc['hosts'][0]['password'] = 'fixture-only'
+        path.write_text(yaml.safe_dump(doc))
+        with self.assertRaisesRegex(ContractError, 'inline credential'): self.load()
+        del doc['hosts'][0]['password']; doc['hosts'][0]['password_ref'] = 'vault-reference'
+        path.write_text(yaml.safe_dump(doc)); self.load()
+        doc['hosts'] = []; path.write_text(yaml.safe_dump(doc))
+        with self.assertRaisesRegex(ContractError, 'exactly one host'): self.load()
+
     def test_historical_source_provenance_and_exact_key_required(self):
         self.catalog['migration_sources'] = [dict(id='old-shared', environment='uat', project='historical',
             provider='akamai-cloud', account='tenant-a', namespace='selfhost', lifecycle=dict(status='migration',persistent=True),
