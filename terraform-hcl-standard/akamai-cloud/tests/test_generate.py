@@ -95,6 +95,47 @@ class GenerateTest(unittest.TestCase):
             self.assertFalse(variables["xconnect_open_to_users"])
             self.assertEqual(variables["service_domains"], ["web.example.test"])
 
+    def test_dev_inventory_refreshes_dynamic_ip_and_instance_identity(self):
+        source = yaml.safe_load((ROOT / "tests/fixtures/linode.yaml").read_text())
+        source["global"]["environment"] = "dev"
+        with tempfile.TemporaryDirectory() as tempdir:
+            resource = Path(tempdir) / "dev.yaml"
+            resource.write_text(yaml.safe_dump(source))
+            workdir = Path(tempdir) / "workdir"
+            generate.render(SimpleNamespace(resources=resource, workdir=workdir, namespace="web-node"))
+            for instance_id, ip in [(123, "198.51.100.10"), (456, "198.51.100.20")]:
+                with mock.patch.object(generate, "terraform_output", return_value={"web-node": {"instance_id": instance_id, "ip": ip}}):
+                    generate.inventory(SimpleNamespace(resources=resource, workdir=workdir))
+                cmdb = json.loads((workdir / "cmdb.json").read_text())["web.example.test"]
+                self.assertEqual((cmdb["instance_id"], cmdb["ip"]), (instance_id, ip))
+                inventory = json.loads(subprocess.check_output(["ansible-inventory", "-i", str(workdir / "inventory.ini"), "--list"], text=True))
+                self.assertEqual(inventory["_meta"]["hostvars"]["web.example.test"]["ansible_host"], ip)
+                if instance_id == 456:
+                    self.assertNotIn("198.51.100.10", (workdir / "inventory.ini").read_text())
+
+    def test_dev_inventory_rejects_missing_or_other_host_runtime_before_publish(self):
+        source = yaml.safe_load((ROOT / "tests/fixtures/linode.yaml").read_text())
+        source["global"]["environment"] = "dev"
+        invalid = [{}, {"production": {"instance_id": 123, "ip": "198.51.100.10"}}]
+        invalid += [{"web-node": facts} for facts in [
+            {}, {"instance_id": True, "ip": "198.51.100.10"},
+            {"instance_id": 0, "ip": "198.51.100.10"},
+            {"instance_id": 123}, {"instance_id": 123, "ip": "not-an-ip"},
+            {"instance_id": 123, "ip": "127.0.0.1"},
+            {"instance_id": 123, "ip": 123},
+        ]]
+        with tempfile.TemporaryDirectory() as tempdir:
+            resource = Path(tempdir) / "dev.yaml"
+            resource.write_text(yaml.safe_dump(source))
+            workdir = Path(tempdir) / "workdir"
+            generate.render(SimpleNamespace(resources=resource, workdir=workdir, namespace="web-node"))
+            for runtime in invalid:
+                with self.subTest(runtime=runtime), mock.patch.object(generate, "terraform_output", return_value=runtime):
+                    with self.assertRaisesRegex(SystemExit, "dev CMDB"):
+                        generate.inventory(SimpleNamespace(resources=resource, workdir=workdir))
+                    self.assertFalse((workdir / "cmdb.json").exists())
+                    self.assertFalse((workdir / "inventory.ini").exists())
+
     def test_invalid_additional_tcp_ports_are_rejected(self):
         for port in [True, 0, 65536, "1443"]:
             with self.subTest(port=port), tempfile.TemporaryDirectory() as tempdir:

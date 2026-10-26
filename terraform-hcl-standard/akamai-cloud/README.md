@@ -119,3 +119,20 @@ must be an integer 1–65535. Declare allow_https: true for the public entry.
 Historical UAT targets remain read-only migration entries in the GitOps catalog until
 state ownership is verified empty or explicitly handed off. Removing a GitOps active
 manifest never grants state deletion or causes automatic retirement.
+
+### Disposable Dev inventory identity
+
+For `environment: dev`, inventory generation requires exactly the declared host
+set, a positive runtime Linode `instance_id`, and a usable runtime IPv4 address.
+Missing or unrelated output aborts before publishing CMDB/inventory. Re-run the
+inventory phase after every successful create/replacement so both artifacts use
+the latest Terraform `cmdb_runtime`; historical IPs are not connection targets.
+A successful offline renderer test does not prove the instance exists or its
+host key is trusted. Before a deployment, compare the CMDB instance ID with the
+cloud API in the selected account and verify the host key independently.
+
+A Dev physical node may host both isolated feature SIT namespaces and post-merge
+UAT namespaces. That stage transition does not change the host resource name,
+provider/account, or canonical Dev state key. Creating the host, bootstrapping
+K3s/Flux, publishing feature DNS and deploying applications remain separate
+owner-controlled actions and require their respective authorization.

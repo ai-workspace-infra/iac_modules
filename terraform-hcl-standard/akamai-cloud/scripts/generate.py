@@ -3,6 +3,7 @@
 
 import argparse
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -214,6 +215,24 @@ def inventory(args):
     resources, workdir = Path(args.resources), Path(args.workdir)
     global_config, _, hosts = load_sources(resources)
     runtime = terraform_output(workdir)
+    # Dev is disposable: never publish an inventory from missing/other-host
+    # output or retain an old address when its runtime identity is incomplete.
+    if global_config.get("environment") == "dev":
+        expected = {host["name"] for host in hosts}
+        if not isinstance(runtime, dict) or set(runtime) != expected:
+            raise SystemExit("dev CMDB runtime hosts must exactly match the selected declaration")
+        for name, facts in runtime.items():
+            instance_id = facts.get("instance_id") if isinstance(facts, dict) else None
+            if isinstance(instance_id, bool) or not str(instance_id or "").isdigit() or int(instance_id) <= 0:
+                raise SystemExit(f"dev CMDB requires a positive instance_id for {name}")
+            try:
+                if not isinstance(facts.get("ip"), str):
+                    raise ValueError("runtime IPv4 must be a string")
+                address = ipaddress.IPv4Address(facts["ip"])
+            except (ValueError, TypeError):
+                raise SystemExit(f"dev CMDB requires a runtime IPv4 address for {name}") from None
+            if address.is_unspecified or address.is_loopback or address.is_link_local or address.is_multicast:
+                raise SystemExit(f"dev CMDB rejects an unusable runtime IPv4 address for {name}")
     cmdb = {}
     groups = {}
     lines = {}
