@@ -19,7 +19,9 @@ PROVIDERS = {
     "gcp-cloud": "gcp", "ucloud": "ucloud", "akamai-cloud": "akamai",
 }
 STAGES = ("bootstrap", "account", "resources")
-ENVIRONMENTS = {"sit": "sit", "uat": "uat", "prod": "prod", "shared": "prod"}
+ENVIRONMENTS = {"dev": "dev", "sit": "sit", "uat": "uat", "prod": "prod", "shared": "prod"}
+# Only disposable dev hosts may use the on-demand create/destroy lifecycle.
+ON_DEMAND_ENVIRONMENTS = {"dev"}
 SHA = re.compile(r"[0-9a-f]{40}")
 IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@+-]{0,126}")
 
@@ -119,6 +121,13 @@ def validate_target(target, gitops_root):
     lifecycle = target.get("lifecycle", {"status": "active", "persistent": False})
     require(isinstance(lifecycle, dict) and lifecycle.get("status") in {"active", "migration", "retired"}, "invalid target lifecycle")
     require(type(lifecycle.get("persistent")) is bool, "explicit lifecycle persistence required")
+    on_demand = lifecycle.get("on_demand", False)
+    require(type(on_demand) is bool, "lifecycle.on_demand must be a boolean")
+    if on_demand:
+        require(target.get("environment") in ON_DEMAND_ENVIRONMENTS, "on-demand lifecycle is limited to dev targets")
+        require(lifecycle["persistent"] is False, "on-demand targets cannot be persistent")
+    if target.get("environment") in ON_DEMAND_ENVIRONMENTS:
+        require(on_demand, "dev targets must declare lifecycle.on_demand: true")
     require(target["provider"] in PROVIDERS, "unsupported provider; existing hosts use their own adapter")
     require(target["environment"] in ENVIRONMENTS, "unsupported environment")
     require(target["account"] not in {"default", "primary", "main"}, "concrete account required")
@@ -168,8 +177,13 @@ def validate_target(target, gitops_root):
                 resource_document = yaml.safe_load(source_file(gitops_root, manifest).read_text())
                 require(isinstance(resource_document, dict), "resource manifest must be a mapping")
                 reject_inline_resource_secrets(resource_document)
-                if target["environment"] == "uat":
-                    require(isinstance(resource_document.get("hosts"), list) and len(resource_document["hosts"]) == 1, "UAT target must own exactly one host")
+                if target["environment"] in {"uat", *ON_DEMAND_ENVIRONMENTS}:
+                    require(isinstance(resource_document.get("hosts"), list) and len(resource_document["hosts"]) == 1, "UAT/dev target must own exactly one host")
+                if lifecycle.get("on_demand"):
+                    host = resource_document["hosts"][0]
+                    require(isinstance(host, dict) and host.get("name") == namespace, "on-demand host name must equal its namespace")
+                    require(resource_document.get("global", {}).get("prevent_destroy") is False, "on-demand resources must declare prevent_destroy: false")
+                    require(not resource_document.get("volumes") and not host.get("volumes"), "on-demand targets cannot own persistent volumes")
                 global_config = resource_document.get("global", {})
                 for field, expected in (("provider", target["provider"]), ("environment", target["environment"]), ("project", target["project"]), ("account", target["account"]), ("state_namespace", namespace), ("workspace", namespace)):
                     require(global_config.get(field) == expected, f"resource manifest identity mismatch: {field}")
@@ -285,6 +299,8 @@ def prepare(gitops_root, iac_root, manifest, environment, action, scope, bootstr
         require(len(targets) == 1 and scope == "resources", "validation cleanup is one target/resources only")
     if action == "destroy":
         selected.reverse()
+    if environment in ON_DEMAND_ENVIRONMENTS and action in {"apply", "destroy"}:
+        require(len(targets) == 1 and scope == "resources", "on-demand create/destroy is one dev target/resources only")
     for target in targets:
         validate_target(target, gitops_root)
         require(action == "check" or ("namespace" in target and "lifecycle" in target), "execution requires explicit namespace/lifecycle")
@@ -305,6 +321,7 @@ def prepare(gitops_root, iac_root, manifest, environment, action, scope, bootstr
                 if action == "destroy":
                     require(spec["mode"] != "verify", "shared/external prerequisites cannot be destroyed")
                     require(not target.get("lifecycle", {}).get("persistent", False), "persistent lifecycle blocks destruction")
+                    require(environment not in ON_DEMAND_ENVIRONMENTS or target["lifecycle"].get("on_demand") is True, "dev destroy requires an on-demand lifecycle")
                     require(spec.get("destroy_allowed") is True or spec["mode"] == "not_applicable", "destroy is not authorized by declaration")
                     require(not spec.get("shared") and not spec.get("external_references"), "shared/external references block destruction")
                     require(not spec.get("management_identity") and not spec.get("backend"), "execution identity/backend require independent retirement")

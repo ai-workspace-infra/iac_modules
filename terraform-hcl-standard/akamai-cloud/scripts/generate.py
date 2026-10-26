@@ -118,14 +118,14 @@ def render(args):
     global_config, ssh_keys, hosts = load_sources(resources)
     declared_environment = str(global_config.get("environment", "")).strip().lower()
     environment = declared_environment
-    path_match = re.search(r"/resources/[^/]+/(uat|prod)/akamai/", str(resources))
+    path_match = re.search(r"/resources/[^/]+/(dev|uat|prod)/akamai/", str(resources))
     if path_match:
         environment = path_match.group(1)
     envs_root = (ROOT / "envs").resolve()
     resolved_workdir = workdir.resolve()
     if resolved_workdir.is_relative_to(envs_root):
         relative_parts = resolved_workdir.relative_to(envs_root).parts
-        if relative_parts and relative_parts[0] in {"uat", "prod"}:
+        if relative_parts and relative_parts[0] in {"dev", "uat", "prod"}:
             environment = relative_parts[0]
 
     namespace = getattr(args, "namespace", None) or os.environ.get("TF_STATE_WORKSPACE")
@@ -138,7 +138,7 @@ def render(args):
         raise SystemExit(
             f"Akamai workdir must end with /{namespace}; shared {workdir} is forbidden"
         )
-    if environment == "uat" and len(hosts) != 1:
+    if environment in {"dev", "uat"} and len(hosts) != 1:
         raise SystemExit(
             f"Akamai namespace {namespace} must contain exactly one host; got {len(hosts)}"
         )
