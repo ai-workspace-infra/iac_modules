@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - scripts/pipeline/cloudflare-gateway-dns-upsert.py
+      - scripts/pipeline/dev-onwalk-dns-create.py
+      - scripts/pipeline/tests/test_dev_onwalk_dns_create.py
       - scripts/pipeline/tests/test_cloudflare_gateway_dns_upsert.py
       - scripts/pipeline/cloudflare-api-aliases.py
       - scripts/pipeline/tests/test_cloudflare_api_aliases.py
@@ -17,6 +19,8 @@ on:
     branches: [main]
     paths:
       - scripts/pipeline/cloudflare-gateway-dns-upsert.py
+      - scripts/pipeline/dev-onwalk-dns-create.py
+      - scripts/pipeline/tests/test_dev_onwalk_dns_create.py
       - scripts/pipeline/tests/test_cloudflare_gateway_dns_upsert.py
       - scripts/pipeline/cloudflare-api-aliases.py
       - scripts/pipeline/tests/test_cloudflare_api_aliases.py
@@ -38,6 +42,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Install shared IaC parser dependency
+        run: python3 -m pip install PyYAML==6.0.2
+      - name: Run Dev create-only DNS owner contracts
+        run: python3 -m unittest scripts/pipeline/tests/test_dev_onwalk_dns_create.py -v
       - name: Run provider contract and failure recovery tests
         run: python3 -m unittest scripts/pipeline/tests/test_cloudflare_gateway_dns_upsert.py scripts/pipeline/tests/test_cloudflare_api_aliases.py scripts/pipeline/tests/test_serverless_domains_request.py -v
       - name: Check syntax
