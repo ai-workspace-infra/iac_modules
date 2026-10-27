@@ -960,6 +960,63 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     return report
 
 
+def _linode_get_one(path: str, token: str) -> tuple[int, dict[str, Any]]:
+    """Read-only GET of one allowlisted Linode API object; returns (http_status, payload)."""
+    if not re.fullmatch(r"(profile|account|linode/instances/[0-9]{1,12}|networking/firewalls/[0-9]{1,12})", path):
+        raise PreflightError("linode_endpoint_not_allowlisted")
+    token = token.strip()
+    if not token or any(ord(c) < 32 or ord(c) == 127 for c in token):
+        raise PreflightError("linode_token_invalid")
+    request = Request(f"{LINODE_API}/{path}",
+                      headers={"Authorization": f"Bearer {token}", "Accept": "application/json"}, method="GET")
+    try:
+        with urlopen(request, timeout=30) as response:
+            return response.status, json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        return exc.code, {}
+    except (URLError, TimeoutError, json.JSONDecodeError) as exc:
+        raise PreflightError("linode_api_read_failed") from exc
+
+
+def enrich_with_direct_lookups(report: dict[str, Any], token: str, account: str) -> dict[str, Any]:
+    """Add token account identity and per-state-ID direct lookups (read-only, sanitized)."""
+    p_status, profile = _linode_get_one("profile", token)
+    a_status, acct = _linode_get_one("account", token)
+    euuid = str(acct.get("euuid", "")) if a_status == 200 else ""
+    username = str(profile.get("username", "")) if p_status == 200 else ""
+    report["token_identity"] = {
+        "profile_http_status": p_status,
+        "profile_username": username,
+        "profile_username_matches_declared_account": bool(username) and username == account,
+        "account_http_status": a_status,
+        "account_euuid_sha256_12": hashlib.sha256(euuid.encode()).hexdigest()[:12] if euuid else "",
+    }
+    for item in report.get("namespaces", []):
+        lookups = []
+        for key, kind in (("namespace_state_instances", "linode/instances"),
+                          ("namespace_state_firewalls", "networking/firewalls"),
+                          ("legacy_state_instances", "linode/instances"),
+                          ("legacy_state_firewalls", "networking/firewalls")):
+            for rec in item.get(key, []):
+                rid = str(rec.get("id", ""))
+                if not rid.isdecimal():
+                    continue
+                status, body = _linode_get_one(f"{kind}/{rid}", token)
+                live_label = body.get("label") if status == 200 else None
+                if status == 200:
+                    verdict = "exists_same_label" if live_label == rec.get("label") else "exists_renamed"
+                elif status == 404:
+                    verdict = "not_found_in_token_account"
+                else:
+                    verdict = f"lookup_http_{status}"
+                lookups.append({"source": key, "id": rid, "state_label": rec.get("label"),
+                                "http_status": status, "live_label": live_label,
+                                "live_status": body.get("status") if status == 200 else None,
+                                "verdict": verdict})
+        item["direct_lookups"] = lookups
+    return report
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gitops-root", required=True)
@@ -978,6 +1035,8 @@ def main(argv: list[str] | None = None) -> int:
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     try:
         report = run(args)
+        if os.environ.get("LINODE_TOKEN"):
+            report = enrich_with_direct_lookups(report, os.environ["LINODE_TOKEN"], args.account)
     except (PreflightError, ContractError, ValueError) as exc:
         report = {
             "schema_version": 1,
