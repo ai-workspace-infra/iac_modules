@@ -427,3 +427,19 @@ class PreflightContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DirectLookupTest(__import__("unittest").TestCase):
+    def test_classifies_direct_lookups(self):
+        import importlib.util, pathlib
+        spec = importlib.util.spec_from_file_location("asp_direct", pathlib.Path(__file__).parents[1] / "akamai_state_preflight.py")
+        m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+        answers = {"profile": (200, {"username": "acct"}), "account": (200, {"euuid": "x"}),
+                   "linode/instances/1": (404, {}), "networking/firewalls/2": (200, {"label": "new", "status": "enabled"})}
+        m._linode_get_one = lambda path, token: answers[path]
+        report = {"namespaces": [{"namespace_state_instances": [{"id": "1", "label": "a"}],
+                                  "namespace_state_firewalls": [{"id": "2", "label": "b"}]}]}
+        out = m.enrich_with_direct_lookups(report, "t", "acct")
+        self.assertTrue(out["token_identity"]["profile_username_matches_declared_account"])
+        verdicts = [x["verdict"] for x in out["namespaces"][0]["direct_lookups"]]
+        self.assertEqual(verdicts, ["not_found_in_token_account", "exists_renamed"])
