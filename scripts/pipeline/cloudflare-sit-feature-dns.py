@@ -7,7 +7,6 @@ import json
 import os
 import re
 import sys
-from urllib.parse import urlencode
 
 import importlib.util
 from pathlib import Path
@@ -53,17 +52,66 @@ class FeatureCloudflare(base.Cloudflare):
         super().__init__(token, account_id)
         self.feature_id = feature_id
 
-    def records(self, zone_id: str, name: str) -> list[dict]:
-        records = super().records(zone_id, name)
-        if any(f"feature-id:{self.feature_id}" not in (r.get("tags") or []) for r in records):
-            raise base.OperationError("DNS name is occupied by a record not owned by this Feature ID")
-        return records
+def reconcile_record(client: FeatureCloudflare, zone_id: str, name: str,
+                     feature_id: str, target: str, waiter=base.wait_for_dns) -> dict:
+    """Reconcile one record and roll back only if our exact write is still current."""
+    records = client.records(zone_id, name)
+    if len(records) > 1:
+        raise base.OperationError("multiple DNS records exist for the feature hostname")
+    feature_tag, owner_tag = f"feature-id:{feature_id}", "owner:iac-modules"
+    record_id = None
+    if not records:
+        original = None
+        desired = {"type": "A", "name": name, "content": target, "ttl": 60,
+                   "proxied": False, "comment": f"SIT feature lane {feature_id}",
+                   "tags": [feature_tag, owner_tag]}
+        action = "create"
+    else:
+        current = records[0]
+        original = base.record_payload(current)
+        record_id = current["id"]
+        if current.get("type") != "A":
+            raise base.OperationError("feature hostname is occupied by a non-A record")
+        tags = set(current.get("tags") or [])
+        owners = {tag for tag in tags if tag.startswith("feature-id:")}
+        if feature_tag in owners and owner_tag in tags:
+            if owners != {feature_tag}:
+                raise base.OperationError("DNS record has conflicting Feature ID owners")
+            desired = dict(original, content=target, ttl=60, proxied=False,
+                           comment=f"SIT feature lane {feature_id}",
+                           tags=sorted((tags - owners) | {feature_tag, owner_tag}))
+            action = "noop" if original == desired else "update"
+        elif not owners and owner_tag not in tags:
+            if current.get("content") != target or current.get("proxied") is not False:
+                raise base.OperationError("unowned DNS record differs from current Dev target; refusing adoption")
+            desired = dict(original, comment=f"SIT feature lane {feature_id}",
+                           tags=sorted(tags | {feature_tag, owner_tag}))
+            action = "adopt"
+        else:
+            raise base.OperationError("DNS record is owned by a different lane or owner")
 
-    def create(self, zone_id: str, payload: dict) -> dict:
-        return super().create(zone_id, dict(payload, comment=f"Codex SIT lane {self.feature_id}", tags=[f"feature-id:{self.feature_id}", "owner:iac-modules"]))
-
-    def delete(self, zone_id: str, record_id: str) -> None:
-        raise base.OperationError("DNS deletion requires an authenticated lane cleanup receipt; reconcile never deletes")
+    if action == "create":
+        record_id = client.create(zone_id, desired)["id"]
+    elif action in ("update", "adopt"):
+        client.update(zone_id, record_id, desired)
+    if not waiter(name, target):
+        try:
+            latest = client.records(zone_id, name)
+            current = next((row for row in latest if row.get("id") == record_id), None)
+            if action == "create":
+                if current is not None:
+                    if base.record_payload(current) != desired:
+                        raise base.OperationError("created DNS record changed before recovery")
+                    client.delete(zone_id, record_id)
+            elif action in ("update", "adopt"):
+                if current is None or base.record_payload(current) != desired:
+                    raise base.OperationError("DNS record changed before recovery")
+                client.update(zone_id, record_id, original)
+        except base.OperationError as error:
+            raise base.OperationError(f"resolver convergence failed; recovery failed: {error}") from None
+        raise base.OperationError("resolver convergence failed; previous DNS state restored")
+    return {"changed": action != "noop", "action": action, "record_id": record_id,
+            "address": target}
 
 
 def main() -> int:
@@ -77,10 +125,9 @@ def main() -> int:
         cmdb = json.loads(Path(base.required(os.environ, "CMDB_FILE")).read_text())
         node = base.required(os.environ, "DEV_INGRESS_NODE")
         target = dev_ingress_ip(cmdb, node)
-        env = dict(os.environ, DNS_ENVIRONMENT="sit", DNS_ZONE=zone, DNS_RECORD_NAME=name, DNS_TARGET_IP=target)
-        config = base.Config.from_env(env)
-        client = FeatureCloudflare(base.required(env, "CLOUDFLARE_DNS_API_TOKEN"), base.required(env, "CLOUDFLARE_ACCOUNT_ID"), feature_id)
-        result = base.execute(config, client)
+        client = FeatureCloudflare(base.required(os.environ, "CLOUDFLARE_DNS_API_TOKEN"),
+                                  base.required(os.environ, "CLOUDFLARE_ACCOUNT_ID"), feature_id)
+        result = reconcile_record(client, client.zone_id(zone), name, feature_id, target)
         print(json.dumps({"result": "verified", "feature_id": feature_id, "service": service, "hostname": name, **result}, sort_keys=True))
         return 0
     except (base.OperationError, ValueError, OSError, json.JSONDecodeError) as error:
