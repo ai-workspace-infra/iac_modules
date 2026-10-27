@@ -14,18 +14,38 @@ from pathlib import Path
 
 spec = importlib.util.spec_from_file_location("feature_dns_base", Path(__file__).with_name("cloudflare-gateway-dns-upsert.py"))
 base = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = base
 spec.loader.exec_module(base)
 
 
 def lane_domain(feature_id: str, service: str, zone: str) -> str:
-    if not re.fullmatch(r"[a-z][a-z0-9-]{1,48}", feature_id) or feature_id.endswith("-"):
+    if not re.fullmatch(r"feature-[a-z][a-z0-9-]{1,48}", feature_id) or feature_id.endswith("-"):
         raise base.OperationError("FEATURE_ID must be a stable lowercase DNS-safe identifier")
     if service not in ("console", "accounts", "billing"):
         raise base.OperationError("unsupported SIT feature service")
     slug = feature_id.removeprefix("feature-")
+    normalized_zone = base.domain(zone)
+    if normalized_zone != "onwalk.net":
+        raise base.OperationError("SIT feature DNS is restricted to the declared onwalk.net zone")
     label = f"{slug}-sit" if service == "console" else f"{service}-{slug}-sit"
-    name = f"{label}.{base.domain(zone)}"
+    name = f"{label}.{normalized_zone}"
     return base.domain(name)
+
+
+def dev_ingress_ip(cmdb: dict, node: str) -> str:
+    if node != "dev-k3s-v5":
+        raise base.OperationError("SIT feature DNS is restricted to the declared Dev ingress node")
+    host = cmdb.get(node)
+    groups = set(host.get("groups", [])) if isinstance(host, dict) else set()
+    if not isinstance(host, dict) or not {"dev", "k3s", "k3s_server", "akamai_cloud"} <= groups:
+        raise base.OperationError("CMDB does not identify the declared Dev K3s ingress node")
+    try:
+        target = ipaddress.IPv4Address(host.get("ip", ""))
+    except ipaddress.AddressValueError:
+        raise base.OperationError("Dev ingress target must be a valid public IPv4 address") from None
+    if not target.is_global:
+        raise base.OperationError("Dev ingress target must be a public IPv4 address")
+    return str(target)
 
 
 class FeatureCloudflare(base.Cloudflare):
@@ -56,12 +76,7 @@ def main() -> int:
         name = lane_domain(feature_id, service, zone)
         cmdb = json.loads(Path(base.required(os.environ, "CMDB_FILE")).read_text())
         node = base.required(os.environ, "DEV_INGRESS_NODE")
-        host = cmdb.get(node)
-        if not isinstance(host, dict) or "dev_k3s" not in (host.get("groups") or []) or host.get("environment") not in ("dev", "sit"):
-            raise base.OperationError("CMDB does not identify the declared Dev K3s ingress node")
-        target = str(ipaddress.IPv4Address(host.get("ip", "")))
-        if not ipaddress.IPv4Address(target).is_global:
-            raise base.OperationError("Dev ingress target must be a public IPv4 address")
+        target = dev_ingress_ip(cmdb, node)
         env = dict(os.environ, DNS_ENVIRONMENT="sit", DNS_ZONE=zone, DNS_RECORD_NAME=name, DNS_TARGET_IP=target)
         config = base.Config.from_env(env)
         client = FeatureCloudflare(base.required(env, "CLOUDFLARE_DNS_API_TOKEN"), base.required(env, "CLOUDFLARE_ACCOUNT_ID"), feature_id)
