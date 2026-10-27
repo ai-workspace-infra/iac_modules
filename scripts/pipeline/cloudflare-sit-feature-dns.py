@@ -19,13 +19,16 @@ spec.loader.exec_module(base)
 
 
 def lane_domain(feature_id: str, service: str, zone: str) -> str:
-    if not re.fullmatch(r"[a-z][a-z0-9-]{1,48}", feature_id) or feature_id.endswith("-"):
+    if not re.fullmatch(r"feature-[a-z][a-z0-9-]{1,48}", feature_id) or feature_id.endswith("-"):
         raise base.OperationError("FEATURE_ID must be a stable lowercase DNS-safe identifier")
     if service not in ("console", "accounts", "billing"):
         raise base.OperationError("unsupported SIT feature service")
     slug = feature_id.removeprefix("feature-")
+    normalized_zone = base.domain(zone)
+    if normalized_zone != "onwalk.net":
+        raise base.OperationError("SIT feature DNS is restricted to the declared onwalk.net zone")
     label = f"{slug}-sit" if service == "console" else f"{service}-{slug}-sit"
-    name = f"{label}.{base.domain(zone)}"
+    name = f"{label}.{normalized_zone}"
     return base.domain(name)
 
 
