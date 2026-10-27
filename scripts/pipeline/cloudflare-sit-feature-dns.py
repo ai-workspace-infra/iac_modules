@@ -14,6 +14,7 @@ from pathlib import Path
 
 spec = importlib.util.spec_from_file_location("feature_dns_base", Path(__file__).with_name("cloudflare-gateway-dns-upsert.py"))
 base = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = base
 spec.loader.exec_module(base)
 
 
