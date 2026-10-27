@@ -17,6 +17,7 @@ class ActionContracts(unittest.TestCase):
             *actions.glob('auth-*/action.yml'),
             actions / 'node-access-gcp/action.yml',
             actions / 'gitops-gcp-target/action.yml',
+            actions / 'serverless-image-release/action.yml',
             actions / 'gitops-aws-oidc/action.yml',
             actions / 'cloud-run-serving-facts/action.yml',
         ]
@@ -68,3 +69,25 @@ class ActionContracts(unittest.TestCase):
         self.assertNotIn('docker buildx', source)
         self.assertIn('gcloud auth print-access-token', source)
         self.assertIn('/manifests/${ARTIFACT_DIGEST}', source)
+
+    def test_serverless_image_release_has_no_nested_action_layers(self):
+        """The registry owner action must not add another reusable-workflow/action chain."""
+        root_action = ROOT / '.github/actions/serverless-image-release/action.yml'
+        action = yaml.safe_load(root_action.read_text())
+        self.assertEqual(action['runs']['using'], 'composite')
+
+        def local_action_depth(path, active=()):
+            self.assertNotIn(path, active, f'cyclic action dependency: {path}')
+            value = yaml.safe_load(path.read_text())
+            children = []
+            for step in value.get('runs', {}).get('steps', []):
+                uses = step.get('uses', '')
+                if uses.startswith('./iac_modules/.github/actions/'):
+                    child = ROOT / uses.removeprefix('./iac_modules/') / 'action.yml'
+                    self.assertTrue(child.is_file(), child)
+                    children.append(1 + local_action_depth(child, (*active, path)))
+            return max(children, default=0)
+
+        self.assertEqual(local_action_depth(root_action), 0)
+        source = (ROOT / 'scripts/pipeline/serverless-image-release.sh').read_text()
+        self.assertNotRegex(source, r'(?m)^\s*docker\s')

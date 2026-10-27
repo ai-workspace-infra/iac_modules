@@ -1,0 +1,79 @@
+name: Publish immutable UAT serverless image candidate
+description: Copy a digest-pinned service GHCR image into the GitOps-declared UAT Artifact Registry and verify the exact digest.
+inputs:
+  gitops-manifest:
+    description: Path to the pinned GitOps GCP UAT declaration
+    required: true
+  source-manifest:
+    description: Path to the immutable service release manifest (schema_version, service, source_sha, source_image, digest)
+    required: true
+  environment:
+    description: Must be uat
+    required: true
+  service:
+    description: Allowlisted Cloud Run service name
+    required: true
+  candidate-tag:
+    description: Immutable daily-build candidate tag
+    required: true
+  ghcr-username:
+    description: Runtime-only GHCR read identity
+    required: true
+  ghcr-token:
+    description: Runtime-only GHCR read token
+    required: true
+outputs:
+  target_image:
+    description: GitOps-derived UAT Artifact Registry image candidate
+    value: ${{ steps.release.outputs.target_image }}
+  digest:
+    description: Verified OCI digest in Artifact Registry
+    value: ${{ steps.release.outputs.digest }}
+  source_sha:
+    description: Service repository source SHA from its release manifest
+    value: ${{ steps.release.outputs.source_sha }}
+runs:
+  using: composite
+  steps:
+    - name: Install checksum-pinned ORAS registry client
+      id: oras
+      shell: bash
+      run: |
+        set -euo pipefail
+        archive="$RUNNER_TEMP/oras_1.3.4_linux_amd64.tar.gz"
+        curl --fail --silent --show-error --location \
+          https://github.com/oras-project/oras/releases/download/v1.3.4/oras_1.3.4_linux_amd64.tar.gz \
+          --output "$archive"
+        echo 'f27adb935022d94df8dc77719c322dda592c78a0d57a6f7dcdd8d900b248c454  '"$archive" | sha256sum --check --status
+        tar -xzf "$archive" -C "$RUNNER_TEMP" oras
+        chmod 755 "$RUNNER_TEMP/oras"
+        echo "path=$RUNNER_TEMP/oras" >> "$GITHUB_OUTPUT"
+    - name: Resolve pinned GitOps UAT registry target
+      id: target
+      shell: bash
+      env:
+        GITOPS_MANIFEST: ${{ inputs.gitops-manifest }}
+        TARGET_ENVIRONMENT: ${{ inputs.environment }}
+      run: |
+        set -euo pipefail
+        [[ "$TARGET_ENVIRONMENT" == uat ]] || { echo '::error::This action only supports the GitOps UAT target.' >&2; exit 2; }
+        python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/gitops_cloud_targets.py" gcp \
+          --manifest "$GITOPS_MANIFEST" --mode read --environment uat --github-output "$GITHUB_OUTPUT"
+    - name: Copy and verify exact OCI digest
+      id: release
+      shell: bash
+      env:
+        GITOPS_ENVIRONMENT: ${{ inputs.environment }}
+        GCP_PROJECT_ID: ${{ steps.target.outputs.project_id }}
+        GCP_REGION: ${{ steps.target.outputs.region }}
+        ARTIFACT_REGISTRY_ID: ${{ steps.target.outputs.artifact_registry_id }}
+        SOURCE_MANIFEST: ${{ inputs.source-manifest }}
+        SERVICE: ${{ inputs.service }}
+        CANDIDATE_TAG: ${{ inputs.candidate-tag }}
+        GHCR_USERNAME: ${{ inputs.ghcr-username }}
+        GHCR_TOKEN: ${{ inputs.ghcr-token }}
+        ORAS_BIN: ${{ steps.oras.outputs.path }}
+      run: |
+        set -euo pipefail
+        echo "::add-mask::$GHCR_TOKEN"
+        bash "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/serverless-image-release.sh"
