@@ -9,6 +9,7 @@ on:
       - "scripts/pipeline/**"
       - "terraform-hcl-standard/scripts/iac_identity.py"
       - ".github/actions/**"
+      - ".github/workflows/websaas-k3s-prod-cname-switch.yml"
       - ".github/workflows/pipeline-scripts.yml"
   push:
     branches: [main]
@@ -16,6 +17,7 @@ on:
       - "scripts/pipeline/**"
       - "terraform-hcl-standard/scripts/iac_identity.py"
       - ".github/actions/**"
+      - ".github/workflows/websaas-k3s-prod-cname-switch.yml"
 
 permissions:
   contents: read

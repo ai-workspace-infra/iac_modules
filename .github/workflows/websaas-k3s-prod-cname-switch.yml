@@ -1,0 +1,125 @@
+name: Web-SaaS K3s PROD CNAME owner
+
+on:
+  workflow_call:
+    inputs:
+      gitops_ref:
+        description: Exact merged GitOps commit containing the desired CNAME targets.
+        required: true
+        type: string
+      release_ref:
+        description: Immutable PROD release tag selected by the caller.
+        required: true
+        type: string
+      dns_action:
+        description: preview performs read-only preflight; switch applies the reviewed three-record plan.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: public-dns-prod-web-saas-k3s-cnames
+  cancel-in-progress: false
+
+jobs:
+  switch:
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - name: Checkout fixed IaC execution owner
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+
+      - name: Checkout exact GitOps declaration
+        uses: actions/checkout@v4
+        with:
+          repository: ai-workspace-infra/gitops
+          ref: ${{ inputs.gitops_ref }}
+          path: gitops
+          persist-credentials: false
+
+      - name: Resolve and validate the bounded record plan
+        id: plan
+        env:
+          GITOPS_REF: ${{ inputs.gitops_ref }}
+          DNS_ACTION: ${{ inputs.dns_action }}
+          RELEASE_REF: ${{ inputs.release_ref }}
+        run: |
+          set -euo pipefail
+          [[ "$GITOPS_REF" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$RELEASE_REF" =~ ^v[0-9][A-Za-z0-9._-]*$ ]]
+          [[ "$DNS_ACTION" == preview || "$DNS_ACTION" == switch ]]
+          [[ "$(git -C gitops rev-parse HEAD)" == "$GITOPS_REF" ]]
+          python3 -m pip install --disable-pip-version-check PyYAML==6.0.2
+          python3 scripts/pipeline/resolve-websaas-k3s-dns-plan.py \
+            gitops/topology/prod/selfhost/runtime-topology.yaml > "$RUNNER_TEMP/websaas-dns-plan.json"
+          jq -e '.environment == "prod" and (.records | length == 3) and ([.records[].name] == ["console.svc.plus","accounts.svc.plus","billing.svc.plus"]) and all(.records[]; .type == "CNAME" and .zone == "svc.plus")' \
+            "$RUNNER_TEMP/websaas-dns-plan.json" >/dev/null
+          echo "plan_sha256=$(sha256sum "$RUNNER_TEMP/websaas-dns-plan.json" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate with the reviewed PROD Vault role
+        id: vault
+        uses: hashicorp/vault-action@v4
+        with:
+          url: ${{ vars.VAULT_ADDR || 'https://vault.svc.plus' }}
+          method: jwt
+          role: github-actions-platform-ops-toolkit-prod
+          jwtGithubAudience: vault
+          exportToken: false
+          secrets: |
+            kv/data/prod/serverless/cloudflare CLOUDFLARE_ACCOUNT_ID | CLOUDFLARE_ACCOUNT_ID ;
+            kv/data/prod/serverless/cloudflare CLOUDFLARE_API_TOKEN | CLOUDFLARE_API_TOKEN
+
+      - name: Read-only provider preflight
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ steps.vault.outputs.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_DNS_API_TOKEN: ${{ steps.vault.outputs.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -m 700 -p "$RUNNER_TEMP/websaas-dns-checkpoint"
+          python3 scripts/pipeline/cloudflare-record-switch.py \
+            --checkpoint "$RUNNER_TEMP/websaas-dns-checkpoint/switch.json" \
+            < "$RUNNER_TEMP/websaas-dns-plan.json"
+
+      - name: Apply only the three reviewed CNAME changes
+        if: inputs.dns_action == 'switch'
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ steps.vault.outputs.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_DNS_API_TOKEN: ${{ steps.vault.outputs.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          python3 scripts/pipeline/cloudflare-record-switch.py \
+            --checkpoint "$RUNNER_TEMP/websaas-dns-checkpoint/switch.json" --apply \
+            < "$RUNNER_TEMP/websaas-dns-plan.json"
+
+      - name: Record sanitized owner receipt
+        env:
+          OWNER_SHA: ${{ job.workflow_sha }}
+          GITOPS_REF: ${{ inputs.gitops_ref }}
+          RELEASE_REF: ${{ inputs.release_ref }}
+          DNS_ACTION: ${{ inputs.dns_action }}
+          PLAN_SHA256: ${{ steps.plan.outputs.plan_sha256 }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/websaas-dns-receipt"
+          jq -n --arg owner "$OWNER_SHA" --arg gitops "$GITOPS_REF" --arg release "$RELEASE_REF" \
+            --arg action "$DNS_ACTION" --arg plan "$PLAN_SHA256" --arg run "$GITHUB_RUN_ID" \
+            --arg attempt "$GITHUB_RUN_ATTEMPT" \
+            '{schema:1,owner_repository:"ai-workspace-infra/iac_modules",owner_commit:$owner,
+              environment:"prod",gitops_commit:$gitops,release_ref:$release,operation:$action,
+              record_names:["console.svc.plus","accounts.svc.plus","billing.svc.plus"],
+              plan_sha256:$plan,run_id:$run,run_attempt:$attempt}' \
+            > "$RUNNER_TEMP/websaas-dns-receipt/receipt.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: websaas-k3s-prod-cname-owner-receipt
+          path: ${{ runner.temp }}/websaas-dns-receipt/receipt.json
+          if-no-files-found: error
+          retention-days: 7
