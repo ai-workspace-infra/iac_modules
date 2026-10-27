@@ -37,6 +37,8 @@ jobs:
           python3 scripts/pipeline/tests/test_xconnect_lab_contract.py -v
           python3 scripts/pipeline/tests/test_xconnect_lab_prepare.py -v
           python3 scripts/pipeline/tests/test_xconnect_terraform_diagnostics.py -v
+          python3 scripts/pipeline/tests/test_cloudflare_sit_feature_dns.py -v
+          python3 -m py_compile scripts/pipeline/cloudflare-sit-feature-dns.py
           bash scripts/pipeline/tests/xconnect-lab-lease-test.sh
           bash scripts/pipeline/tests/xconnect-lab-lifecycle-test.sh
           bash scripts/pipeline/tests/xconnect-lab-lifecycle-negative-test.sh

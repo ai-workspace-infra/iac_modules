@@ -1,9 +1,13 @@
 name: Platform resource operations owner
 description: Parameterized IaC cloud-fact, DNS, SMTP and existing-target inventory operations.
 inputs:
-  operation: {required: true, description: "resize-preflight, existing-host, sit-dns, or smtp-sync"}
+  operation: {required: true, description: "resize-preflight, existing-host, sit-dns, sit-feature-dns, or smtp-sync"}
   environment: {required: true, description: "Exact sit, uat or prod environment"}
   declaration: {required: false, default: '', description: "Selected GitOps YAML existing-host declaration"}
+  feature_id: {required: false, default: '', description: "Validated stable feature-delivery ID; required only for sit-feature-dns"}
+  dns_service: {required: false, default: '', description: "console, accounts, or billing; required only for sit-feature-dns"}
+  cmdb_file: {required: false, default: '', description: "Fresh IaC CMDB path; required only for sit-feature-dns"}
+  ingress_node: {required: false, default: 'dev-k3s-v5', description: "Exact declared Dev ingress node"}
 outputs:
   smtp_configured: {description: Explicit configured or absent SMTP source, value: '${{ steps.execute.outputs.smtp_configured }}'}
   instance_id: {description: Resolved authoritative instance ID, value: '${{ steps.execute.outputs.instance_id }}'}
@@ -25,6 +29,10 @@ runs:
         RESOURCE_OPERATION: ${{ inputs.operation }}
         RESOURCE_ENVIRONMENT: ${{ inputs.environment }}
         EXISTING_HOST_DECLARATION: ${{ inputs.declaration }}
+        FEATURE_ID: ${{ inputs.feature_id }}
+        FEATURE_DNS_SERVICE: ${{ inputs.dns_service }}
+        CMDB_FILE: ${{ inputs.cmdb_file }}
+        DEV_INGRESS_NODE: ${{ inputs.ingress_node }}
       run: |
         set -euo pipefail
         case "$RESOURCE_ENVIRONMENT" in sit|uat|prod) ;; *) exit 2 ;; esac
@@ -32,8 +40,13 @@ runs:
           resize-preflight) script=resize-instance-preflight.sh ;;
           existing-host) script=render-existing-host-cmdb.sh ;;
           sit-dns) script=cloudflare-sit-dns-reconcile.sh ;;
+          sit-feature-dns) script=cloudflare-sit-feature-dns.py ;;
           smtp-sync) script=sync-smtp-secrets.sh ;;
           *) echo '::error::Unregistered resource operation'; exit 2 ;;
         esac
         export DEPLOY_ENV="$RESOURCE_ENVIRONMENT" VAULT_ENV_PATH="$RESOURCE_ENVIRONMENT"
-        bash "$GITHUB_ACTION_PATH/../../../scripts/pipeline/$script"
+        if [[ "$script" == *.py ]]; then
+          python3 "$GITHUB_ACTION_PATH/../../../scripts/pipeline/$script"
+        else
+          bash "$GITHUB_ACTION_PATH/../../../scripts/pipeline/$script"
+        fi
