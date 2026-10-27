@@ -1,10 +1,10 @@
 name: Pipeline owner Shell contracts
 on:
   pull_request:
-    paths: ['.github/actions/**', 'scripts/pipeline/**', '.github/workflows/pipeline-owner-contracts.yml']
+    paths: ['.github/actions/**', 'scripts/pipeline/**', '.github/workflows/pipeline-owner-contracts.yml', '.github/workflows/sit-feature-dns.yml']
   push:
     branches: [main]
-    paths: ['.github/actions/**', 'scripts/pipeline/**', '.github/workflows/pipeline-owner-contracts.yml']
+    paths: ['.github/actions/**', 'scripts/pipeline/**', '.github/workflows/pipeline-owner-contracts.yml', '.github/workflows/sit-feature-dns.yml']
 permissions:
   contents: read
 jobs:
@@ -38,7 +38,8 @@ jobs:
           python3 scripts/pipeline/tests/test_xconnect_lab_prepare.py -v
           python3 scripts/pipeline/tests/test_xconnect_terraform_diagnostics.py -v
           python3 scripts/pipeline/tests/test_cloudflare_sit_feature_dns.py -v
-          python3 -m py_compile scripts/pipeline/cloudflare-sit-feature-dns.py
+          python3 scripts/pipeline/tests/test_validate_sit_feature_dns_request.py -v
+          python3 -m py_compile scripts/pipeline/cloudflare-sit-feature-dns.py scripts/pipeline/validate-sit-feature-dns-request.py
           bash scripts/pipeline/tests/xconnect-lab-lease-test.sh
           bash scripts/pipeline/tests/xconnect-lab-lifecycle-test.sh
           bash scripts/pipeline/tests/xconnect-lab-lifecycle-negative-test.sh

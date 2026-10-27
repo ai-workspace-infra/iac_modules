@@ -1,0 +1,100 @@
+name: SIT feature DNS owner
+on:
+  workflow_call:
+    inputs:
+      request_artifact: {type: string, required: true, description: Same-run Toolkit request artifact}
+      request_sha256: {type: string, required: true, description: Request receipt SHA256}
+      cmdb_artifact: {type: string, required: true, description: Same-run IaC CMDB artifact}
+      cmdb_sha256: {type: string, required: true, description: CMDB SHA256}
+      instance_id: {type: string, required: true, description: Expected Dev instance ID}
+      gitops_sha: {type: string, required: true, description: Immutable GitOps candidate SHA}
+      candidate_sha256: {type: string, required: true, description: Candidate receipt SHA256}
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+concurrency:
+  group: sit-feature-dns-${{ inputs.instance_id }}-${{ inputs.gitops_sha }}
+  cancel-in-progress: false
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    environment: sit
+    timeout-minutes: 20
+    steps:
+      - name: Checkout fixed IaC execution owner
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with: {name: "${{ inputs.request_artifact }}", path: "${{ runner.temp }}/sit-dns-request"}
+      - uses: actions/download-artifact@v4
+        with: {name: "${{ inputs.cmdb_artifact }}", path: "${{ runner.temp }}/sit-dns-cmdb"}
+      - name: Validate same-run request and CMDB before authentication
+        id: request
+        env:
+          REQUEST_ARTIFACT: ${{ inputs.request_artifact }}
+          REQUEST_SHA256: ${{ inputs.request_sha256 }}
+          REQUEST_PATH: ${{ runner.temp }}/sit-dns-request/receipt.json
+          CMDB_ARTIFACT: ${{ inputs.cmdb_artifact }}
+          CMDB_SHA256: ${{ inputs.cmdb_sha256 }}
+          CMDB_PATH: ${{ runner.temp }}/sit-dns-cmdb/cmdb.json
+          INSTANCE_ID: ${{ inputs.instance_id }}
+          GITOPS_SHA: ${{ inputs.gitops_sha }}
+          CANDIDATE_SHA256: ${{ inputs.candidate_sha256 }}
+        run: |
+          set -euo pipefail
+          python3 scripts/pipeline/validate-sit-feature-dns-request.py > "$RUNNER_TEMP/validated.json"
+          echo "feature_id=$(jq -er '.feature_id' "$RUNNER_TEMP/validated.json")" >> "$GITHUB_OUTPUT"
+      - name: Authenticate SIT DNS owner through OIDC
+        id: vault
+        uses: hashicorp/vault-action@v4
+        with:
+          url: ${{ vars.VAULT_ADDR || 'https://vault.svc.plus' }}
+          method: jwt
+          role: github-actions-platform-ops-toolkit-sit
+          jwtGithubAudience: vault
+          exportToken: false
+          secrets: |
+            kv/data/sit/serverless/cloudflare CLOUDFLARE_ACCOUNT_ID | CLOUDFLARE_ACCOUNT_ID ;
+            kv/data/sit/serverless/cloudflare CLOUDFLARE_API_TOKEN | CLOUDFLARE_DNS_API_TOKEN
+      - name: Reconcile only the three declared lane hostnames
+        id: dns
+        env:
+          FEATURE_ID: ${{ steps.request.outputs.feature_id }}
+          DNS_ENVIRONMENT: sit
+          DNS_ZONE: onwalk.net
+          CLOUDFLARE_ACCOUNT_ID: ${{ steps.vault.outputs.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_DNS_API_TOKEN: ${{ steps.vault.outputs.CLOUDFLARE_DNS_API_TOKEN }}
+          CMDB_FILE: ${{ runner.temp }}/sit-dns-cmdb/cmdb.json
+          DEV_INGRESS_NODE: dev-k3s-v5
+        shell: bash
+        run: |
+          set -euo pipefail
+          for service in console accounts billing; do
+            FEATURE_DNS_SERVICE="$service" python3 scripts/pipeline/cloudflare-sit-feature-dns.py
+          done
+      - name: Write redacted owner receipt
+        if: always()
+        env:
+          FEATURE_ID: ${{ steps.request.outputs.feature_id }}
+          GITOPS_SHA: ${{ inputs.gitops_sha }}
+          CMDB_SHA256: ${{ inputs.cmdb_sha256 }}
+          INSTANCE_ID: ${{ inputs.instance_id }}
+          RESULT: ${{ steps.dns.outcome }}
+          OWNER_SHA: ${{ job.workflow_sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/sit-dns-receipt"
+          jq -n --arg f "$FEATURE_ID" --arg g "$GITOPS_SHA" --arg o "$OWNER_SHA" --arg c "$CMDB_SHA256" --arg i "$INSTANCE_ID" --arg r "$RESULT" \
+            '{schema_version:"sit-feature-dns-owner/v1",feature_id:$f,gitops_sha:$g,owner_sha:$o,cmdb_sha256:$c,instance_id:$i,run_id:env.GITHUB_RUN_ID,run_attempt:env.GITHUB_RUN_ATTEMPT,environment:"sit",result:(if $r=="success" then "verified" else "blocked_or_failed" end),hostnames:[($f|ltrimstr("feature-")+"-sit.onwalk.net"),("accounts-"+($f|ltrimstr("feature-"))+"-sit.onwalk.net"),("billing-"+($f|ltrimstr("feature-"))+"-sit.onwalk.net")]}' \
+            > "$RUNNER_TEMP/sit-dns-receipt/receipt.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sit-feature-dns-owner-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/sit-dns-receipt/receipt.json
+          if-no-files-found: error
+          retention-days: 7
