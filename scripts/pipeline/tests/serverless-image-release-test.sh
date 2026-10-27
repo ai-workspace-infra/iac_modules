@@ -47,7 +47,8 @@ export PATH="${work}/bin:${PATH}"
 export ORAS_BIN="${work}/bin/oras"
 export FAKE_ORAS_LOG="${work}/oras.log"
 export FAKE_TARGET_DIGEST="${work}/target.digest"
-export FAKE_SOURCE_DIGEST="sha256:$(printf 'a%.0s' {1..64})"
+FAKE_SOURCE_DIGEST="sha256:$(printf 'a%.0s' {1..64})"
+export FAKE_SOURCE_DIGEST
 export RUNNER_TEMP="${work}/runner-temp"
 export GITOPS_ENVIRONMENT=uat
 export GCP_PROJECT_ID=open-platform-uat
