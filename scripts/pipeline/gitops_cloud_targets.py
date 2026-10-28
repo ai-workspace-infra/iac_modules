@@ -15,6 +15,7 @@ GCP_REGION = re.compile(r"^[a-z]+-[a-z]+[0-9]+$")
 AWS_REGION = re.compile(r"^[a-z]+-[a-z]+-[0-9]+$")
 ACCOUNT = re.compile(r"^[0-9]{12}$")
 ROLE = re.compile(r"^[A-Za-z0-9+=,.@_-]+$")
+ARTIFACT_REGISTRY = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 
 
 def document(path: Path) -> dict:
@@ -37,22 +38,29 @@ def gcp(args: argparse.Namespace) -> None:
         raise ValueError("GCP GitOps manifest must contain a global mapping")
     project_id = str(global_config.get("project_id", ""))
     region = str(global_config.get("region", ""))
+    environment = str(global_config.get("environment", ""))
+    registry_location = str(global_config.get("artifact_registry_location", ""))
+    artifact_registry_id = str(global_config.get("artifact_registry_id", ""))
     if not PROJECT.fullmatch(project_id):
         raise ValueError("GitOps GCP project_id is empty or malformed")
     if not GCP_REGION.fullmatch(region):
         raise ValueError("GitOps GCP region is empty or malformed")
+    if args.environment and environment != args.environment:
+        raise ValueError(f"GCP manifest environment mismatch: expected {args.environment}, found {environment}")
+    if artifact_registry_id and not ARTIFACT_REGISTRY.fullmatch(artifact_registry_id):
+        raise ValueError("GitOps artifact_registry_id is empty or malformed")
+    if artifact_registry_id and registry_location != region:
+        raise ValueError("GitOps Artifact Registry location must match the declared GCP region")
     if args.mode == "validate":
-        environment = str(global_config.get("environment", ""))
-        registry = str(global_config.get("artifact_registry_location", ""))
         if environment != args.environment:
             raise ValueError(f"GCP manifest environment mismatch: expected {args.environment}, found {environment}")
         if project_id != args.project_id:
             raise ValueError(f"resolved GCP project does not match GitOps: expected {project_id}, found {args.project_id}")
         if region != args.region:
             raise ValueError(f"resolved GCP region does not match GitOps: expected {region}, found {args.region}")
-        if registry != region:
+        if registry_location != region:
             raise ValueError("GitOps Artifact Registry location must match the declared GCP region")
-    output({"project_id": project_id, "region": region}, args.github_output)
+    output({"project_id": project_id, "region": region, "artifact_registry_id": artifact_registry_id}, args.github_output)
     print(f"GCP GitOps target {args.mode}: project={project_id}, region={region}")
 
 

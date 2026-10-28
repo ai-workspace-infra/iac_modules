@@ -26,10 +26,10 @@ class GitOpsCloudTargetTests(unittest.TestCase):
         self.manifest.write_text(yaml.safe_dump(value), encoding="utf-8")
 
     def test_gcp_read_and_exact_contract_validation(self):
-        self.write({"global": {"environment": "uat", "project_id": "open-platform-uat", "region": "asia-northeast1", "artifact_registry_location": "asia-northeast1"}})
+        self.write({"global": {"environment": "uat", "project_id": "open-platform-uat", "region": "asia-northeast1", "artifact_registry_location": "asia-northeast1", "artifact_registry_id": "xwork-services"}})
         args = argparse.Namespace(manifest=self.manifest, mode="read", environment="", project_id="", region="", github_output=self.output)
         targets.gcp(args)
-        self.assertEqual(self.output.read_text().splitlines(), ["project_id=open-platform-uat", "region=asia-northeast1"])
+        self.assertEqual(self.output.read_text().splitlines(), ["project_id=open-platform-uat", "region=asia-northeast1", "artifact_registry_id=xwork-services"])
         args.mode, args.environment, args.project_id, args.region = "validate", "uat", "open-platform-uat", "asia-northeast1"
         targets.gcp(args)
         args.project_id = "other-project"
@@ -37,9 +37,21 @@ class GitOpsCloudTargetTests(unittest.TestCase):
             targets.gcp(args)
 
     def test_gcp_rejects_registry_region_drift(self):
-        self.write({"global": {"environment": "uat", "project_id": "open-platform-uat", "region": "asia-northeast1", "artifact_registry_location": "us-central1"}})
+        self.write({"global": {"environment": "uat", "project_id": "open-platform-uat", "region": "asia-northeast1", "artifact_registry_location": "us-central1", "artifact_registry_id": "xwork-services"}})
         args = argparse.Namespace(manifest=self.manifest, mode="validate", environment="uat", project_id="open-platform-uat", region="asia-northeast1", github_output=None)
         with self.assertRaisesRegex(ValueError, "Artifact Registry"):
+            targets.gcp(args)
+
+    def test_gcp_rejects_malformed_registry_id_and_environment_mismatch(self):
+        value = {"global": {"environment": "uat", "project_id": "open-platform-uat", "region": "asia-northeast1", "artifact_registry_location": "asia-northeast1", "artifact_registry_id": "../prod"}}
+        self.write(value)
+        args = argparse.Namespace(manifest=self.manifest, mode="read", environment="uat", project_id="", region="", github_output=None)
+        with self.assertRaisesRegex(ValueError, "artifact_registry_id"):
+            targets.gcp(args)
+        value["global"]["artifact_registry_id"] = "xwork-services"
+        self.write(value)
+        args.environment = "prod"
+        with self.assertRaisesRegex(ValueError, "environment mismatch"):
             targets.gcp(args)
 
     def test_aws_oidc_requires_account_role_and_environment_subjects(self):
