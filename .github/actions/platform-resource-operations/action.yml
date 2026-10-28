@@ -1,10 +1,12 @@
 name: Platform resource operations owner
 description: Parameterized IaC cloud-fact, DNS, SMTP and existing-target inventory operations.
 inputs:
-  operation: {required: true, description: "resize-preflight, existing-host, sit-dns, sit-feature-dns, or smtp-sync"}
+  operation: {required: true, description: "resize-preflight, existing-host, sit-dns, sit-feature-dns, sit-feature-tag-dns, or smtp-sync"}
   environment: {required: true, description: "Exact sit, uat or prod environment"}
   declaration: {required: false, default: '', description: "Selected GitOps YAML existing-host declaration"}
   feature_id: {required: false, default: '', description: "Validated stable feature-delivery ID; required only for sit-feature-dns"}
+  feature_tag: {required: false, default: '', description: "Tag from the authenticated candidate; required for sit-feature-tag-dns"}
+  feature_hostname: {required: false, default: '', description: "Service hostname from the authenticated candidate; required for sit-feature-tag-dns"}
   dns_service: {required: false, default: '', description: "console, accounts, or billing; required only for sit-feature-dns"}
   cmdb_file: {required: false, default: '', description: "Fresh IaC CMDB path; required only for sit-feature-dns"}
   ingress_node: {required: false, default: 'dev-k3s-v5', description: "Exact declared Dev ingress node"}
@@ -30,6 +32,8 @@ runs:
         RESOURCE_ENVIRONMENT: ${{ inputs.environment }}
         EXISTING_HOST_DECLARATION: ${{ inputs.declaration }}
         FEATURE_ID: ${{ inputs.feature_id }}
+        FEATURE_TAG: ${{ inputs.feature_tag }}
+        FEATURE_HOSTNAME: ${{ inputs.feature_hostname }}
         FEATURE_DNS_SERVICE: ${{ inputs.dns_service }}
         CMDB_FILE: ${{ inputs.cmdb_file }}
         DEV_INGRESS_NODE: ${{ inputs.ingress_node }}
@@ -40,7 +44,7 @@ runs:
           resize-preflight) script=resize-instance-preflight.sh ;;
           existing-host) script=render-existing-host-cmdb.sh ;;
           sit-dns) script=cloudflare-sit-dns-reconcile.sh ;;
-          sit-feature-dns) script=cloudflare-sit-feature-dns.py ;;
+          sit-feature-dns|sit-feature-tag-dns) script=cloudflare-sit-feature-dns.py ;;
           smtp-sync) script=sync-smtp-secrets.sh ;;
           *) echo '::error::Unregistered resource operation'; exit 2 ;;
         esac
