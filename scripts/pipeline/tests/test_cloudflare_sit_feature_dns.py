@@ -3,6 +3,9 @@ import json
 import tempfile
 import unittest
 from unittest.mock import patch
+import contextlib
+import io
+import os
 from pathlib import Path
 import yaml
 
@@ -27,6 +30,17 @@ class FeatureDnsContract(unittest.TestCase):
             MODULE.verify_current_target(cmdb,'8.8.8.8','fake-read-token')
         with patch.object(TARGET_CHECK,'_linode_get_one',return_value=(200,dict(facts,ipv4=['8.8.4.4']))), self.assertRaises(MODULE.base.OperationError):
             MODULE.verify_current_target(cmdb,'8.8.8.8','fake-read-token')
+
+    def test_provider_denial_stops_before_dns_client_creation(self):
+        cmdb={'dev-k3s-v5':{'name':'dev-k3s-v5','label':'dev-k3s-v5','instance_id':'123','ip':'8.8.8.8',
+                             'groups':['dev','k3s','k3s_server','akamai_cloud']}}
+        with tempfile.TemporaryDirectory() as temp:
+            path=Path(temp)/'cmdb.json';path.write_text(json.dumps(cmdb))
+            env={'DNS_ZONE':'onwalk.net','DNS_ENVIRONMENT':'sit','FEATURE_ID':'sit-test-1483','FEATURE_DNS_SERVICE':'console',
+                 'CMDB_FILE':str(path),'DEV_INGRESS_NODE':'dev-k3s-v5','LINODE_TOKEN':'fake-read-token'}
+            with patch.dict(os.environ,env,clear=True), patch.object(MODULE,'requested_domain',return_value=('smoke-sit-test-1483-sit.onwalk.net','smoke-sit-test-1483')), patch.object(TARGET_CHECK,'_linode_get_one',return_value=(403,{})), patch.object(MODULE,'FeatureCloudflare') as client, contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(MODULE.main(),1)
+            client.assert_not_called()
 
     def test_tagged_owner_requires_exact_candidate_hostname_and_ownership(self):
         directory = tempfile.TemporaryDirectory()
