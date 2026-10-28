@@ -77,8 +77,8 @@ class FeatureCloudflare(base.Cloudflare):
             raise base.OperationError("DNS name is occupied by a record not owned by this Feature ID")
         return records
 
-    def create(self, zone_id: str, payload: dict) -> dict:
-        return super().create(zone_id, dict(payload, comment=f"Codex SIT lane {self.feature_id}", tags=[f"feature-id:{self.feature_id}", "owner:iac-modules"]))
+    def create_payload(self, payload: dict) -> dict:
+        return dict(payload, comment=f"Codex SIT lane {self.feature_id}", tags=[f"feature-id:{self.feature_id}", "owner:iac-modules"])
 
     def delete(self, zone_id: str, record_id: str) -> None:
         raise base.OperationError("DNS deletion requires an authenticated lane cleanup receipt; reconcile never deletes")
@@ -96,7 +96,7 @@ def main() -> int:
         node = base.required(os.environ, "DEV_INGRESS_NODE")
         target = dev_ingress_ip(cmdb, node)
         env = dict(os.environ, DNS_ENVIRONMENT="sit", DNS_ZONE=zone, DNS_RECORD_NAME=name, DNS_TARGET_IP=target)
-        config = base.Config.from_env(env)
+        config = base.Config.from_env(env, allowed_environments=("sit",))
         client = FeatureCloudflare(base.required(env, "CLOUDFLARE_DNS_API_TOKEN"), base.required(env, "CLOUDFLARE_ACCOUNT_ID"), feature_id)
         result = base.execute(config, client)
         print(json.dumps({"result": "verified", "feature_id": feature_id, "service": service, "hostname": name, **result}, sort_keys=True))

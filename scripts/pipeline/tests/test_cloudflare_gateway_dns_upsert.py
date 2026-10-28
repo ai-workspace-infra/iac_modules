@@ -24,6 +24,9 @@ class FakeCloudflare:
     def zone_id(self, zone):
         return "zone"
 
+    def create_payload(self, payload):
+        return payload
+
     def records(self, zone, name):
         return copy.deepcopy(self.current)
 
