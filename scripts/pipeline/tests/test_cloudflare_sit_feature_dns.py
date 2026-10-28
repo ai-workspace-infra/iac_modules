@@ -13,6 +13,23 @@ SPEC.loader.exec_module(MODULE)
 
 
 class FeatureDnsContract(unittest.TestCase):
+    def test_tagged_owner_requires_exact_candidate_hostname_and_ownership(self):
+        env = {'RESOURCE_OPERATION': 'sit-feature-tag-dns', 'FEATURE_TAG': 'smoke-sit-test-1483',
+               'FEATURE_HOSTNAME': 'smoke-sit-test-1483-sit.onwalk.net'}
+        result = MODULE.requested_domain(env, 'sit-test-1483', 'console', 'onwalk.net')
+        self.assertEqual(result, (env['FEATURE_HOSTNAME'], env['FEATURE_TAG']))
+        for changes in ({'FEATURE_TAG': 'smoke-sit-test-1484'},
+                        {'FEATURE_HOSTNAME': 'other-sit.onwalk.net'},
+                        {'FEATURE_HOSTNAME': ''}, {'RESOURCE_OPERATION': 'sit-feature-dns'}):
+            with self.subTest(changes=changes), self.assertRaises(MODULE.base.OperationError):
+                MODULE.requested_domain(dict(env, **changes), 'sit-test-1483', 'console', 'onwalk.net')
+        client = MODULE.FeatureCloudflare('test-token', 'a' * 32, 'sit-test-1483', env['FEATURE_TAG'])
+        self.assertIn('feature-tag:smoke-sit-test-1483', client.create_payload({})['tags'])
+        client.request = lambda *_: [{'name': env['FEATURE_HOSTNAME'], 'id': 'r',
+                                     'tags': ['feature-id:sit-test-1483', 'owner:iac-modules']}]
+        with self.assertRaises(MODULE.base.OperationError):
+            client.records('zone', env['FEATURE_HOSTNAME'])
+
     def test_sit_configuration_and_owned_creation_retry(self):
         with tempfile.TemporaryDirectory() as directory:
             env = {'DNS_ENVIRONMENT': 'sit', 'CLOUDFLARE_ACCOUNT_ID': 'a' * 32,

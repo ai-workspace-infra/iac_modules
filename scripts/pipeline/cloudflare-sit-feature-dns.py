@@ -50,6 +50,21 @@ def tagged_lane_domain(feature_id: str, feature_tag: str, service: str, zone: st
     return base.domain(label + '.onwalk.net')
 
 
+def requested_domain(env: dict, feature_id: str, service: str, zone: str) -> tuple[str, str | None]:
+    operation = env.get('RESOURCE_OPERATION', 'sit-feature-dns')
+    if operation == 'sit-feature-dns':
+        if env.get('FEATURE_TAG') or env.get('FEATURE_HOSTNAME'):
+            raise base.OperationError('legacy DNS operation cannot consume tagged inputs')
+        return lane_domain(feature_id, service, zone), None
+    if operation != 'sit-feature-tag-dns':
+        raise base.OperationError('unsupported feature DNS operation')
+    tag = base.required(env, 'FEATURE_TAG')
+    hostname = tagged_lane_domain(feature_id, tag, service, zone)
+    if base.required(env, 'FEATURE_HOSTNAME') != hostname:
+        raise base.OperationError('candidate hostname does not match tag, feature and service')
+    return hostname, tag
+
+
 def dev_ingress_ip(cmdb: dict, node: str) -> str:
     if node != "dev-k3s-v5":
         raise base.OperationError("SIT feature DNS is restricted to the declared Dev ingress node")
@@ -67,18 +82,25 @@ def dev_ingress_ip(cmdb: dict, node: str) -> str:
 
 
 class FeatureCloudflare(base.Cloudflare):
-    def __init__(self, token: str, account_id: str, feature_id: str):
+    def __init__(self, token: str, account_id: str, feature_id: str, feature_tag: str | None = None):
         super().__init__(token, account_id)
         self.feature_id = feature_id
+        self.feature_tag = feature_tag
+
+    def ownership_tags(self):
+        tags = [f"feature-id:{self.feature_id}", "owner:iac-modules"]
+        if self.feature_tag:
+            tags.append(f"feature-tag:{self.feature_tag}")
+        return sorted(tags)
 
     def records(self, zone_id: str, name: str) -> list[dict]:
         records = super().records(zone_id, name)
-        if any(f"feature-id:{self.feature_id}" not in (r.get("tags") or []) for r in records):
+        if any(not set(self.ownership_tags()) <= set(r.get("tags") or []) for r in records):
             raise base.OperationError("DNS name is occupied by a record not owned by this Feature ID")
         return records
 
     def create_payload(self, payload: dict) -> dict:
-        return dict(payload, comment=f"Codex SIT lane {self.feature_id}", tags=[f"feature-id:{self.feature_id}", "owner:iac-modules"])
+        return dict(payload, comment=f"Codex SIT lane {self.feature_id}", tags=self.ownership_tags())
 
     def delete(self, zone_id: str, record_id: str) -> None:
         raise base.OperationError("DNS deletion requires an authenticated lane cleanup receipt; reconcile never deletes")
@@ -91,15 +113,15 @@ def main() -> int:
         zone = base.domain(base.required(os.environ, "DNS_ZONE"))
         if os.environ.get("DNS_ENVIRONMENT") != "sit":
             raise base.OperationError("feature DNS is SIT-only")
-        name = lane_domain(feature_id, service, zone)
+        name, tag = requested_domain(os.environ, feature_id, service, zone)
         cmdb = json.loads(Path(base.required(os.environ, "CMDB_FILE")).read_text())
         node = base.required(os.environ, "DEV_INGRESS_NODE")
         target = dev_ingress_ip(cmdb, node)
         env = dict(os.environ, DNS_ENVIRONMENT="sit", DNS_ZONE=zone, DNS_RECORD_NAME=name, DNS_TARGET_IP=target)
         config = base.Config.from_env(env, allowed_environments=("sit",))
-        client = FeatureCloudflare(base.required(env, "CLOUDFLARE_DNS_API_TOKEN"), base.required(env, "CLOUDFLARE_ACCOUNT_ID"), feature_id)
+        client = FeatureCloudflare(base.required(env, "CLOUDFLARE_DNS_API_TOKEN"), base.required(env, "CLOUDFLARE_ACCOUNT_ID"), feature_id, tag)
         result = base.execute(config, client)
-        print(json.dumps({"result": "verified", "feature_id": feature_id, "service": service, "hostname": name, **result}, sort_keys=True))
+        print(json.dumps({"result": "verified", "feature_id": feature_id, "feature_tag": tag, "service": service, "hostname": name, **result}, sort_keys=True))
         return 0
     except (base.OperationError, ValueError, OSError, json.JSONDecodeError) as error:
         print(f"::error::{error}", file=sys.stderr)
