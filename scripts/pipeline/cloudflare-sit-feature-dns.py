@@ -32,6 +32,24 @@ def lane_domain(feature_id: str, service: str, zone: str) -> str:
     return base.domain(name)
 
 
+def tagged_lane_domain(feature_id: str, feature_tag: str, service: str, zone: str) -> str:
+    """Derive a v2 hostname; provenance must be verified by the caller first."""
+    if not re.fullmatch(r"[a-z][a-z0-9-]{1,45}", feature_id) or feature_id.endswith('-'):
+        raise base.OperationError("invalid Feature ID")
+    suffix = '-' + feature_id
+    if not isinstance(feature_tag, str) or not feature_tag.endswith(suffix):
+        raise base.OperationError("tag does not match Feature ID")
+    prefix = feature_tag[:-len(suffix)]
+    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", prefix):
+        raise base.OperationError("invalid feature tag name")
+    if service not in ("console", "accounts", "billing") or base.domain(zone) != "onwalk.net":
+        raise base.OperationError("unsupported SIT feature service or zone")
+    label = feature_tag + '-sit' if service == 'console' else service + '-' + feature_tag + '-sit'
+    if len(label) > 63:
+        raise base.OperationError("SIT DNS label exceeds 63 characters")
+    return base.domain(label + '.onwalk.net')
+
+
 def dev_ingress_ip(cmdb: dict, node: str) -> str:
     if node != "dev-k3s-v5":
         raise base.OperationError("SIT feature DNS is restricted to the declared Dev ingress node")
