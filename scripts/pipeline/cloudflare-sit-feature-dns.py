@@ -17,9 +17,6 @@ base = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = base
 spec.loader.exec_module(base)
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import verify_dev_sit_target as target_check
-
 
 def lane_domain(feature_id: str, service: str, zone: str) -> str:
     if not re.fullmatch(r"feature-[a-z][a-z0-9-]{1,48}", feature_id) or feature_id.endswith("-"):
@@ -111,11 +108,16 @@ def dev_ingress_ip(cmdb: dict, node: str) -> str:
 
 
 def verify_current_target(cmdb, target, token):
-    instance_id = str(cmdb.get('dev-k3s-v5', {}).get('instance_id', ''))
-    target_check.validate_cmdb(cmdb, instance_id)
-    status, facts = target_check._linode_get_one('linode/instances/' + instance_id, token)
-    if status != 200 or target_check.validate(cmdb, facts, instance_id) != target:
-        raise base.OperationError('fresh Dev provider target verification failed')
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        import verify_dev_sit_target as target_check
+        instance_id = str(cmdb.get('dev-k3s-v5', {}).get('instance_id', ''))
+        target_check.validate_cmdb(cmdb, instance_id)
+        status, facts = target_check._linode_get_one('linode/instances/' + instance_id, token)
+        if status != 200 or target_check.validate(cmdb, facts, instance_id) != target:
+            raise base.OperationError('fresh Dev provider target verification failed')
+    except (ImportError, RuntimeError, ValueError):
+        raise base.OperationError('fresh Dev provider target verification failed') from None
 
 
 class FeatureCloudflare(base.Cloudflare):
@@ -162,7 +164,7 @@ def main() -> int:
         result = base.execute(config, client)
         print(json.dumps({"result": "verified", "feature_id": feature_id, "feature_tag": tag, "service": service, "hostname": name, **result}, sort_keys=True))
         return 0
-    except (base.OperationError, target_check.PreflightError, ValueError, OSError, json.JSONDecodeError) as error:
+    except (base.OperationError, ValueError, OSError, json.JSONDecodeError) as error:
         print(f"::error::{error}", file=sys.stderr)
         return 1
 
