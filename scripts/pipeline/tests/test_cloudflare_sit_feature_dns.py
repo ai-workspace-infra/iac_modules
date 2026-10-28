@@ -43,12 +43,21 @@ class FeatureDnsContract(unittest.TestCase):
             with patch.dict(os.environ,env,clear=True), patch.object(MODULE,'requested_domain',return_value=('smoke-sit-test-1483-sit.onwalk.net','smoke-sit-test-1483')), patch.object(TARGET_CHECK,'_linode_get_one',return_value=(403,{})), patch.object(MODULE,'FeatureCloudflare') as client, contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(MODULE.main(),1)
             client.assert_not_called()
+            for invalid in ('', 'bad', 'A'*64):
+                with self.subTest(invalid=invalid), patch.dict(os.environ,dict(env,FEATURE_CANDIDATE_SHA256=invalid),clear=True), patch.object(MODULE,'requested_domain',return_value=('smoke-sit-test-1483-sit.onwalk.net','smoke-sit-test-1483')), patch.object(TARGET_CHECK,'_linode_get_one') as lookup, patch.object(MODULE,'FeatureCloudflare') as client, contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(MODULE.main(),1)
+                    lookup.assert_not_called();client.assert_not_called()
             output=io.StringIO()
             with patch.dict(os.environ,env,clear=True), patch.object(MODULE,'requested_domain',return_value=('smoke-sit-test-1483-sit.onwalk.net','smoke-sit-test-1483')), patch.object(MODULE,'verify_current_target',return_value={'instance_id':'123'}), patch.object(MODULE.base.Config,'from_env',return_value=object()), patch.object(MODULE,'FeatureCloudflare'), patch.object(MODULE.base,'execute',return_value={}), contextlib.redirect_stdout(output):
                 env.update(CLOUDFLARE_DNS_API_TOKEN='fake',CLOUDFLARE_ACCOUNT_ID='fake')
                 os.environ.update(env)
                 self.assertEqual(MODULE.main(),0)
             self.assertEqual(json.loads(output.getvalue())['candidate_sha256'],'a'*64)
+            legacy=dict(env);legacy.pop('FEATURE_CANDIDATE_SHA256');legacy.pop('LINODE_TOKEN');output=io.StringIO()
+            with patch.dict(os.environ,legacy,clear=True), patch.object(MODULE,'requested_domain',return_value=('xconnect-referral-sit.onwalk.net',None)), patch.object(TARGET_CHECK,'_linode_get_one') as lookup, patch.object(MODULE.base.Config,'from_env',return_value=object()), patch.object(MODULE,'FeatureCloudflare'), patch.object(MODULE.base,'execute',return_value={}), contextlib.redirect_stdout(output):
+                self.assertEqual(MODULE.main(),0)
+            lookup.assert_not_called()
+            self.assertNotIn('candidate_sha256',json.loads(output.getvalue()))
 
     def test_tagged_owner_requires_exact_candidate_hostname_and_ownership(self):
         directory = tempfile.TemporaryDirectory()
