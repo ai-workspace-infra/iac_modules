@@ -157,6 +157,11 @@ def main() -> int:
         if os.environ.get("DNS_ENVIRONMENT") != "sit":
             raise base.OperationError("feature DNS is SIT-only")
         name, tag = requested_domain(os.environ, feature_id, service, zone)
+        fingerprint = None
+        if tag is not None:
+            fingerprint = base.required(os.environ, 'FEATURE_CANDIDATE_SHA256')
+            if not re.fullmatch(r'[0-9a-f]{64}', fingerprint):
+                raise base.OperationError('authenticated candidate fingerprint required')
         cmdb_raw = Path(base.required(os.environ, "CMDB_FILE")).read_bytes()
         cmdb = json.loads(cmdb_raw)
         node = base.required(os.environ, "DEV_INGRESS_NODE")
@@ -172,6 +177,7 @@ def main() -> int:
         output = {"result": "verified", "feature_id": feature_id, "feature_tag": tag, "service": service, "hostname": name, **result}
         if observation is not None:
             output['provider_observation'] = observation
+            output['candidate_sha256'] = fingerprint
         print(json.dumps(output, sort_keys=True))
         return 0
     except (base.OperationError, ValueError, OSError, json.JSONDecodeError) as error:

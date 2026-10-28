@@ -39,10 +39,16 @@ class FeatureDnsContract(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             path=Path(temp)/'cmdb.json';path.write_text(json.dumps(cmdb))
             env={'DNS_ZONE':'onwalk.net','DNS_ENVIRONMENT':'sit','FEATURE_ID':'sit-test-1483','FEATURE_DNS_SERVICE':'console',
-                 'CMDB_FILE':str(path),'DEV_INGRESS_NODE':'dev-k3s-v5','LINODE_TOKEN':'fake-read-token'}
+                 'CMDB_FILE':str(path),'DEV_INGRESS_NODE':'dev-k3s-v5','LINODE_TOKEN':'fake-read-token','FEATURE_CANDIDATE_SHA256':'a'*64}
             with patch.dict(os.environ,env,clear=True), patch.object(MODULE,'requested_domain',return_value=('smoke-sit-test-1483-sit.onwalk.net','smoke-sit-test-1483')), patch.object(TARGET_CHECK,'_linode_get_one',return_value=(403,{})), patch.object(MODULE,'FeatureCloudflare') as client, contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(MODULE.main(),1)
             client.assert_not_called()
+            output=io.StringIO()
+            with patch.dict(os.environ,env,clear=True), patch.object(MODULE,'requested_domain',return_value=('smoke-sit-test-1483-sit.onwalk.net','smoke-sit-test-1483')), patch.object(MODULE,'verify_current_target',return_value={'instance_id':'123'}), patch.object(MODULE.base.Config,'from_env',return_value=object()), patch.object(MODULE,'FeatureCloudflare'), patch.object(MODULE.base,'execute',return_value={}), contextlib.redirect_stdout(output):
+                env.update(CLOUDFLARE_DNS_API_TOKEN='fake',CLOUDFLARE_ACCOUNT_ID='fake')
+                os.environ.update(env)
+                self.assertEqual(MODULE.main(),0)
+            self.assertEqual(json.loads(output.getvalue())['candidate_sha256'],'a'*64)
 
     def test_tagged_owner_requires_exact_candidate_hostname_and_ownership(self):
         directory = tempfile.TemporaryDirectory()
