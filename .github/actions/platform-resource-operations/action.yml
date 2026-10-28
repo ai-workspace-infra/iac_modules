@@ -26,6 +26,10 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Install tagged SIT DNS reader dependencies
+      if: inputs.operation == 'sit-feature-tag-dns'
+      shell: bash
+      run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.2
     - id: execute
       shell: bash
       env:
