@@ -24,8 +24,10 @@ class FeatureDnsContract(unittest.TestCase):
         cmdb={'dev-k3s-v5':{'name':'dev-k3s-v5','label':'dev-k3s-v5','instance_id':'123','ip':'8.8.8.8'}}
         facts={'id':123,'label':'dev-k3s-v5','region':'jp-tyo-3','status':'running','ipv4':['8.8.8.8']}
         with patch.object(TARGET_CHECK,'_linode_get_one',return_value=(200,facts)) as lookup:
-            MODULE.verify_current_target(cmdb,'8.8.8.8','fake-read-token')
+            observation=MODULE.verify_current_target(cmdb,'8.8.8.8','fake-read-token')
             lookup.assert_called_once_with('linode/instances/123','fake-read-token')
+            self.assertEqual((observation['node'],observation['instance_id'],observation['ip']),('dev-k3s-v5','123','8.8.8.8'))
+            self.assertIn('observed_at',observation)
         with patch.object(TARGET_CHECK,'_linode_get_one',return_value=(403,{})), self.assertRaises(MODULE.base.OperationError):
             MODULE.verify_current_target(cmdb,'8.8.8.8','fake-read-token')
         with patch.object(TARGET_CHECK,'_linode_get_one',return_value=(200,dict(facts,ipv4=['8.8.4.4']))), self.assertRaises(MODULE.base.OperationError):
