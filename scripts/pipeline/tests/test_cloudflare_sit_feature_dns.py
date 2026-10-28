@@ -2,6 +2,7 @@ import importlib.util
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 import yaml
 
@@ -14,6 +15,17 @@ SPEC.loader.exec_module(MODULE)
 
 
 class FeatureDnsContract(unittest.TestCase):
+    def test_tagged_dns_requires_current_matching_provider_target(self):
+        cmdb={'dev-k3s-v5':{'name':'dev-k3s-v5','label':'dev-k3s-v5','instance_id':'123','ip':'8.8.8.8'}}
+        facts={'id':123,'label':'dev-k3s-v5','region':'jp-tyo-3','status':'running','ipv4':['8.8.8.8']}
+        with patch.object(MODULE.target_check,'_linode_get_one',return_value=(200,facts)) as lookup:
+            MODULE.verify_current_target(cmdb,'8.8.8.8','fake-read-token')
+            lookup.assert_called_once_with('linode/instances/123','fake-read-token')
+        with patch.object(MODULE.target_check,'_linode_get_one',return_value=(403,{})), self.assertRaises(MODULE.base.OperationError):
+            MODULE.verify_current_target(cmdb,'8.8.8.8','fake-read-token')
+        with patch.object(MODULE.target_check,'_linode_get_one',return_value=(200,dict(facts,ipv4=['8.8.4.4']))), self.assertRaises(ValueError):
+            MODULE.verify_current_target(cmdb,'8.8.8.8','fake-read-token')
+
     def test_tagged_owner_requires_exact_candidate_hostname_and_ownership(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)

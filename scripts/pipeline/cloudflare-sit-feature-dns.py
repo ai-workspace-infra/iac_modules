@@ -17,6 +17,9 @@ base = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = base
 spec.loader.exec_module(base)
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import verify_dev_sit_target as target_check
+
 
 def lane_domain(feature_id: str, service: str, zone: str) -> str:
     if not re.fullmatch(r"feature-[a-z][a-z0-9-]{1,48}", feature_id) or feature_id.endswith("-"):
@@ -107,6 +110,14 @@ def dev_ingress_ip(cmdb: dict, node: str) -> str:
     return str(target)
 
 
+def verify_current_target(cmdb, target, token):
+    instance_id = str(cmdb.get('dev-k3s-v5', {}).get('instance_id', ''))
+    target_check.validate_cmdb(cmdb, instance_id)
+    status, facts = target_check._linode_get_one('linode/instances/' + instance_id, token)
+    if status != 200 or target_check.validate(cmdb, facts, instance_id) != target:
+        raise base.OperationError('fresh Dev provider target verification failed')
+
+
 class FeatureCloudflare(base.Cloudflare):
     def __init__(self, token: str, account_id: str, feature_id: str, feature_tag: str | None = None):
         super().__init__(token, account_id)
@@ -143,13 +154,15 @@ def main() -> int:
         cmdb = json.loads(Path(base.required(os.environ, "CMDB_FILE")).read_text())
         node = base.required(os.environ, "DEV_INGRESS_NODE")
         target = dev_ingress_ip(cmdb, node)
+        if tag is not None:
+            verify_current_target(cmdb, target, base.required(os.environ, 'LINODE_TOKEN'))
         env = dict(os.environ, DNS_ENVIRONMENT="sit", DNS_ZONE=zone, DNS_RECORD_NAME=name, DNS_TARGET_IP=target)
         config = base.Config.from_env(env, allowed_environments=("sit",))
         client = FeatureCloudflare(base.required(env, "CLOUDFLARE_DNS_API_TOKEN"), base.required(env, "CLOUDFLARE_ACCOUNT_ID"), feature_id, tag)
         result = base.execute(config, client)
         print(json.dumps({"result": "verified", "feature_id": feature_id, "feature_tag": tag, "service": service, "hostname": name, **result}, sort_keys=True))
         return 0
-    except (base.OperationError, ValueError, OSError, json.JSONDecodeError) as error:
+    except (base.OperationError, target_check.PreflightError, ValueError, OSError, json.JSONDecodeError) as error:
         print(f"::error::{error}", file=sys.stderr)
         return 1
 
