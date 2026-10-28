@@ -47,6 +47,11 @@ class FeatureDnsContract(unittest.TestCase):
         contract_path.write_text(yaml.safe_dump(declaration))
         with self.assertRaises(MODULE.base.OperationError):
             MODULE.requested_domain(env, 'sit-test-1483', 'console', 'onwalk.net')
+        declaration['zone'] = 'onwalk.net'
+        declaration['dns']['proxied'] = 0
+        contract_path.write_text(yaml.safe_dump(declaration))
+        with self.assertRaises(MODULE.base.OperationError):
+            MODULE.requested_domain(env, 'sit-test-1483', 'console', 'onwalk.net')
 
     def test_sit_configuration_and_owned_creation_retry(self):
         with tempfile.TemporaryDirectory() as directory:

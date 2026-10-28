@@ -68,7 +68,7 @@ def verify_domain_contract(path: str) -> None:
     if not isinstance(declaration, dict) or any(declaration.get(k) != v for k, v in expected.items()):
         raise base.OperationError('GitOps domain declaration differs from the approved tagged SIT contract')
     dns = declaration.get('dns')
-    if not isinstance(dns, dict) or any(dns.get(k) != v for k, v in {
+    if not isinstance(dns, dict) or type(dns.get('proxied')) is not bool or type(dns.get('ttl_seconds')) is not int or any(dns.get(k) != v for k, v in {
             'provider_owner': 'iac_modules', 'record_type': 'A', 'target': 'fresh-cmdb-dev-k3s-v5-ip',
             'ttl_seconds': 60, 'proxied': False, 'conflict_policy': 'refuse-unowned-record',
             'cleanup_policy': 'exact-feature-id-and-tag-owned-records-only'}.items()):

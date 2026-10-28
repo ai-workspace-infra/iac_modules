@@ -46,7 +46,10 @@ runs:
           resize-preflight) script=resize-instance-preflight.sh ;;
           existing-host) script=render-existing-host-cmdb.sh ;;
           sit-dns) script=cloudflare-sit-dns-reconcile.sh ;;
-          sit-feature-dns|sit-feature-tag-dns) script=cloudflare-sit-feature-dns.py ;;
+          sit-feature-dns|sit-feature-tag-dns)
+            [[ "$RESOURCE_ENVIRONMENT" == sit ]] || { echo '::error::Feature DNS is SIT-only'; exit 2; }
+            export DNS_ENVIRONMENT=sit
+            script=cloudflare-sit-feature-dns.py ;;
           smtp-sync) script=sync-smtp-secrets.sh ;;
           *) echo '::error::Unregistered resource operation'; exit 2 ;;
         esac
