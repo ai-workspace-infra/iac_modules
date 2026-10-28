@@ -11,6 +11,13 @@ SPEC.loader.exec_module(MODULE)
 
 
 class FeatureDnsContract(unittest.TestCase):
+    def test_tagged_domain_is_bound_to_feature_id_and_zone(self):
+        self.assertEqual(MODULE.tagged_lane_domain('sit-test-1483', 'smoke-sit-test-1483', 'console', 'onwalk.net'), 'smoke-sit-test-1483-sit.onwalk.net')
+        self.assertEqual(MODULE.tagged_lane_domain('sit-test-1483', 'smoke-sit-test-1483', 'accounts', 'onwalk.net'), 'accounts-smoke-sit-test-1483-sit.onwalk.net')
+        for tag, zone in [('smoke-sit-test-1484', 'onwalk.net'), ('smoke-sit-test-1483', 'example.net')]:
+            with self.subTest(tag=tag, zone=zone), self.assertRaises(MODULE.base.OperationError):
+                MODULE.tagged_lane_domain('sit-test-1483', tag, 'console', zone)
+
     def test_stable_feature_id_maps_to_service_names(self):
         self.assertEqual(MODULE.lane_domain("feature-xconnect-referral", "console", "onwalk.net"), "xconnect-referral-sit.onwalk.net")
         self.assertEqual(MODULE.lane_domain("feature-xconnect-referral", "accounts", "onwalk.net"), "accounts-xconnect-referral-sit.onwalk.net")
