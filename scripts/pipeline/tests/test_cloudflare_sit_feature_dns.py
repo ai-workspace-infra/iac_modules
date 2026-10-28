@@ -17,6 +17,10 @@ class FeatureDnsContract(unittest.TestCase):
         for tag, zone in [('smoke-sit-test-1484', 'onwalk.net'), ('smoke-sit-test-1483', 'example.net')]:
             with self.subTest(tag=tag, zone=zone), self.assertRaises(MODULE.base.OperationError):
                 MODULE.tagged_lane_domain('sit-test-1483', tag, 'console', zone)
+        with self.assertRaises(MODULE.base.OperationError):
+            MODULE.tagged_lane_domain('sit-test-1483', 'a' * 40 + '-sit-test-1483', 'accounts', 'onwalk.net')
+        with self.assertRaises(MODULE.base.OperationError):
+            MODULE.tagged_lane_domain('sit-test-', 'smoke-sit-test-', 'console', 'onwalk.net')
 
     def test_stable_feature_id_maps_to_service_names(self):
         self.assertEqual(MODULE.lane_domain("feature-xconnect-referral", "console", "onwalk.net"), "xconnect-referral-sit.onwalk.net")
