@@ -75,10 +75,10 @@ class Config:
     resolver_wait: bool
 
     @classmethod
-    def from_env(cls, env: dict[str, str]) -> "Config":
+    def from_env(cls, env: dict[str, str], allowed_environments=("uat", "prod")) -> "Config":
         environment = required(env, "DNS_ENVIRONMENT")
-        if environment not in ("uat", "prod"):
-            raise OperationError("DNS_ENVIRONMENT must be uat or prod")
+        if environment not in allowed_environments:
+            raise OperationError("DNS_ENVIRONMENT is outside the allowed execution scope")
         account_id = required(env, "CLOUDFLARE_ACCOUNT_ID")
         if not re.fullmatch(r"[a-f0-9]{32}", account_id):
             raise OperationError("CLOUDFLARE_ACCOUNT_ID must be a 32-character id")
@@ -138,6 +138,9 @@ class Cloudflare:
             if not isinstance(record, dict) or record.get("name") != name or not record.get("id"):
                 raise OperationError("DNS record identity mismatch")
         return result
+
+    def create_payload(self, payload: dict) -> dict:
+        return payload
 
     def create(self, zone_id: str, payload: dict) -> dict:
         result = self.request("POST", f"/zones/{zone_id}/dns_records", payload)
@@ -246,7 +249,7 @@ def _execute_locked(config: Config, client: Cloudflare, waiter=wait_for_dns) -> 
     if len(records) > 1:
         raise OperationError("multiple A DNS records exist; refusing implicit cleanup")
     if not records:
-        desired = {"type": "A", "name": config.name, "content": config.target, "ttl": 60, "proxied": False, "comment": "", "tags": []}
+        desired = client.create_payload({"type": "A", "name": config.name, "content": config.target, "ttl": 60, "proxied": False, "comment": "", "tags": []})
         action, record_id, original = "create", None, None
     else:
         original = record_payload(records[0])

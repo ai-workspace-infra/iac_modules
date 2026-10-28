@@ -1,4 +1,6 @@
 import importlib.util
+import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -11,6 +13,34 @@ SPEC.loader.exec_module(MODULE)
 
 
 class FeatureDnsContract(unittest.TestCase):
+    def test_sit_configuration_and_owned_creation_retry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env = {'DNS_ENVIRONMENT': 'sit', 'CLOUDFLARE_ACCOUNT_ID': 'a' * 32,
+                   'DNS_ZONE': 'onwalk.net', 'DNS_RECORD_NAME': 'xconnect-referral-sit.onwalk.net',
+                   'DNS_TARGET_IP': '172.237.5.48', 'DNS_CHECKPOINT_PATH': str(Path(directory) / 'dns.json'),
+                   'DNS_WAIT_FOR_RESOLVER': 'false'}
+            with self.assertRaises(MODULE.base.OperationError):
+                MODULE.base.Config.from_env(env)
+            config = MODULE.base.Config.from_env(env, allowed_environments=('sit',))
+            client = MODULE.FeatureCloudflare('test-token', 'a' * 32, 'feature-xconnect-referral')
+            records = []
+            def request(method, path, payload=None):
+                if method == 'GET' and path.startswith('/zones?'):
+                    return [{'id': 'zone'}]
+                if method == 'GET':
+                    return list(records)
+                if method == 'POST':
+                    record = dict(payload, id='created')
+                    records.append(record)
+                    return record
+                raise AssertionError('unexpected provider mutation')
+            client.request = request
+            self.assertEqual(MODULE.base.execute(config, client)['action'], 'create')
+            checkpoint = json.loads(config.checkpoint.read_text())
+            self.assertEqual(checkpoint['desired']['tags'], ['feature-id:feature-xconnect-referral', 'owner:iac-modules'])
+            self.assertEqual(MODULE.base.execute(config, client)['action'], 'noop')
+            self.assertEqual(len(records), 1)
+
     def test_tagged_domain_is_bound_to_feature_id_and_zone(self):
         self.assertEqual(MODULE.tagged_lane_domain('sit-test-1483', 'smoke-sit-test-1483', 'console', 'onwalk.net'), 'smoke-sit-test-1483-sit.onwalk.net')
         self.assertEqual(MODULE.tagged_lane_domain('sit-test-1483', 'smoke-sit-test-1483', 'accounts', 'onwalk.net'), 'accounts-smoke-sit-test-1483-sit.onwalk.net')
