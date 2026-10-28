@@ -43,6 +43,19 @@ class TargetTest(unittest.TestCase):
             self.assertNotIn('test-secret',output.getvalue())
             self.assertEqual(json.loads(output.getvalue())['result'],'MATCH')
 
+    def test_provider_denial_and_bad_cmdb_fail_closed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path=Path(temp)/'cmdb.json';path.write_text(json.dumps(self.cmdb));output=io.StringIO();errors=io.StringIO()
+            with patch.object(sys,'argv',['verify','--cmdb',str(path),'--instance-id','123']), patch.dict('os.environ',{'LINODE_TOKEN':'test-secret'}), patch.object(module,'_linode_get_one',return_value=(403,{})) as lookup, contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+                self.assertEqual(module.main(),1)
+            lookup.assert_called_once()
+            self.assertEqual(output.getvalue(),'')
+            self.assertNotIn('test-secret',errors.getvalue())
+            path.write_text(json.dumps({'wrong-target':{}}))
+            with patch.object(sys,'argv',['verify','--cmdb',str(path),'--instance-id','123']), patch.object(module,'_linode_get_one') as lookup, contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(module.main(),1)
+            lookup.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()
