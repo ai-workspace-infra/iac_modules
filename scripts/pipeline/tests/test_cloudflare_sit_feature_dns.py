@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("feature_dns", ROOT / "cloudflare-sit-feature-dns.py")
@@ -14,8 +15,21 @@ SPEC.loader.exec_module(MODULE)
 
 class FeatureDnsContract(unittest.TestCase):
     def test_tagged_owner_requires_exact_candidate_hostname_and_ownership(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        contract_path = Path(directory.name) / 'contract.yaml'
+        declaration = {'format': 'sit-feature-domain-contract/v2', 'environment': 'sit', 'zone': 'onwalk.net',
+                       'namespace': 'feature-{feature_id}-sit',
+                       'services': {'console': '{feature_tag}-sit.onwalk.net',
+                                    'accounts': 'accounts-{feature_tag}-sit.onwalk.net',
+                                    'billing': 'billing-{feature_tag}-sit.onwalk.net'},
+                       'dns': {'provider_owner': 'iac_modules', 'record_type': 'A',
+                               'target': 'fresh-cmdb-dev-k3s-v5-ip', 'ttl_seconds': 60, 'proxied': False,
+                               'conflict_policy': 'refuse-unowned-record',
+                               'cleanup_policy': 'exact-feature-id-and-tag-owned-records-only'}}
+        contract_path.write_text(yaml.safe_dump(declaration))
         env = {'RESOURCE_OPERATION': 'sit-feature-tag-dns', 'FEATURE_TAG': 'smoke-sit-test-1483',
-               'FEATURE_HOSTNAME': 'smoke-sit-test-1483-sit.onwalk.net'}
+               'FEATURE_HOSTNAME': 'smoke-sit-test-1483-sit.onwalk.net', 'FEATURE_DOMAIN_CONTRACT': str(contract_path)}
         result = MODULE.requested_domain(env, 'sit-test-1483', 'console', 'onwalk.net')
         self.assertEqual(result, (env['FEATURE_HOSTNAME'], env['FEATURE_TAG']))
         for changes in ({'FEATURE_TAG': 'smoke-sit-test-1484'},
@@ -29,6 +43,10 @@ class FeatureDnsContract(unittest.TestCase):
                                      'tags': ['feature-id:sit-test-1483', 'owner:iac-modules']}]
         with self.assertRaises(MODULE.base.OperationError):
             client.records('zone', env['FEATURE_HOSTNAME'])
+        declaration['zone'] = 'svc.plus'
+        contract_path.write_text(yaml.safe_dump(declaration))
+        with self.assertRaises(MODULE.base.OperationError):
+            MODULE.requested_domain(env, 'sit-test-1483', 'console', 'onwalk.net')
 
     def test_sit_configuration_and_owned_creation_retry(self):
         with tempfile.TemporaryDirectory() as directory:

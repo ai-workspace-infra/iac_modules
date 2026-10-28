@@ -50,6 +50,31 @@ def tagged_lane_domain(feature_id: str, feature_tag: str, service: str, zone: st
     return base.domain(label + '.onwalk.net')
 
 
+def verify_domain_contract(path: str) -> None:
+    """Validate a reviewed declaration; the caller authenticates its GitOps SHA."""
+    import yaml
+    source = Path(path)
+    if source.is_symlink() or not source.is_file() or source.stat().st_size > 65536:
+        raise base.OperationError('missing or oversized GitOps domain declaration')
+    try:
+        declaration = yaml.safe_load(source.read_text())
+    except (yaml.YAMLError, UnicodeError) as exc:
+        raise base.OperationError('invalid GitOps domain declaration') from exc
+    expected = {'format': 'sit-feature-domain-contract/v2', 'environment': 'sit', 'zone': 'onwalk.net',
+                'namespace': 'feature-{feature_id}-sit',
+                'services': {'console': '{feature_tag}-sit.onwalk.net',
+                             'accounts': 'accounts-{feature_tag}-sit.onwalk.net',
+                             'billing': 'billing-{feature_tag}-sit.onwalk.net'}}
+    if not isinstance(declaration, dict) or any(declaration.get(k) != v for k, v in expected.items()):
+        raise base.OperationError('GitOps domain declaration differs from the approved tagged SIT contract')
+    dns = declaration.get('dns')
+    if not isinstance(dns, dict) or any(dns.get(k) != v for k, v in {
+            'provider_owner': 'iac_modules', 'record_type': 'A', 'target': 'fresh-cmdb-dev-k3s-v5-ip',
+            'ttl_seconds': 60, 'proxied': False, 'conflict_policy': 'refuse-unowned-record',
+            'cleanup_policy': 'exact-feature-id-and-tag-owned-records-only'}.items()):
+        raise base.OperationError('GitOps DNS owner or target contract differs')
+
+
 def requested_domain(env: dict, feature_id: str, service: str, zone: str) -> tuple[str, str | None]:
     operation = env.get('RESOURCE_OPERATION', 'sit-feature-dns')
     if operation == 'sit-feature-dns':
@@ -58,6 +83,7 @@ def requested_domain(env: dict, feature_id: str, service: str, zone: str) -> tup
         return lane_domain(feature_id, service, zone), None
     if operation != 'sit-feature-tag-dns':
         raise base.OperationError('unsupported feature DNS operation')
+    verify_domain_contract(base.required(env, 'FEATURE_DOMAIN_CONTRACT'))
     tag = base.required(env, 'FEATURE_TAG')
     hostname = tagged_lane_domain(feature_id, tag, service, zone)
     if base.required(env, 'FEATURE_HOSTNAME') != hostname:

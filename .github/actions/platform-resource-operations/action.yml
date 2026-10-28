@@ -7,6 +7,7 @@ inputs:
   feature_id: {required: false, default: '', description: "Validated stable feature-delivery ID; required only for sit-feature-dns"}
   feature_tag: {required: false, default: '', description: "Tag from the authenticated candidate; required for sit-feature-tag-dns"}
   feature_hostname: {required: false, default: '', description: "Service hostname from the authenticated candidate; required for sit-feature-tag-dns"}
+  feature_domain_contract: {required: false, default: '', description: "Reviewed GitOps v2 domain declaration at the authenticated candidate commit"}
   dns_service: {required: false, default: '', description: "console, accounts, or billing; required only for sit-feature-dns"}
   cmdb_file: {required: false, default: '', description: "Fresh IaC CMDB path; required only for sit-feature-dns"}
   ingress_node: {required: false, default: 'dev-k3s-v5', description: "Exact declared Dev ingress node"}
@@ -34,6 +35,7 @@ runs:
         FEATURE_ID: ${{ inputs.feature_id }}
         FEATURE_TAG: ${{ inputs.feature_tag }}
         FEATURE_HOSTNAME: ${{ inputs.feature_hostname }}
+        FEATURE_DOMAIN_CONTRACT: ${{ inputs.feature_domain_contract }}
         FEATURE_DNS_SERVICE: ${{ inputs.dns_service }}
         CMDB_FILE: ${{ inputs.cmdb_file }}
         DEV_INGRESS_NODE: ${{ inputs.ingress_node }}
