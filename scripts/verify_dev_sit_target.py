@@ -17,7 +17,7 @@ import sys
 from akamai_state_preflight import _linode_get_one, PreflightError
 
 
-def validate(cmdb, body, instance_id):
+def validate_cmdb(cmdb, instance_id):
     if not re.fullmatch(r'[1-9][0-9]{0,11}', instance_id) or not isinstance(cmdb, dict) or set(cmdb) != {'dev-k3s-v5'}:
         raise ValueError('invalid Dev target')
     host = cmdb['dev-k3s-v5']
@@ -26,6 +26,11 @@ def validate(cmdb, body, instance_id):
     ip = str(ipaddress.IPv4Address(host.get('ip', '')))
     if not ipaddress.IPv4Address(ip).is_global:
         raise ValueError('Dev public IPv4 required')
+    return ip
+
+
+def validate(cmdb, body, instance_id):
+    ip = validate_cmdb(cmdb, instance_id)
     if (not isinstance(body, dict) or type(body.get('id')) is not int or str(body['id']) != instance_id or
         body.get('label') != 'dev-k3s-v5' or body.get('region') != 'jp-tyo-3' or
         body.get('status') != 'running' or not isinstance(body.get('ipv4'), list) or ip not in body['ipv4']):
@@ -43,8 +48,7 @@ def main():
         if len(raw) > 1_000_000:
             raise ValueError('CMDB too large')
         cmdb = json.loads(raw)
-        if not re.fullmatch(r'[1-9][0-9]{0,11}', args.instance_id):
-            raise ValueError('invalid instance ID')
+        validate_cmdb(cmdb, args.instance_id)
         status, body = _linode_get_one('linode/instances/' + args.instance_id, os.environ.get('LINODE_TOKEN', ''))
         if status != 200:
             raise ValueError('provider lookup failed')
