@@ -11,7 +11,7 @@ import subprocess
 from urllib.parse import urlparse
 
 from unified.auth import request_json
-from unified.contracts import require, write_json
+from unified.contracts import ContractError, require, write_json
 from unified.hostkeys import console_fingerprint
 
 
@@ -43,7 +43,14 @@ def main():
         input=json.dumps(console), capture_output=True, text=True, timeout=args.listen_seconds + 15, env=env)
     require(result.returncode == 0, "TLS-verified provider console unavailable")
     (output / "console.txt").write_text(result.stdout)
-    fingerprint = console_fingerprint(result.stdout)
+    try:
+        fingerprint = console_fingerprint(result.stdout)
+    except ContractError:
+        # Never expose the raw terminal or access-bearing console session.
+        raise ContractError('complete trusted cloud fingerprint missing; '
+            f'decoded_chars={len(result.stdout)}, '
+            f'begin_frames={result.stdout.count("IAC_ED25519_FP_BEGIN")}, '
+            f'end_frames={result.stdout.count("IAC_ED25519_FP_END")}') from None
     scan = subprocess.run(["ssh-keyscan", "-T", "10", "-t", "ed25519", str(address)], capture_output=True, text=True, timeout=20)
     rows = [line.split() for line in scan.stdout.splitlines() if line and not line.startswith("#")]
     require(len(rows) == 1 and len(rows[0]) == 3 and rows[0][1] == "ssh-ed25519", "one network Ed25519 key required")

@@ -54,6 +54,10 @@ class CloudHostkeyProofTests(unittest.TestCase):
             with self.subTest(text=text), self.assertRaises(ContractError):
                 console_fingerprint(text)
 
+    def test_provider_binary_console_frames_decode_without_object_coercion(self):
+        source=Path(__file__).resolve().parents[1]/"lib/console-text.test.mjs"
+        subprocess.run(["node","--test",str(source)],check=True,capture_output=True)
+
     def test_provider_console_reader_javascript_parses(self):
         source=Path(__file__).resolve().parents[1]/"lib/akamai-console-read.mjs"
         subprocess.run(["node","--check",str(source)],check=True,capture_output=True)
