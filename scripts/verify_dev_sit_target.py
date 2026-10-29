@@ -42,11 +42,17 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--cmdb', required=True, type=Path)
     parser.add_argument('--instance-id', required=True)
+    parser.add_argument('--cmdb-sha256', required=True)
+    parser.add_argument('--candidate-sha256', required=True)
     args = parser.parse_args()
     try:
         raw = args.cmdb.read_bytes()
         if len(raw) > 1_000_000:
             raise ValueError('CMDB too large')
+        if (not re.fullmatch(r'[0-9a-f]{64}', args.cmdb_sha256) or
+                not re.fullmatch(r'[0-9a-f]{64}', args.candidate_sha256) or
+                hashlib.sha256(raw).hexdigest() != args.cmdb_sha256):
+            raise ValueError('candidate or authenticated CMDB digest mismatch')
         cmdb = json.loads(raw)
         validate_cmdb(cmdb, args.instance_id)
         status, body = _linode_get_one('linode/instances/' + args.instance_id, os.environ.get('LINODE_TOKEN', ''))
@@ -55,7 +61,7 @@ def main():
         ip = validate(cmdb, body, args.instance_id)
         print(json.dumps({'schema':'dev-sit-provider-observation/v1','result':'MATCH',
                           'instance_id':args.instance_id,'node':'dev-k3s-v5','ip':ip,
-                          'cmdb_sha256':hashlib.sha256(raw).hexdigest(),
+                          'cmdb_sha256':args.cmdb_sha256, 'candidate_sha256':args.candidate_sha256,
                           'observed_at':datetime.datetime.now(datetime.timezone.utc).isoformat()}, sort_keys=True))
         return 0
     except (OSError, ValueError, TypeError, KeyError, PreflightError):
