@@ -1,0 +1,19 @@
+name: Feature SIT DNS contracts
+on:
+  pull_request:
+    paths: ['.github/workflows/feature-sit-dns*.yml', 'scripts/pipeline/feature-dns-preflight.py', 'scripts/pipeline/cloudflare-sit-feature-dns.py', 'scripts/pipeline/tests/test_feature_dns_preflight.py']
+  push:
+    branches: [main]
+    paths: ['.github/workflows/feature-sit-dns*.yml', 'scripts/pipeline/feature-dns-preflight.py', 'scripts/pipeline/cloudflare-sit-feature-dns.py', 'scripts/pipeline/tests/test_feature_dns_preflight.py']
+permissions:
+  contents: read
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - run: python3 -m pip install PyYAML==6.0.3
+      - run: python3 scripts/pipeline/tests/test_feature_dns_preflight.py
+      - run: python3 scripts/pipeline/tests/test_cloudflare_sit_feature_dns.py

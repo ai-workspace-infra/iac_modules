@@ -1,0 +1,133 @@
+name: Feature SIT DNS owner
+on:
+  workflow_call:
+    inputs:
+      candidate_artifact: {type: string, required: true}
+      candidate_receipt_sha256: {type: string, required: true}
+      candidate_sha256: {type: string, required: true}
+      cmdb_artifact: {type: string, required: true}
+      cmdb_sha256: {type: string, required: true}
+      gitops_sha: {type: string, required: true}
+      feature_id: {type: string, required: true}
+      feature_tag: {type: string, required: true}
+      service: {type: string, required: true}
+      hostname: {type: string, required: true}
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+jobs:
+  dns:
+    runs-on: ubuntu-latest
+    environment: dev
+    timeout-minutes: 15
+    steps:
+      - name: Checkout immutable IaC owner
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: ai-workspace-infra/iac_modules
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+      - name: Validate protected caller
+        run: python3 scripts/verify_feature_target_caller.py
+      - name: Checkout candidate GitOps
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: ai-workspace-infra/gitops
+          ref: ${{ inputs.gitops_sha }}
+          path: gitops-candidate
+          persist-credentials: false
+      - name: Check same-run artifact names
+        env:
+          CANDIDATE_ARTIFACT: ${{ inputs.candidate_artifact }}
+          CMDB_ARTIFACT: ${{ inputs.cmdb_artifact }}
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_ARTIFACT" == "feature-candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" ]]
+          [[ "$CMDB_ARTIFACT" == "feature-foundation-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" ]]
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ inputs.candidate_artifact }}
+          path: ${{ runner.temp }}/feature-candidate
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ inputs.cmdb_artifact }}
+          path: ${{ runner.temp }}/feature-cmdb
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: feature-sit-target-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/feature-target
+      - name: Install pinned YAML parser
+        run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.3
+      - name: Validate candidate, domain contract, CMDB and live target
+        env:
+          FEATURE_CANDIDATE_RECEIPT: ${{ runner.temp }}/feature-candidate/receipt.json
+          FEATURE_CANDIDATE_RECEIPT_SHA256: ${{ inputs.candidate_receipt_sha256 }}
+          FEATURE_CANDIDATE_SHA256: ${{ inputs.candidate_sha256 }}
+          FEATURE_ID: ${{ inputs.feature_id }}
+          FEATURE_TAG: ${{ inputs.feature_tag }}
+          FEATURE_DNS_SERVICE: ${{ inputs.service }}
+          FEATURE_HOSTNAME: ${{ inputs.hostname }}
+          FEATURE_GITOPS_ROOT: ${{ github.workspace }}/gitops-candidate
+          FEATURE_DOMAIN_CONTRACT: ${{ github.workspace }}/gitops-candidate/docs/features/tagged-sit-domain-contract.yaml
+          CMDB_FILE: ${{ runner.temp }}/feature-cmdb/cmdb.json
+          CMDB_SHA256: ${{ inputs.cmdb_sha256 }}
+          TARGET_OBSERVATION: ${{ runner.temp }}/feature-target/feature-target-observation.json
+        run: python3 scripts/pipeline/feature-dns-preflight.py
+      - name: Read dedicated DNS identity
+        id: dns-vault
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4
+        with:
+          url: https://vault.svc.plus
+          method: jwt
+          role: github-actions-feature-dns-write-sit
+          jwtGithubAudience: vault
+          exportEnv: false
+          secrets: |
+            kv/data/sit/platform/cloudflare/feature-dns token | DNS_TOKEN ;
+            kv/data/sit/platform/cloudflare/feature-dns account_id | DNS_ACCOUNT_ID
+      - name: Read dedicated target identity
+        id: target-vault
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4
+        with:
+          url: https://vault.svc.plus
+          method: jwt
+          role: github-actions-feature-dns-target-read-sit
+          jwtGithubAudience: vault
+          exportEnv: false
+          secrets: |
+            kv/data/sit/platform/akamai/feature-target token | TARGET_TOKEN
+      - name: Reconcile exact feature DNS record
+        env:
+          FEATURE_CANDIDATE_RECEIPT: ${{ runner.temp }}/feature-candidate/receipt.json
+          FEATURE_CANDIDATE_RECEIPT_SHA256: ${{ inputs.candidate_receipt_sha256 }}
+          FEATURE_CANDIDATE_SHA256: ${{ inputs.candidate_sha256 }}
+          FEATURE_ID: ${{ inputs.feature_id }}
+          FEATURE_TAG: ${{ inputs.feature_tag }}
+          FEATURE_DNS_SERVICE: ${{ inputs.service }}
+          FEATURE_HOSTNAME: ${{ inputs.hostname }}
+          FEATURE_GITOPS_ROOT: ${{ github.workspace }}/gitops-candidate
+          FEATURE_DOMAIN_CONTRACT: ${{ github.workspace }}/gitops-candidate/docs/features/tagged-sit-domain-contract.yaml
+          CMDB_FILE: ${{ runner.temp }}/feature-cmdb/cmdb.json
+          CMDB_SHA256: ${{ inputs.cmdb_sha256 }}
+          TARGET_OBSERVATION: ${{ runner.temp }}/feature-target/feature-target-observation.json
+          CLOUDFLARE_DNS_API_TOKEN: ${{ steps.dns-vault.outputs.DNS_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ steps.dns-vault.outputs.DNS_ACCOUNT_ID }}
+          LINODE_TOKEN: ${{ steps.target-vault.outputs.TARGET_TOKEN }}
+          RESOURCE_OPERATION: sit-feature-tag-dns
+          DNS_ENVIRONMENT: sit
+          DNS_ZONE: onwalk.net
+          DEV_INGRESS_NODE: dev-k3s-v5
+          DNS_CHECKPOINT_PATH: ${{ runner.temp }}/feature-dns/checkpoint.json
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/feature-dns"
+          python3 scripts/pipeline/cloudflare-sit-feature-dns.py > "$RUNNER_TEMP/feature-dns/receipt.json"
+      - name: Retain DNS receipt and recovery checkpoint
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: feature-sit-dns-${{ inputs.service }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/feature-dns/
+          if-no-files-found: warn
+          retention-days: 30
