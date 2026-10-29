@@ -37,3 +37,19 @@ test('provider scrollback controls are finite and contain no guest command text'
     assert.ok(scrollbackFrames.every(([ms]) => ms >= 0 && ms <= 9000));
   } finally { globalThis.WebSocket = old; }
 });
+
+import { ConsoleRenderer } from './console-renderer.mjs';
+test('actual terminal rendering restores overwritten and wrapped public host keys', async () => {
+  const wire = Buffer.concat([Buffer.from('0000000b7373682d6564323535313900000020', 'hex'), Buffer.alloc(32, 7)]);
+  const key = wire.toString('base64');
+  const renderer = new ConsoleRenderer();
+  try {
+    await renderer.write('\x1b[2J\x1b[1;1H-----BEGIN SSH HOST KEY KEYS-----');
+    await renderer.write('\x1b[2;1Hssh-ed25519 ' + key.slice(0, 20) + 'X\b' + key.slice(20));
+    await renderer.write('\x1b[4;1H-----END SSH HOST KEY KEYS-----');
+    const snapshot = renderer.snapshot();
+    assert.ok(snapshot.includes('ssh-ed25519 ' + key));
+    assert.ok(snapshot.includes('-----END SSH HOST KEY KEYS-----'));
+    assert.ok(!snapshot.includes('\x1b') && !snapshot.includes('\b'));
+  } finally { renderer.dispose(); }
+});

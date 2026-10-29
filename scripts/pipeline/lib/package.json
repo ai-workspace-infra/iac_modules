@@ -1,0 +1,6 @@
+{
+  "name": "iac-provider-console-rendering",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {"@xterm/headless": "5.5.0"}
+}

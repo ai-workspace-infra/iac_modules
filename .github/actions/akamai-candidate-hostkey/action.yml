@@ -16,6 +16,9 @@ runs:
     - uses: actions/setup-node@v4
       with:
         node-version: '22'
+    - name: Install integrity-locked terminal renderer without package scripts
+      shell: bash
+      run: npm ci --prefix "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/lib" --ignore-scripts --no-audit --no-fund --loglevel=error
     - name: Read and bind provider SSH identity
       shell: bash
       env:
