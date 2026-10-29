@@ -15,6 +15,13 @@ from unified.contracts import ContractError, require, write_json
 from unified.hostkeys import console_fingerprint
 
 
+def console_environment(source):
+    env = {k: v for k, v in source.items() if not k.startswith(('VAULT_', 'LINODE_', 'TF_VAR_'))
+           and k not in {'GH_TOKEN', 'GITHUB_TOKEN', 'ACTIONS_ID_TOKEN_REQUEST_TOKEN', 'NODE_OPTIONS'}}
+    env['NODE_TLS_REJECT_UNAUTHORIZED'] = '1'
+    return env
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("instance-id", "expected-account", "expected-label", "expected-region", "expected-ip", "output"):
@@ -37,8 +44,7 @@ def main():
     console = request_json(endpoint + "/lish", headers, b"{}")
     url = urlparse(console["weblish_url"])
     require(url.scheme == "wss" and url.hostname == args.expected_region + ".webconsole.linode.com" and not url.username, "untrusted provider console endpoint")
-    env = {**os.environ, "NODE_TLS_REJECT_UNAUTHORIZED": "1"}
-    env.pop("NODE_OPTIONS", None)
+    env = console_environment(os.environ)
     result = subprocess.run(["node", str(Path(__file__).parent / "lib/akamai-console-read.mjs"), str(args.listen_seconds * 1000)],
         input=json.dumps(console), capture_output=True, text=True, timeout=args.listen_seconds + 15, env=env)
     require(result.returncode == 0, "TLS-verified provider console unavailable")

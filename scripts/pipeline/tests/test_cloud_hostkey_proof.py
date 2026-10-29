@@ -71,6 +71,16 @@ class CloudHostkeyProofTests(unittest.TestCase):
         conflict=frame.replace(key,base64.b64encode(raw[:-1]+b"Z").decode())
         with self.assertRaises(ContractError): console_fingerprint(frame+conflict)
 
+    def test_renderer_cannot_inherit_provider_vault_or_oidc_credentials(self):
+        import importlib.util
+        path=Path(__file__).resolve().parents[1]/"akamai-hostkey-read.py"
+        spec=importlib.util.spec_from_file_location("console_reader",path)
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        actual=module.console_environment({'PATH':'/bin','LINODE_TOKEN':'fixture','VAULT_TOKEN':'fixture',
+            'TF_VAR_linode_token':'fixture','GH_TOKEN':'fixture','ACTIONS_ID_TOKEN_REQUEST_TOKEN':'fixture',
+            'NODE_OPTIONS':'--insecure','NODE_TLS_REJECT_UNAUTHORIZED':'0'})
+        self.assertEqual(actual,{'PATH':'/bin','NODE_TLS_REJECT_UNAUTHORIZED':'1'})
+
     def test_provider_console_reader_javascript_parses(self):
         source=Path(__file__).resolve().parents[1]/"lib/akamai-console-read.mjs"
         subprocess.run(["node","--check",str(source)],check=True,capture_output=True)
