@@ -38,8 +38,15 @@ class FeatureDnsContract(unittest.TestCase):
                              'groups':['dev','k3s','k3s_server','akamai_cloud']}}
         with tempfile.TemporaryDirectory() as temp:
             path=Path(temp)/'cmdb.json';path.write_text(json.dumps(cmdb))
+            repo='ai-workspace-infra/Platform-Orchestrator';ref=repo+'/.github/workflows/feature-lane-deploy.yml@refs/heads/main'
+            candidate_path=Path(temp)/'candidate.json'
+            candidate_path.write_text(json.dumps({'schema_version':'dev-feature-candidate/v2','result':'verified','stage':'sit','candidate_sha256':'a'*64,
+                'projection':{'tagged_lane':{'feature_id':'sit-test-1483','feature_tag':'smoke-sit-test-1483','candidate_sha256':'a'*64}},
+                'source':{'repository':repo,'workflow_ref':ref,'workflow_sha':'b'*40,'run_id':'123','run_attempt':'1'}}))
             env={'DNS_ZONE':'onwalk.net','DNS_ENVIRONMENT':'sit','FEATURE_ID':'sit-test-1483','FEATURE_DNS_SERVICE':'console',
-                 'CMDB_FILE':str(path),'DEV_INGRESS_NODE':'dev-k3s-v5','LINODE_TOKEN':'fake-read-token','FEATURE_CANDIDATE_SHA256':'a'*64}
+                 'CMDB_FILE':str(path),'DEV_INGRESS_NODE':'dev-k3s-v5','LINODE_TOKEN':'fake-read-token','FEATURE_CANDIDATE_SHA256':'a'*64,
+                 'FEATURE_CANDIDATE_RECEIPT':str(candidate_path),'GITHUB_REPOSITORY':repo,'GITHUB_REF':'refs/heads/main',
+                 'GITHUB_WORKFLOW_REF':ref,'GITHUB_SHA':'b'*40,'GITHUB_RUN_ID':'123','GITHUB_RUN_ATTEMPT':'1'}
             with patch.dict(os.environ,env,clear=True), patch.object(MODULE,'requested_domain',return_value=('smoke-sit-test-1483-sit.onwalk.net','smoke-sit-test-1483')), patch.object(TARGET_CHECK,'_linode_get_one',return_value=(403,{})), patch.object(MODULE,'FeatureCloudflare') as client, contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(MODULE.main(),1)
             client.assert_not_called()
@@ -58,6 +65,21 @@ class FeatureDnsContract(unittest.TestCase):
                 self.assertEqual(MODULE.main(),0)
             lookup.assert_not_called()
             self.assertNotIn('candidate_sha256',json.loads(output.getvalue()))
+
+    def test_tagged_candidate_receipt_rejects_wrong_run_or_identity(self):
+        repo='ai-workspace-infra/Platform-Orchestrator';ref=repo+'/.github/workflows/feature-lane-deploy.yml@refs/heads/main'
+        env={'GITHUB_REPOSITORY':repo,'GITHUB_REF':'refs/heads/main','GITHUB_WORKFLOW_REF':ref,'GITHUB_SHA':'a'*40,'GITHUB_RUN_ID':'11','GITHUB_RUN_ATTEMPT':'1'}
+        receipt={'schema_version':'dev-feature-candidate/v2','result':'verified','stage':'sit','candidate_sha256':'b'*64,
+                 'projection':{'tagged_lane':{'feature_id':'sit-test-1483','feature_tag':'smoke-sit-test-1483','candidate_sha256':'b'*64}},
+                 'source':{'repository':repo,'workflow_ref':ref,'workflow_sha':'a'*40,'run_id':'11','run_attempt':'1'}}
+        with tempfile.TemporaryDirectory() as temp:
+            path=Path(temp)/'receipt.json';path.write_text(json.dumps(receipt))
+            MODULE.verify_candidate_receipt(str(path),'sit-test-1483','smoke-sit-test-1483','b'*64,env)
+            for changed in ({'GITHUB_RUN_ID':'12'},{'GITHUB_REF':'refs/heads/other'},{'GITHUB_SHA':'c'*40}):
+                with self.subTest(changed=changed),self.assertRaises(MODULE.base.OperationError):
+                    MODULE.verify_candidate_receipt(str(path),'sit-test-1483','smoke-sit-test-1483','b'*64,{**env,**changed})
+            with self.assertRaises(MODULE.base.OperationError):
+                MODULE.verify_candidate_receipt(str(path),'sit-test-1483','other-sit-test-1483','b'*64,env)
 
     def test_tagged_owner_requires_exact_candidate_hostname_and_ownership(self):
         directory = tempfile.TemporaryDirectory()
