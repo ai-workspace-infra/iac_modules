@@ -37,6 +37,8 @@ class PreflightTest(unittest.TestCase):
         'TARGET_OBSERVATION':str(observation),'FEATURE_CANDIDATE_RECEIPT_SHA256':'a'*64}
    with patch.object(p.owner,'verify_candidate_receipt'),patch.object(p.owner,'verify_domain_contract'),patch.object(p.owner,'dev_ingress_ip',return_value='8.8.8.8'):
     p.validate(env)
+    for change in ({'CMDB_SHA256':'f'*64},{'FEATURE_HOSTNAME':'unrelated.onwalk.net'}):
+     with self.subTest(change=change),self.assertRaises(ValueError):p.validate({**env,**change})
     for changes in ({'candidate_sha256':'c'*64},{'ip':'1.1.1.1'},{'observed_at':(datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(minutes=21)).isoformat()}):
      observation.write_text(json.dumps({**row,**changes}))
      with self.subTest(changes=changes),self.assertRaises(ValueError):p.validate(env)
