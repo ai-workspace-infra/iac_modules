@@ -128,7 +128,11 @@ def verify_candidate_receipt(path, feature_id, tag, fingerprint, env):
     source = Path(path)
     if source.is_symlink() or not source.is_file() or source.stat().st_size > 1000000:
         raise base.OperationError('same-run candidate receipt unavailable')
-    receipt = json.loads(source.read_text())
+    raw = source.read_bytes()
+    expected = env.get('FEATURE_CANDIDATE_RECEIPT_SHA256', '')
+    if not re.fullmatch(r'[0-9a-f]{64}', expected) or hashlib.sha256(raw).hexdigest() != expected:
+        raise base.OperationError('candidate receipt digest mismatch')
+    receipt = json.loads(raw)
     if not isinstance(receipt, dict):
         raise base.OperationError('invalid candidate receipt')
     repo = env.get('GITHUB_REPOSITORY', '')
@@ -188,6 +192,10 @@ def main() -> int:
                 raise base.OperationError('authenticated candidate fingerprint required')
             verify_candidate_receipt(base.required(os.environ, 'FEATURE_CANDIDATE_RECEIPT'), feature_id, tag, fingerprint, os.environ)
         cmdb_raw = Path(base.required(os.environ, "CMDB_FILE")).read_bytes()
+        if tag is not None:
+            cmdb_sha = base.required(os.environ, 'CMDB_SHA256')
+            if not re.fullmatch(r'[0-9a-f]{64}', cmdb_sha) or hashlib.sha256(cmdb_raw).hexdigest() != cmdb_sha:
+                raise base.OperationError('authenticated CMDB digest mismatch')
         cmdb = json.loads(cmdb_raw)
         node = base.required(os.environ, "DEV_INGRESS_NODE")
         target = dev_ingress_ip(cmdb, node)

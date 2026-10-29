@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 import json
 import tempfile
 import unittest
@@ -46,10 +47,15 @@ class FeatureDnsContract(unittest.TestCase):
             env={'DNS_ZONE':'onwalk.net','DNS_ENVIRONMENT':'sit','FEATURE_ID':'sit-test-1483','FEATURE_DNS_SERVICE':'console',
                  'CMDB_FILE':str(path),'DEV_INGRESS_NODE':'dev-k3s-v5','LINODE_TOKEN':'fake-read-token','FEATURE_CANDIDATE_SHA256':'a'*64,
                  'FEATURE_CANDIDATE_RECEIPT':str(candidate_path),'GITHUB_REPOSITORY':repo,'GITHUB_REF':'refs/heads/main',
+                 'FEATURE_CANDIDATE_RECEIPT_SHA256':hashlib.sha256(candidate_path.read_bytes()).hexdigest(),
+                 'CMDB_SHA256':hashlib.sha256(path.read_bytes()).hexdigest(),
                  'GITHUB_WORKFLOW_REF':ref,'GITHUB_SHA':'b'*40,'GITHUB_RUN_ID':'123','GITHUB_RUN_ATTEMPT':'1'}
             with patch.dict(os.environ,env,clear=True), patch.object(MODULE,'requested_domain',return_value=('smoke-sit-test-1483-sit.onwalk.net','smoke-sit-test-1483')), patch.object(TARGET_CHECK,'_linode_get_one',return_value=(403,{})), patch.object(MODULE,'FeatureCloudflare') as client, contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(MODULE.main(),1)
             client.assert_not_called()
+            with patch.dict(os.environ,dict(env,CMDB_SHA256='f'*64),clear=True), patch.object(MODULE,'requested_domain',return_value=('smoke-sit-test-1483-sit.onwalk.net','smoke-sit-test-1483')), patch.object(TARGET_CHECK,'_linode_get_one') as lookup, patch.object(MODULE,'FeatureCloudflare') as client, contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(MODULE.main(),1)
+                lookup.assert_not_called();client.assert_not_called()
             for invalid in ('', 'bad', 'A'*64):
                 with self.subTest(invalid=invalid), patch.dict(os.environ,dict(env,FEATURE_CANDIDATE_SHA256=invalid),clear=True), patch.object(MODULE,'requested_domain',return_value=('smoke-sit-test-1483-sit.onwalk.net','smoke-sit-test-1483')), patch.object(TARGET_CHECK,'_linode_get_one') as lookup, patch.object(MODULE,'FeatureCloudflare') as client, contextlib.redirect_stderr(io.StringIO()):
                     self.assertEqual(MODULE.main(),1)
@@ -74,12 +80,15 @@ class FeatureDnsContract(unittest.TestCase):
                  'source':{'repository':repo,'workflow_ref':ref,'workflow_sha':'a'*40,'run_id':'11','run_attempt':'1'}}
         with tempfile.TemporaryDirectory() as temp:
             path=Path(temp)/'receipt.json';path.write_text(json.dumps(receipt))
+            env['FEATURE_CANDIDATE_RECEIPT_SHA256']=hashlib.sha256(path.read_bytes()).hexdigest()
             MODULE.verify_candidate_receipt(str(path),'sit-test-1483','smoke-sit-test-1483','b'*64,env)
             for changed in ({'GITHUB_RUN_ID':'12'},{'GITHUB_REF':'refs/heads/other'},{'GITHUB_SHA':'c'*40}):
                 with self.subTest(changed=changed),self.assertRaises(MODULE.base.OperationError):
                     MODULE.verify_candidate_receipt(str(path),'sit-test-1483','smoke-sit-test-1483','b'*64,{**env,**changed})
             with self.assertRaises(MODULE.base.OperationError):
                 MODULE.verify_candidate_receipt(str(path),'sit-test-1483','other-sit-test-1483','b'*64,env)
+            with self.assertRaises(MODULE.base.OperationError):
+                MODULE.verify_candidate_receipt(str(path),'sit-test-1483','smoke-sit-test-1483','b'*64,{**env,'FEATURE_CANDIDATE_RECEIPT_SHA256':'c'*64})
 
     def test_tagged_owner_requires_exact_candidate_hostname_and_ownership(self):
         directory = tempfile.TemporaryDirectory()
