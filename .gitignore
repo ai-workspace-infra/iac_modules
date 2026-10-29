@@ -56,3 +56,5 @@ offline-iac/
 offline-setup-*.tar.gz
 
 .env
+
+/scripts/pipeline/lib/node_modules/

@@ -260,3 +260,9 @@ with the network key. The query may use only fixed Lish/GNU screen copy-mode
 controls to read boot scrollback; it sends no printable text, newline,
 credential or guest command and exits copy mode before closing. Raw console
 buffers remain private and are never delivery artifacts.
+
+Weblish viewport redraws are rendered through integrity-locked
+`@xterm/headless` 5.5.0, installed with package scripts disabled. The reader
+captures at most 64 quiet 80-by-40 viewports, preserving backspace/cursor
+corrections before full host-key parsing. Console text is not treated as an
+append-only log, and rendered viewports remain private query material.

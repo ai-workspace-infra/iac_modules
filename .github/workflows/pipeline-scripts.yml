@@ -28,6 +28,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install locked provider console renderer without package scripts
+        run: npm ci --prefix scripts/pipeline/lib --ignore-scripts --no-audit --no-fund --loglevel=error
+
       - name: Install exact owner contract dependencies
         run: python3 -m pip install PyYAML==6.0.2 Jinja2==3.1.6
 
