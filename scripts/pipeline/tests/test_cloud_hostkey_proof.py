@@ -1,6 +1,8 @@
 """Full fingerprint proof across narrow consoles, without cloud credentials."""
 import base64
 import hashlib
+import importlib.util
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -15,6 +17,20 @@ from unified.hostkeys import console_fingerprint
 
 
 class CloudHostkeyProofTests(unittest.TestCase):
+    def test_candidate_hostkey_read_is_bound_to_exact_cmdb_digest_and_node(self):
+        spec = importlib.util.spec_from_file_location('candidate_hostkey', Path(__file__).resolve().parents[1] / 'akamai-candidate-hostkey.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        sample = {'node': {'name': 'candidate', 'label': 'candidate', 'instance_id': 123,
+                           'host_vars': {'cloud_provider': 'akamai-cloud'}}}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'cmdb.json'
+            path.write_text(json.dumps(sample))
+            checksum = hashlib.sha256(path.read_bytes()).hexdigest()
+            self.assertEqual(module.select(path, checksum, 'candidate')['instance_id'], 123)
+            with self.assertRaises(ContractError): module.select(path, '0'*64, 'candidate')
+            with self.assertRaises(ContractError): module.select(path, checksum, 'another')
+
     def test_actual_bootstrap_script_produces_complete_framed_fingerprint(self):
         root = Path(__file__).resolve().parents[3]
         script = yaml.safe_load((root / "terraform-hcl-standard/akamai-cloud/templates/cloud-init.yaml").read_text())["runcmd"][-1]

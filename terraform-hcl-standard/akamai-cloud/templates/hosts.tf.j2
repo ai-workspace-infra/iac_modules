@@ -88,7 +88,7 @@ module "compute_{{ hid }}" {
 
 {% if host.get('volume') %}
 module "volume_{{ hid }}" {
-  source     = "{{ module_root }}/storage"
+  source     = "{{ module_root }}/{{ storage_module }}"
   label      = "{{ host.volume.get('label', host.label ~ '-data') }}"
   region     = {% if host.get('region') %}"{{ host.region }}"{% else %}var.region{% endif %}
   size       = {{ host.volume.get('size', 10) }}
@@ -107,6 +107,16 @@ output "cmdb_runtime" {
       private_ip  = module.compute_{{ host.name | tf_id }}.private_ip
       instance_id = module.compute_{{ host.name | tf_id }}.instance_id
       ipv6        = module.compute_{{ host.name | tf_id }}.ipv6
+{% if host.get('volume') %}
+      data_volume = {
+        volume_id       = module.volume_{{ host.name | tf_id }}.volume_id
+        filesystem_path = module.volume_{{ host.name | tf_id }}.filesystem_path
+        size_gb         = module.volume_{{ host.name | tf_id }}.size_gb
+        region          = module.volume_{{ host.name | tf_id }}.region
+        label           = module.volume_{{ host.name | tf_id }}.label
+        linode_id       = module.volume_{{ host.name | tf_id }}.linode_id
+      }
+{% endif %}
     }
 {% endfor %}
   }

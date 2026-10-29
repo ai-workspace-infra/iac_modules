@@ -168,6 +168,7 @@ def render(args):
             hosts=hosts,
             module_root=os.path.relpath(ROOT / "modules", workdir),
             compute_module="compute_protected" if prevent_destroy else "compute",
+            storage_module="storage_protected" if prevent_destroy else "storage",
             # Account-level linode_sshkey objects cannot be owned by six states.
             # Each isolated namespace therefore passes the public keys directly
             # to its instance unless a legacy declaration explicitly opts in.
@@ -211,10 +212,31 @@ def terraform_output(workdir: Path):
     return json.loads(raw)
 
 
+def validated_data_volume(host, facts, region):
+    """Only provider output may bind a declared disk to a deployment host."""
+    declared = host.get("volume")
+    if not declared:
+        return None
+    volume = facts.get("data_volume")
+    if not isinstance(volume, dict):
+        raise SystemExit("declared data volume is missing from Terraform runtime output")
+    for key in ("volume_id", "linode_id", "size_gb"):
+        value = volume.get(key)
+        if isinstance(value, bool) or not str(value or "").isdigit() or int(value) <= 0:
+            raise SystemExit("data volume runtime identity/capacity is incomplete")
+    if (str(volume["linode_id"]) != str(facts.get("instance_id"))
+            or volume.get("region") != region
+            or volume.get("label") != declared.get("label", host["label"] + "-data")
+            or int(volume["size_gb"]) < int(declared.get("size", 10))
+            or not re.fullmatch(r"/dev/disk/by-id/[A-Za-z0-9._+-]+", str(volume.get("filesystem_path", "")))):
+        raise SystemExit("data volume does not match declared host, region, label, size or stable device path")
+    return {key: volume[key] for key in ("volume_id", "linode_id", "size_gb", "region", "label", "filesystem_path")}
+
+
 def inventory(args):
     resources, workdir = Path(args.resources), Path(args.workdir)
     global_config, _, hosts = load_sources(resources)
-    if global_config.get("environment") == "dev":
+    if global_config.get("environment") == "dev" or any(host.get("volume") for host in hosts):
         # Only derived deployment artifacts are invalidated. Never leave an
         # earlier address available if the runtime read or validation fails.
         for artifact in ("cmdb.json", "inventory.ini"):
@@ -250,6 +272,10 @@ def inventory(args):
         host_vars.setdefault("cloud_region", host.get("region", default_region))
         host_vars.setdefault("plan", host.get("type", host.get("plan", global_config.get("type"))))
         host_vars.setdefault("image", host.get("image", global_config.get("image")))
+        data_volume = validated_data_volume(host, facts, host_vars["cloud_region"])
+        if data_volume:
+            host_vars["data_volume"] = data_volume
+            host_vars["web_saas_data_device_path"] = data_volume["filesystem_path"]
         service_domains = host_vars.get("service_domains", []) or []
         fqdn = str(service_domains[0]).strip() if isinstance(service_domains, list) and service_domains else name
         ssh_user = host.get("ansible_user", "root")
@@ -271,6 +297,8 @@ def inventory(args):
             "ansible_user": ssh_user,
             "host_vars": host_vars,
         }
+        if data_volume:
+            cmdb[fqdn]["data_volume"] = data_volume
         # INI host values are parsed as Python literals by Ansible. Quote the
         # complete literal so spaces, lists and booleans survive shlex parsing.
         inventory_vars = {**host_vars, "ansible_host": facts.get("ip", ""), "ansible_user": ssh_user}

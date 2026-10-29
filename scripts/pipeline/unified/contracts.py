@@ -148,6 +148,7 @@ def validate_target(target, gitops_root):
         if spec.get("manifest"):
             source_file(gitops_root, spec["manifest"])
         if spec["mode"] == "terraform":
+            require(type(spec.get("create_only", False)) is bool, "stage.create_only must be a boolean")
             require(target["provider"] != "azure-cloud", "Azure renderer not implemented; declare unsupported")
             if stage != "resources":
                 require(target["provider"] == "gcp-cloud" and stage == "bootstrap", "account state split/adapter not implemented; declare unsupported or verify")
