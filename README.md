@@ -252,3 +252,11 @@ artifacts or secrets staged.
 
 - [Official website](https://www.svc.plus/)
 - [ai-workspace-infra organization](https://github.com/ai-workspace-infra)
+
+The Akamai candidate console query supports ordered binary UTF-8 frames and
+canonical cloud-init `BEGIN/END SSH HOST KEY KEYS` frames. It accepts only a
+complete Ed25519 SSH wire key and still compares the full SHA-256 fingerprint
+with the network key. The query may use only fixed Lish/GNU screen copy-mode
+controls to read boot scrollback; it sends no printable text, newline,
+credential or guest command and exits copy mode before closing. Raw console
+buffers remain private and are never delivery artifacts.

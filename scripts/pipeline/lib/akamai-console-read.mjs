@@ -1,10 +1,12 @@
-// Provider console reads only; never send keyboard input or log session tokens.
+// Provider console reads only; only fixed read-only scrollback controls are allowed.
 import { consoleText } from './console-text.mjs';
+import { readScrollback } from './console-scrollback.mjs';
 let input = '';
 for await (const chunk of process.stdin) input += chunk;
 const config = JSON.parse(input);
 const socket = new WebSocket(config.weblish_url, config.ws_protocols);
 socket.binaryType = 'arraybuffer';
+socket.addEventListener('open', () => readScrollback(socket));
 const decoder = new TextDecoder('utf-8');
 let output = '';
 let pending = Promise.resolve();
