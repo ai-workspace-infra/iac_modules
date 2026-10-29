@@ -1,5 +1,5 @@
 // Provider console reads only; only fixed read-only scrollback controls are allowed.
-import { consoleText } from './console-text.mjs';
+import { consoleText, writeConsole } from './console-text.mjs';
 import { readScrollback } from './console-scrollback.mjs';
 import { ConsoleRenderer } from './console-renderer.mjs';
 let input = '';
@@ -32,7 +32,7 @@ setTimeout(async () => {
   await pending;
   await renderer.write(decoder.decode());
   capture();
-  process.stdout.write(snapshots.join('\n'));
+  await writeConsole(snapshots.join('\n'));
   renderer.dispose();
   process.exit(0);
 }, Number(process.argv[2]));

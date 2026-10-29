@@ -6,3 +6,7 @@ export async function consoleText(data, decoder) {
   if (ArrayBuffer.isView(data)) return decoder.decode(data, { stream: true });
   throw new Error('Unsupported provider console frame type');
 }
+
+export async function writeConsole(text, stream = process.stdout) {
+  await new Promise((resolve, reject) => stream.write(text, (error) => error ? reject(error) : resolve()));
+}

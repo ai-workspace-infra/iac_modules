@@ -53,3 +53,13 @@ test('actual terminal rendering restores overwritten and wrapped public host key
     assert.ok(!snapshot.includes('\x1b') && !snapshot.includes('\b'));
   } finally { renderer.dispose(); }
 });
+
+import { spawnSync } from 'node:child_process';
+test('complete terminal evidence is flushed across pipe backpressure before exit', () => {
+  const moduleUrl = new URL('./console-text.mjs', import.meta.url).href;
+  const source = `import { writeConsole } from ${JSON.stringify(moduleUrl)}; const x='IAC_ED25519_FP_BEGIN\\n'+'x'.repeat(1024*1024)+'\\nIAC_ED25519_FP_END'; await writeConsole(x); process.exit(0);`;
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', source], { maxBuffer: 2*1024*1024 });
+  assert.equal(result.status, 0);
+  assert.ok(result.stdout.toString().endsWith('IAC_ED25519_FP_END'));
+  assert.ok(result.stdout.length > 1024*1024);
+});
