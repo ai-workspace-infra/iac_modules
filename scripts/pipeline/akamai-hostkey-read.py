@@ -50,7 +50,9 @@ def main():
         raise ContractError('complete trusted cloud fingerprint missing; '
             f'decoded_chars={len(result.stdout)}, '
             f'begin_frames={result.stdout.count("IAC_ED25519_FP_BEGIN")}, '
-            f'end_frames={result.stdout.count("IAC_ED25519_FP_END")}') from None
+            f'end_frames={result.stdout.count("IAC_ED25519_FP_END")}, '
+            f'canonical_frames={result.stdout.count("BEGIN SSH HOST KEY KEYS")}, '
+            f'login_prompt={"login:" in result.stdout}') from None
     scan = subprocess.run(["ssh-keyscan", "-T", "10", "-t", "ed25519", str(address)], capture_output=True, text=True, timeout=20)
     rows = [line.split() for line in scan.stdout.splitlines() if line and not line.startswith("#")]
     require(len(rows) == 1 and len(rows[0]) == 3 and rows[0][1] == "ssh-ed25519", "one network Ed25519 key required")

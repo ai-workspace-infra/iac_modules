@@ -58,6 +58,19 @@ class CloudHostkeyProofTests(unittest.TestCase):
         source=Path(__file__).resolve().parents[1]/"lib/console-text.test.mjs"
         subprocess.run(["node","--test",str(source)],check=True,capture_output=True)
 
+    def test_canonical_cloud_init_frame_requires_one_complete_host_key(self):
+        raw=b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20" + bytes(range(32))
+        key=base64.b64encode(raw).decode()
+        fp="SHA256:"+base64.b64encode(hashlib.sha256(raw).digest()).decode().rstrip("=")
+        frame="-----BEGIN SSH HOST KEY KEYS-----\nssh-ed25519 " + key + " root@candidate\n-----END SSH HOST KEY KEYS-----\n"
+        self.assertEqual(console_fingerprint(frame), fp)
+        self.assertEqual(console_fingerprint(frame.replace("\n", "\x1b[2;1H")), fp)
+        self.assertEqual(console_fingerprint(frame.replace(key,key[:40]+"\n"+key[40:])),fp)
+        for text in ("ssh-ed25519 "+key, frame.replace(key,key[:-8]), frame.replace("HOST KEY KEYS","AUTHORIZED KEYS")):
+            with self.assertRaises(ContractError): console_fingerprint(text)
+        conflict=frame.replace(key,base64.b64encode(raw[:-1]+b"Z").decode())
+        with self.assertRaises(ContractError): console_fingerprint(frame+conflict)
+
     def test_provider_console_reader_javascript_parses(self):
         source=Path(__file__).resolve().parents[1]/"lib/akamai-console-read.mjs"
         subprocess.run(["node","--check",str(source)],check=True,capture_output=True)

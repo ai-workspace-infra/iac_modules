@@ -21,3 +21,19 @@ test('text frames remain unchanged and unknown objects are rejected', async () =
   assert.equal(await consoleText(text, new TextDecoder()), text);
   await assert.rejects(consoleText({}, new TextDecoder()), /Unsupported/);
 });
+
+import { scrollbackFrames, readScrollback } from './console-scrollback.mjs';
+test('provider scrollback controls are finite and contain no guest command text', () => {
+  const sent = [];
+  const socket = { readyState: 1, send: (x) => sent.push(x) };
+  const old = globalThis.WebSocket;
+  globalThis.WebSocket = { OPEN: 1 };
+  try {
+    readScrollback(socket, (fn) => fn());
+    assert.equal(sent.length, 18);
+    assert.equal(sent[0], '\x01\x1b');
+    assert.equal(sent.at(-1), '\x1b');
+    assert.ok(sent.every((x) => ['\x01\x1b', '\x02', '\x1b'].includes(x)));
+    assert.ok(scrollbackFrames.every(([ms]) => ms >= 0 && ms <= 9000));
+  } finally { globalThis.WebSocket = old; }
+});
