@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 from urllib.parse import urlencode
 
@@ -137,8 +138,11 @@ def verify_candidate_receipt(path, feature_id, tag, fingerprint, env):
         raise base.OperationError('invalid candidate receipt')
     repo = env.get('GITHUB_REPOSITORY', '')
     ref = repo + '/.github/workflows/feature-lane-deploy.yml@refs/heads/main'
-    producer = receipt.get('source', {}) if isinstance(receipt, dict) else {}
-    lane = receipt.get('projection', {}).get('tagged_lane', {}) if isinstance(receipt, dict) else {}
+    producer = receipt.get('source')
+    projection = receipt.get('projection')
+    if not isinstance(producer, dict) or not isinstance(projection, dict):
+        raise base.OperationError('invalid candidate receipt provenance')
+    lane = projection.get('tagged_lane')
     if (repo != 'ai-workspace-infra/Platform-Orchestrator' or env.get('GITHUB_REF') != 'refs/heads/main' or
         not re.fullmatch(r'[0-9a-f]{40}', env.get('GITHUB_SHA', '')) or
         not re.fullmatch(r'[1-9][0-9]*', env.get('GITHUB_RUN_ID', '')) or
@@ -150,6 +154,20 @@ def verify_candidate_receipt(path, feature_id, tag, fingerprint, env):
         producer.get('workflow_sha') != env.get('GITHUB_SHA') or producer.get('run_id') != env.get('GITHUB_RUN_ID') or
         producer.get('run_attempt') != env.get('GITHUB_RUN_ATTEMPT')):
         raise base.OperationError('candidate receipt is not bound to protected same-run tag')
+    gitops = Path(base.required(env, 'FEATURE_GITOPS_ROOT')).resolve(strict=True)
+    contract = Path(base.required(env, 'FEATURE_DOMAIN_CONTRACT')).resolve(strict=True)
+    if contract != gitops / 'docs/features/tagged-sit-domain-contract.yaml':
+        raise base.OperationError('domain declaration outside candidate GitOps checkout')
+    candidate_head = receipt.get('candidate_head', '')
+    if not re.fullmatch(r'[0-9a-f]{40}', candidate_head):
+        raise base.OperationError('candidate GitOps revision missing')
+    try:
+        checked_out = subprocess.run(['git', '-C', str(gitops), 'rev-parse', 'HEAD'], check=True,
+                                     capture_output=True, text=True, timeout=10).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        raise base.OperationError('candidate GitOps checkout unavailable') from None
+    if checked_out != candidate_head:
+        raise base.OperationError('domain declaration is not at candidate GitOps revision')
 
 
 class FeatureCloudflare(base.Cloudflare):

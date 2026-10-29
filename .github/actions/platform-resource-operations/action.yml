@@ -11,6 +11,7 @@ inputs:
   feature_candidate_receipt: {required: false, default: '', description: "Same-run verified candidate receipt; required for sit-feature-tag-dns"}
   feature_candidate_receipt_sha256: {required: false, default: '', description: "SHA-256 of same-run candidate receipt; required for sit-feature-tag-dns"}
   feature_domain_contract: {required: false, default: '', description: "Reviewed GitOps v2 domain declaration at the authenticated candidate commit"}
+  feature_gitops_root: {required: false, default: '', description: "GitOps checkout at candidate revision; required for sit-feature-tag-dns"}
   dns_service: {required: false, default: '', description: "console, accounts, or billing; required only for sit-feature-dns"}
   cmdb_file: {required: false, default: '', description: "Fresh IaC CMDB path; required only for sit-feature-dns"}
   cmdb_sha256: {required: false, default: '', description: "Authenticated CMDB digest; required for sit-feature-tag-dns"}
@@ -47,6 +48,7 @@ runs:
         FEATURE_CANDIDATE_RECEIPT: ${{ inputs.feature_candidate_receipt }}
         FEATURE_CANDIDATE_RECEIPT_SHA256: ${{ inputs.feature_candidate_receipt_sha256 }}
         FEATURE_DOMAIN_CONTRACT: ${{ inputs.feature_domain_contract }}
+        FEATURE_GITOPS_ROOT: ${{ inputs.feature_gitops_root }}
         FEATURE_DNS_SERVICE: ${{ inputs.dns_service }}
         CMDB_FILE: ${{ inputs.cmdb_file }}
         CMDB_SHA256: ${{ inputs.cmdb_sha256 }}
