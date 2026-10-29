@@ -109,6 +109,29 @@ class ContractTests(unittest.TestCase):
         renamed["account"] = "different-account"
         self.assertNotEqual(state_lock_key(renamed), state_lock_key(self.target))
 
+    def test_create_only_plan_rejects_updates_and_replacements(self):
+        target = copy.deepcopy(self.target)
+        target['stages']['resources']['create_only'] = True
+        owner = target['stages']['resources']['owners'][0]
+        item = {'address': owner, 'type': 'linode_instance', 'change': {'actions': ['create']}}
+        self.assertEqual(guard_plan(target, 'resources', {'resource_changes': [item]}, 'apply')['create'], 1)
+        for actions in (['update'], ['delete', 'create']):
+            item['change']['actions'] = actions
+            with self.assertRaises(ContractError): guard_plan(target, 'resources', {'resource_changes': [item]}, 'apply')
+
+    def test_runtime_volume_binding_survives_receipts_without_untrusted_fields(self):
+        volume = {'volume_id': 42, 'linode_id': 123, 'size_gb': 100, 'region': 'us-east',
+                  'label': 'retained-data', 'filesystem_path': '/dev/disk/by-id/scsi-0Linode_Volume_retained-data',
+                  'secret': 'must-not-copy'}
+        raw = {'node': {'instance_id': 123, 'region': 'us-east', 'data_volume': volume}}
+        clean = sanitize_inventory(raw)
+        self.assertEqual(clean['node']['data_volume']['volume_id'], 42)
+        self.assertNotIn('must-not-copy', json.dumps(clean))
+        for field, value in [('linode_id', 456), ('filesystem_path', '/dev/sda'), ('volume_id', True)]:
+            changed = copy.deepcopy(raw)
+            changed['node']['data_volume'][field] = value
+            with self.assertRaises(ContractError): sanitize_inventory(changed)
+
     def test_real_provider_identity_mismatch_rejected(self):
         fixtures = [
             ("aws-cloud", {"Account": "wrong", "Arn": "arn:aws:sts::wrong:assumed-role/deploy/run"}),

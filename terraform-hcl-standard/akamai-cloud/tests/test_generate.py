@@ -16,6 +16,43 @@ import generate  # noqa: E402
 
 
 class GenerateTest(unittest.TestCase):
+    def test_protected_volume_is_rendered_and_identity_bound_before_inventory(self):
+        source = yaml.safe_load((ROOT / 'tests/fixtures/linode.yaml').read_text())
+        source['global'].update(environment='prod', workspace='volume-test', state_namespace='volume-test')
+        source['hosts'][0]['volume'] = {'label': 'retained-data', 'size': 100, 'filesystem': 'ext4'}
+        volume = {'volume_id': 42, 'linode_id': 123, 'size_gb': 100, 'region': 'us-east',
+                  'label': 'retained-data', 'filesystem_path': '/dev/disk/by-id/scsi-0Linode_Volume_retained-data'}
+        with tempfile.TemporaryDirectory() as tempdir:
+            resource = Path(tempdir) / 'prod.yaml'
+            resource.write_text(yaml.safe_dump(source))
+            workdir = Path(tempdir) / 'volume-test'
+            generate.render(SimpleNamespace(resources=resource, workdir=workdir, namespace='volume-test'))
+            hcl = (workdir / 'generated_hosts.tf').read_text()
+            self.assertIn('/storage_protected"', hcl)
+            self.assertIn('module.volume_web_node.filesystem_path', hcl)
+            runtime = {'web-node': {'ip': '198.51.100.10', 'instance_id': 123, 'data_volume': volume}}
+            with mock.patch.object(generate, 'terraform_output', return_value=runtime):
+                generate.inventory(SimpleNamespace(resources=resource, workdir=workdir))
+            facts = next(iter(json.loads((workdir / 'cmdb.json').read_text()).values()))
+            self.assertEqual(facts['data_volume'], volume)
+            self.assertEqual(facts['host_vars']['web_saas_data_device_path'], volume['filesystem_path'])
+            runtime['web-node']['data_volume'] = {**volume, 'linode_id': 999}
+            with mock.patch.object(generate, 'terraform_output', return_value=runtime), self.assertRaises(SystemExit):
+                generate.inventory(SimpleNamespace(resources=resource, workdir=workdir))
+            self.assertFalse((workdir / 'cmdb.json').exists())
+            self.assertFalse((workdir / 'inventory.ini').exists())
+
+    def test_missing_wrong_or_root_volume_facts_are_rejected(self):
+        host = {'label': 'node', 'volume': {'label': 'data', 'size': 100}}
+        volume = {'volume_id': 42, 'linode_id': 123, 'size_gb': 100, 'region': 'us-east',
+                  'label': 'data', 'filesystem_path': '/dev/disk/by-id/scsi-0Linode_Volume_data'}
+        bad = [None, {**volume, 'size_gb': 10}, {**volume, 'region': 'other'},
+               {**volume, 'filesystem_path': '/dev/sda'}, {**volume, 'volume_id': True},
+               {**volume, 'label': 'other'}]
+        for sample in bad:
+            with self.subTest(sample=sample), self.assertRaises(SystemExit):
+                generate.validated_data_volume(host, {'instance_id': 123, 'data_volume': sample}, 'us-east')
+
     def test_firewall_label_is_stable_and_within_linode_limit(self):
         label = "open-platform-uat-ak-open-platform"
         rendered = generate.firewall_label(label)

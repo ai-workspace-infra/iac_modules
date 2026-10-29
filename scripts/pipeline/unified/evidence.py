@@ -88,6 +88,8 @@ def guard_plan(target, stage, plan, action):
         address = item["address"]
         require(owner_match(address, spec["owners"]), f"resource outside stage ownership: {address}")
         actions = item["change"]["actions"]
+        if spec.get("create_only") and action != "destroy":
+            require(actions in (["create"], ["no-op"], ["read"]), "create-only target cannot update, replace or delete existing resources")
         for operation in counts:
             counts[operation] += operation in actions
         if "delete" in actions:
@@ -113,7 +115,7 @@ def guard_plan(target, stage, plan, action):
 
 def sanitize_inventory(raw):
     require(isinstance(raw, dict), "inventory must be a mapping")
-    permitted = {"name", "fqdn", "label", "ip", "private_ip", "ipv6", "instance_id", "region", "type", "image", "groups", "ansible_user", "cloud_provider"}
+    permitted = {"name", "fqdn", "label", "ip", "private_ip", "ipv6", "instance_id", "region", "type", "image", "groups", "ansible_user", "cloud_provider", "data_volume"}
     vars_allowed = {"role", "cloud_provider", "cloud_region", "plan", "image", "service_domains", "xconnect_role", "target_generation"}
     clean = {}
     for name, facts in raw.items():
@@ -132,6 +134,17 @@ def sanitize_inventory(raw):
                 require(not address.is_unspecified and not address.is_loopback and not address.is_multicast, "invalid deployment address")
         require(all(isinstance(group, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,126}", group) for group in facts.get("groups", [])), "invalid inventory group")
         clean[name] = {key: value for key, value in facts.items() if key in permitted}
+        if "data_volume" in facts:
+            volume = facts["data_volume"]
+            keys = {"volume_id", "linode_id", "size_gb", "region", "label", "filesystem_path"}
+            require(isinstance(volume, dict) and keys <= volume.keys(), "data volume identity is incomplete")
+            for key in ("volume_id", "linode_id", "size_gb"):
+                require(not isinstance(volume[key], bool) and str(volume[key]).isdigit() and int(volume[key]) > 0, "invalid data volume numeric identity")
+            require(str(volume["linode_id"]) == str(facts.get("instance_id")), "data volume belongs to another instance")
+            require(volume["region"] == facts.get("region"), "data volume region differs from instance")
+            require(isinstance(volume["label"], str) and re.fullmatch(r"[A-Za-z0-9_-]{1,32}", volume["label"]), "invalid data volume label")
+            require(isinstance(volume["filesystem_path"], str) and re.fullmatch(r"/dev/disk/by-id/[A-Za-z0-9._+-]+", volume["filesystem_path"]), "data volume requires a stable device path")
+            clean[name]["data_volume"] = {key: volume[key] for key in sorted(keys)}
         allowed_host_vars = set(vars_allowed)
         if "dev" in facts.get("groups", []):
             # Non-sensitive bootstrap inputs must survive the real public

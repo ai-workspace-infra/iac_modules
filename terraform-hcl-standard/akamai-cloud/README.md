@@ -1,5 +1,25 @@
 # Akamai Cloud / Linode VPS Terraform Standard
 
+## Independent production data volumes
+
+`hosts[].volume` creates a separate attached Block Storage device. Production
+`prevent_destroy` selection now chooses a protected storage module as well as a
+protected compute module. Protection does not survive removing the module from
+configuration; the catalog transition and saved-plan gates remain necessary.
+`stages.resources.create_only: true` rejects updates/replacements/deletions during
+initial creation, while permitting a no-op retry.
+
+IaC never formats or mounts the disk. The declared filesystem is metadata for
+Playbooks; it is not a supported `linode_volume` resource argument. Runtime output
+and the verified CMDB carry the provider volume ID, attached instance ID, actual
+size/region/label and stable `filesystem_path`. Inventory generation refuses a
+missing or mismatched disk and invalidates stale derived inventory before publishing.
+
+The `akamai-candidate-hostkey` owner action binds the existing TLS-verified cloud
+console fingerprint reader to one checksummed CMDB host. It emits a matching public
+known_hosts file for the host owner without executing host commands or printing
+provider/console tokens. Consumers must verify the originating IaC receipt first.
+
 此目录是 Akamai Cloud（Linode VPS）的 IaC provider tree。结构遵循现有
 `aws-cloud`、`gcp-cloud` 和 `vultr-vps` 约定；Terraform 实际使用
 `linode/linode` provider，`akamai/akamai` CDN/Edge provider 不属于本目录。

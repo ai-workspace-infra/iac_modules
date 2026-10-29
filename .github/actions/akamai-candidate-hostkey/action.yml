@@ -1,0 +1,27 @@
+name: Verify Akamai candidate SSH identity
+description: Read provider-attested SSH identity for one receipt-bound candidate; no host execution.
+inputs:
+  cmdb-file: {required: true, description: Owner-verified single-host CMDB file}
+  cmdb-sha256: {required: true, description: Expected CMDB checksum}
+  account: {required: true, description: Reviewed concrete provider account}
+  node: {required: true, description: Reviewed logical node name}
+  output-dir: {required: true, description: New private directory for attestation}
+outputs:
+  known-hosts:
+    description: Provider-attested public host-key file
+    value: ${{ inputs.output-dir }}/known_hosts
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+    - name: Read and bind provider SSH identity
+      shell: bash
+      env:
+        CANDIDATE_CMDB: ${{ inputs.cmdb-file }}
+        CANDIDATE_CMDB_SHA256: ${{ inputs.cmdb-sha256 }}
+        CANDIDATE_ACCOUNT: ${{ inputs.account }}
+        CANDIDATE_NODE: ${{ inputs.node }}
+        CANDIDATE_OUTPUT: ${{ inputs.output-dir }}
+      run: python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/akamai-candidate-hostkey.py"
