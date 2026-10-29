@@ -7,6 +7,7 @@ inputs:
   feature_id: {required: false, default: '', description: "Validated stable feature-delivery ID; required only for sit-feature-dns"}
   feature_tag: {required: false, default: '', description: "Tag from the authenticated candidate; required for sit-feature-tag-dns"}
   feature_hostname: {required: false, default: '', description: "Service hostname from the authenticated candidate; required for sit-feature-tag-dns"}
+  feature_candidate_sha256: {required: false, default: '', description: "Authenticated candidate fingerprint; required for sit-feature-tag-dns"}
   feature_domain_contract: {required: false, default: '', description: "Reviewed GitOps v2 domain declaration at the authenticated candidate commit"}
   dns_service: {required: false, default: '', description: "console, accounts, or billing; required only for sit-feature-dns"}
   cmdb_file: {required: false, default: '', description: "Fresh IaC CMDB path; required only for sit-feature-dns"}
@@ -26,6 +27,10 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Install tagged SIT DNS reader dependencies
+      if: inputs.operation == 'sit-feature-tag-dns'
+      shell: bash
+      run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.2
     - id: execute
       shell: bash
       env:
@@ -35,6 +40,7 @@ runs:
         FEATURE_ID: ${{ inputs.feature_id }}
         FEATURE_TAG: ${{ inputs.feature_tag }}
         FEATURE_HOSTNAME: ${{ inputs.feature_hostname }}
+        FEATURE_CANDIDATE_SHA256: ${{ inputs.feature_candidate_sha256 }}
         FEATURE_DOMAIN_CONTRACT: ${{ inputs.feature_domain_contract }}
         FEATURE_DNS_SERVICE: ${{ inputs.dns_service }}
         CMDB_FILE: ${{ inputs.cmdb_file }}

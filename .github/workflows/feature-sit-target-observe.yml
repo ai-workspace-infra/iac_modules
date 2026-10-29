@@ -1,0 +1,72 @@
+name: Feature SIT target read-only owner
+on:
+  workflow_call:
+    inputs:
+      cmdb_artifact:
+        type: string
+        required: true
+      cmdb_sha256:
+        type: string
+        required: true
+      candidate_sha256:
+        type: string
+        required: true
+      instance_id:
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+  id-token: write
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    environment: dev
+    timeout-minutes: 10
+    steps:
+      - name: Checkout the fixed IaC owner
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: ai-workspace-infra/iac_modules
+          ref: ${{ job.workflow_sha }}
+          persist-credentials: false
+      - name: Validate protected caller before credentials
+        run: python3 scripts/verify_feature_target_caller.py
+      - name: Read authenticated same-run CMDB
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ inputs.cmdb_artifact }}
+          path: ${{ runner.temp }}/feature-target-cmdb
+      - name: Install pinned parser dependency
+        run: python3 -m pip install PyYAML==6.0.3
+      - name: Read dedicated Akamai target identity
+        id: vault
+        uses: hashicorp/vault-action@892a26828f195e65540a40b4768ae4571f51ebfc # v4
+        with:
+          url: https://vault.svc.plus
+          method: jwt
+          role: github-actions-feature-target-read-sit
+          jwtGithubAudience: vault
+          exportEnv: false
+          secrets: |
+            kv/data/sit/platform/akamai/feature-target token | FEATURE_LINODE_TOKEN
+      - name: Compare provider with fixed CMDB and candidate
+        env:
+          LINODE_TOKEN: ${{ steps.vault.outputs.FEATURE_LINODE_TOKEN }}
+          CMDB_SHA256: ${{ inputs.cmdb_sha256 }}
+          CANDIDATE_SHA256: ${{ inputs.candidate_sha256 }}
+          INSTANCE_ID: ${{ inputs.instance_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/verify_dev_sit_target.py \
+            --cmdb "$RUNNER_TEMP/feature-target-cmdb/cmdb.json" \
+            --instance-id "$INSTANCE_ID" --cmdb-sha256 "$CMDB_SHA256" \
+            --candidate-sha256 "$CANDIDATE_SHA256" > "$RUNNER_TEMP/feature-target-observation.json"
+      - name: Publish same-run target observation
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: feature-sit-target-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/feature-target-observation.json
+          if-no-files-found: error
+          retention-days: 7

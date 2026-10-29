@@ -2,6 +2,10 @@ import importlib.util
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
+import contextlib
+import io
+import os
 from pathlib import Path
 import yaml
 
@@ -11,9 +15,50 @@ MODULE = importlib.util.module_from_spec(SPEC)
 import sys
 sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
+sys.path.insert(0, str(ROOT.parent))
+import verify_dev_sit_target as TARGET_CHECK
 
 
 class FeatureDnsContract(unittest.TestCase):
+    def test_tagged_dns_requires_current_matching_provider_target(self):
+        cmdb={'dev-k3s-v5':{'name':'dev-k3s-v5','label':'dev-k3s-v5','instance_id':'123','ip':'8.8.8.8'}}
+        facts={'id':123,'label':'dev-k3s-v5','region':'jp-tyo-3','status':'running','ipv4':['8.8.8.8']}
+        with patch.object(TARGET_CHECK,'_linode_get_one',return_value=(200,facts)) as lookup:
+            observation=MODULE.verify_current_target(cmdb,'8.8.8.8','fake-read-token')
+            lookup.assert_called_once_with('linode/instances/123','fake-read-token')
+            self.assertEqual((observation['node'],observation['instance_id'],observation['ip']),('dev-k3s-v5','123','8.8.8.8'))
+            self.assertIn('observed_at',observation)
+        with patch.object(TARGET_CHECK,'_linode_get_one',return_value=(403,{})), self.assertRaises(MODULE.base.OperationError):
+            MODULE.verify_current_target(cmdb,'8.8.8.8','fake-read-token')
+        with patch.object(TARGET_CHECK,'_linode_get_one',return_value=(200,dict(facts,ipv4=['8.8.4.4']))), self.assertRaises(MODULE.base.OperationError):
+            MODULE.verify_current_target(cmdb,'8.8.8.8','fake-read-token')
+
+    def test_provider_denial_stops_before_dns_client_creation(self):
+        cmdb={'dev-k3s-v5':{'name':'dev-k3s-v5','label':'dev-k3s-v5','instance_id':'123','ip':'8.8.8.8',
+                             'groups':['dev','k3s','k3s_server','akamai_cloud']}}
+        with tempfile.TemporaryDirectory() as temp:
+            path=Path(temp)/'cmdb.json';path.write_text(json.dumps(cmdb))
+            env={'DNS_ZONE':'onwalk.net','DNS_ENVIRONMENT':'sit','FEATURE_ID':'sit-test-1483','FEATURE_DNS_SERVICE':'console',
+                 'CMDB_FILE':str(path),'DEV_INGRESS_NODE':'dev-k3s-v5','LINODE_TOKEN':'fake-read-token','FEATURE_CANDIDATE_SHA256':'a'*64}
+            with patch.dict(os.environ,env,clear=True), patch.object(MODULE,'requested_domain',return_value=('smoke-sit-test-1483-sit.onwalk.net','smoke-sit-test-1483')), patch.object(TARGET_CHECK,'_linode_get_one',return_value=(403,{})), patch.object(MODULE,'FeatureCloudflare') as client, contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(MODULE.main(),1)
+            client.assert_not_called()
+            for invalid in ('', 'bad', 'A'*64):
+                with self.subTest(invalid=invalid), patch.dict(os.environ,dict(env,FEATURE_CANDIDATE_SHA256=invalid),clear=True), patch.object(MODULE,'requested_domain',return_value=('smoke-sit-test-1483-sit.onwalk.net','smoke-sit-test-1483')), patch.object(TARGET_CHECK,'_linode_get_one') as lookup, patch.object(MODULE,'FeatureCloudflare') as client, contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(MODULE.main(),1)
+                    lookup.assert_not_called();client.assert_not_called()
+            output=io.StringIO()
+            with patch.dict(os.environ,env,clear=True), patch.object(MODULE,'requested_domain',return_value=('smoke-sit-test-1483-sit.onwalk.net','smoke-sit-test-1483')), patch.object(MODULE,'verify_current_target',return_value={'instance_id':'123'}), patch.object(MODULE.base.Config,'from_env',return_value=object()), patch.object(MODULE,'FeatureCloudflare'), patch.object(MODULE.base,'execute',return_value={}), contextlib.redirect_stdout(output):
+                env.update(CLOUDFLARE_DNS_API_TOKEN='fake',CLOUDFLARE_ACCOUNT_ID='fake')
+                os.environ.update(env)
+                self.assertEqual(MODULE.main(),0)
+            self.assertEqual(json.loads(output.getvalue())['candidate_sha256'],'a'*64)
+            legacy=dict(env);legacy.pop('FEATURE_CANDIDATE_SHA256');legacy.pop('LINODE_TOKEN');output=io.StringIO()
+            with patch.dict(os.environ,legacy,clear=True), patch.object(MODULE,'requested_domain',return_value=('xconnect-referral-sit.onwalk.net',None)), patch.object(TARGET_CHECK,'_linode_get_one') as lookup, patch.object(MODULE.base.Config,'from_env',return_value=object()), patch.object(MODULE,'FeatureCloudflare'), patch.object(MODULE.base,'execute',return_value={}), contextlib.redirect_stdout(output):
+                self.assertEqual(MODULE.main(),0)
+            lookup.assert_not_called()
+            self.assertNotIn('candidate_sha256',json.loads(output.getvalue()))
+
     def test_tagged_owner_requires_exact_candidate_hostname_and_ownership(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)

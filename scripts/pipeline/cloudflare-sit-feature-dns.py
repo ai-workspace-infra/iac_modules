@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ipaddress
+import datetime
+import hashlib
 import json
 import os
 import re
@@ -107,6 +109,21 @@ def dev_ingress_ip(cmdb: dict, node: str) -> str:
     return str(target)
 
 
+def verify_current_target(cmdb, target, token):
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        import verify_dev_sit_target as target_check
+        instance_id = str(cmdb.get('dev-k3s-v5', {}).get('instance_id', ''))
+        target_check.validate_cmdb(cmdb, instance_id)
+        status, facts = target_check._linode_get_one('linode/instances/' + instance_id, token)
+        if status != 200 or target_check.validate(cmdb, facts, instance_id) != target:
+            raise base.OperationError('fresh Dev provider target verification failed')
+        return {'instance_id': instance_id, 'node': 'dev-k3s-v5', 'ip': target,
+                'observed_at': datetime.datetime.now(datetime.timezone.utc).isoformat()}
+    except (ImportError, RuntimeError, ValueError):
+        raise base.OperationError('fresh Dev provider target verification failed') from None
+
+
 class FeatureCloudflare(base.Cloudflare):
     def __init__(self, token: str, account_id: str, feature_id: str, feature_tag: str | None = None):
         super().__init__(token, account_id)
@@ -140,14 +157,28 @@ def main() -> int:
         if os.environ.get("DNS_ENVIRONMENT") != "sit":
             raise base.OperationError("feature DNS is SIT-only")
         name, tag = requested_domain(os.environ, feature_id, service, zone)
-        cmdb = json.loads(Path(base.required(os.environ, "CMDB_FILE")).read_text())
+        fingerprint = None
+        if tag is not None:
+            fingerprint = base.required(os.environ, 'FEATURE_CANDIDATE_SHA256')
+            if not re.fullmatch(r'[0-9a-f]{64}', fingerprint):
+                raise base.OperationError('authenticated candidate fingerprint required')
+        cmdb_raw = Path(base.required(os.environ, "CMDB_FILE")).read_bytes()
+        cmdb = json.loads(cmdb_raw)
         node = base.required(os.environ, "DEV_INGRESS_NODE")
         target = dev_ingress_ip(cmdb, node)
+        observation = None
+        if tag is not None:
+            observation = verify_current_target(cmdb, target, base.required(os.environ, 'LINODE_TOKEN'))
+            observation['cmdb_sha256'] = hashlib.sha256(cmdb_raw).hexdigest()
         env = dict(os.environ, DNS_ENVIRONMENT="sit", DNS_ZONE=zone, DNS_RECORD_NAME=name, DNS_TARGET_IP=target)
         config = base.Config.from_env(env, allowed_environments=("sit",))
         client = FeatureCloudflare(base.required(env, "CLOUDFLARE_DNS_API_TOKEN"), base.required(env, "CLOUDFLARE_ACCOUNT_ID"), feature_id, tag)
         result = base.execute(config, client)
-        print(json.dumps({"result": "verified", "feature_id": feature_id, "feature_tag": tag, "service": service, "hostname": name, **result}, sort_keys=True))
+        output = {"result": "verified", "feature_id": feature_id, "feature_tag": tag, "service": service, "hostname": name, **result}
+        if observation is not None:
+            output['provider_observation'] = observation
+            output['candidate_sha256'] = fingerprint
+        print(json.dumps(output, sort_keys=True))
         return 0
     except (base.OperationError, ValueError, OSError, json.JSONDecodeError) as error:
         print(f"::error::{error}", file=sys.stderr)
