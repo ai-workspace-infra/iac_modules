@@ -185,14 +185,27 @@ class FeatureCloudflare(base.Cloudflare):
             tags.append(f"feature-tag:{self.feature_tag}")
         return sorted(tags)
 
+    def ownership_comment(self):
+        return f"iac-modules:sit:{self.feature_tag}"
+
     def records(self, zone_id: str, name: str) -> list[dict]:
         records = super().records(zone_id, name)
-        if any(not set(self.ownership_tags()) <= set(r.get("tags") or []) for r in records):
+        def owned(record):
+            tagged = set(self.ownership_tags()) <= set(record.get("tags") or [])
+            return tagged or (self.feature_tag is not None and record.get("comment") == self.ownership_comment())
+        if any(not owned(record) for record in records):
             raise base.OperationError("DNS name is occupied by a record not owned by this Feature ID")
         return records
 
     def create_payload(self, payload: dict) -> dict:
+        if self.feature_tag:
+            return dict(payload, comment=self.ownership_comment(), tags=[])
         return dict(payload, comment=f"Codex SIT lane {self.feature_id}", tags=self.ownership_tags())
+
+    def request(self, method: str, path: str, payload: dict | None = None):
+        if self.feature_tag and payload is not None and not payload.get("tags"):
+            payload = {key: value for key, value in payload.items() if key != "tags"}
+        return super().request(method, path, payload)
 
     def delete(self, zone_id: str, record_id: str) -> None:
         raise base.OperationError("DNS deletion requires an authenticated lane cleanup receipt; reconcile never deletes")
