@@ -4,6 +4,7 @@ import importlib.util
 import json
 import tempfile
 import unittest
+import yaml
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,6 +13,16 @@ spec=importlib.util.spec_from_file_location('dns_preflight', ROOT/'feature-dns-p
 p=importlib.util.module_from_spec(spec);spec.loader.exec_module(p)
 
 class PreflightTest(unittest.TestCase):
+ def test_workflow_gates_credentials_and_retains_evidence(self):
+  workflow=yaml.safe_load((ROOT.parents[1]/'.github/workflows/feature-sit-dns.yml').read_text())
+  steps=workflow['jobs']['dns']['steps']; names=[step.get('name','') for step in steps]
+  preflight=names.index('Validate candidate, domain contract, CMDB and live target')
+  self.assertLess(preflight,names.index('Read dedicated DNS identity'))
+  self.assertLess(preflight,names.index('Read dedicated target identity'))
+  self.assertLess(names.index('Read dedicated DNS identity'),names.index('Reconcile exact feature DNS record'))
+  retained=steps[names.index('Retain DNS receipt and recovery checkpoint')]
+  self.assertEqual(retained['if'],'always()')
+  self.assertIn('${{ inputs.service }}',retained['with']['name'])
  def test_requires_exact_fresh_target_and_candidate(self):
   with tempfile.TemporaryDirectory() as tmp:
    cmdb=Path(tmp)/'cmdb.json'; cmdb.write_text(json.dumps({'dev-k3s-v5':{'instance_id':'123'}}))
