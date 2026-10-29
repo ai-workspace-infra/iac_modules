@@ -164,9 +164,12 @@ def verify_candidate_receipt(path, feature_id, tag, fingerprint, env):
     try:
         checked_out = subprocess.run(['git', '-C', str(gitops), 'rev-parse', 'HEAD'], check=True,
                                      capture_output=True, text=True, timeout=10).stdout.strip()
+        committed_contract = subprocess.run(['git', '-C', str(gitops), 'show',
+                                             'HEAD:docs/features/tagged-sit-domain-contract.yaml'],
+                                            check=True, capture_output=True, timeout=10).stdout
     except (OSError, subprocess.SubprocessError):
         raise base.OperationError('candidate GitOps checkout unavailable') from None
-    if checked_out != candidate_head:
+    if checked_out != candidate_head or contract.read_bytes() != committed_contract:
         raise base.OperationError('domain declaration is not at candidate GitOps revision')
 
 

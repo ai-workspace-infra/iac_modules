@@ -52,7 +52,7 @@ class FeatureDnsContract(unittest.TestCase):
                  'CMDB_SHA256':hashlib.sha256(path.read_bytes()).hexdigest(),
                  'FEATURE_GITOPS_ROOT':str(gitops),'FEATURE_DOMAIN_CONTRACT':str(contract),
                  'GITHUB_WORKFLOW_REF':ref,'GITHUB_SHA':'b'*40,'GITHUB_RUN_ID':'123','GITHUB_RUN_ATTEMPT':'1'}
-            git=patch.object(MODULE.subprocess,'run',return_value=type('GitResult',(),{'stdout':'c'*40})());git.start();self.addCleanup(git.stop)
+            git=patch.object(MODULE.subprocess,'run',side_effect=lambda cmd,**kwargs:type('GitResult',(),{'stdout': 'c'*40 if 'rev-parse' in cmd else b'test'})());git.start();self.addCleanup(git.stop)
             with patch.dict(os.environ,env,clear=True), patch.object(MODULE,'requested_domain',return_value=('smoke-sit-test-1483-sit.onwalk.net','smoke-sit-test-1483')), patch.object(TARGET_CHECK,'_linode_get_one',return_value=(403,{})), patch.object(MODULE,'FeatureCloudflare') as client, contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(MODULE.main(),1)
             client.assert_not_called()
@@ -86,7 +86,7 @@ class FeatureDnsContract(unittest.TestCase):
             env.update(FEATURE_GITOPS_ROOT=str(gitops),FEATURE_DOMAIN_CONTRACT=str(contract))
             path=Path(temp)/'receipt.json';path.write_text(json.dumps(receipt))
             env['FEATURE_CANDIDATE_RECEIPT_SHA256']=hashlib.sha256(path.read_bytes()).hexdigest()
-            git=patch.object(MODULE.subprocess,'run',return_value=type('GitResult',(),{'stdout':'d'*40})());git.start();self.addCleanup(git.stop)
+            git=patch.object(MODULE.subprocess,'run',side_effect=lambda cmd,**kwargs:type('GitResult',(),{'stdout': 'd'*40 if 'rev-parse' in cmd else b'test'})());git.start();self.addCleanup(git.stop)
             MODULE.verify_candidate_receipt(str(path),'sit-test-1483','smoke-sit-test-1483','b'*64,env)
             for changed in ({'GITHUB_RUN_ID':'12'},{'GITHUB_REF':'refs/heads/other'},{'GITHUB_SHA':'c'*40}):
                 with self.subTest(changed=changed),self.assertRaises(MODULE.base.OperationError):
@@ -95,7 +95,10 @@ class FeatureDnsContract(unittest.TestCase):
                 MODULE.verify_candidate_receipt(str(path),'sit-test-1483','other-sit-test-1483','b'*64,env)
             with self.assertRaises(MODULE.base.OperationError):
                 MODULE.verify_candidate_receipt(str(path),'sit-test-1483','smoke-sit-test-1483','b'*64,{**env,'FEATURE_CANDIDATE_RECEIPT_SHA256':'c'*64})
-            with patch.object(MODULE.subprocess,'run',return_value=type('GitResult',(),{'stdout':'e'*40})()), self.assertRaises(MODULE.base.OperationError):
+            with patch.object(MODULE.subprocess,'run',side_effect=lambda cmd,**kwargs:type('GitResult',(),{'stdout': 'e'*40 if 'rev-parse' in cmd else b'test'})()), self.assertRaises(MODULE.base.OperationError):
+                MODULE.verify_candidate_receipt(str(path),'sit-test-1483','smoke-sit-test-1483','b'*64,env)
+            contract.write_text('tampered')
+            with self.assertRaises(MODULE.base.OperationError):
                 MODULE.verify_candidate_receipt(str(path),'sit-test-1483','smoke-sit-test-1483','b'*64,env)
 
     def test_tagged_owner_requires_exact_candidate_hostname_and_ownership(self):
