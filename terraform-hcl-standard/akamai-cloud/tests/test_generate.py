@@ -53,6 +53,32 @@ class GenerateTest(unittest.TestCase):
             with self.subTest(sample=sample), self.assertRaises(SystemExit):
                 generate.validated_data_volume(host, {'instance_id': 123, 'data_volume': sample}, 'us-east')
 
+    def test_paused_k3s_uses_node_name_and_preserves_service_alias(self):
+        source=yaml.safe_load((ROOT/'tests/fixtures/linode.yaml').read_text())
+        host=source['hosts'][0];name=host['name']
+        host['host_vars']={'service_domains':['console.example.invalid']}
+        with tempfile.TemporaryDirectory() as tmp:
+            resource=Path(tmp)/'source.yaml';workdir=Path(tmp)/'work'
+            resource.write_text(yaml.safe_dump(source))
+            generate.render(SimpleNamespace(resources=resource,workdir=workdir,namespace='test'))
+            runtime={name:{'ip':'198.51.100.10','instance_id':123}}
+            with mock.patch.object(generate,'terraform_output',return_value=runtime):
+                generate.inventory(SimpleNamespace(resources=resource,workdir=workdir))
+            self.assertIn('console.example.invalid',json.loads((workdir/'cmdb.json').read_text()))
+            host['host_vars'].update(k3s_platform_flux_bootstrap_mode='declarative_paused',k3s_platform_node_name=name)
+            resource.write_text(yaml.safe_dump(source))
+            with mock.patch.object(generate,'terraform_output',return_value=runtime):
+                generate.inventory(SimpleNamespace(resources=resource,workdir=workdir))
+            data=json.loads((workdir/'cmdb.json').read_text())
+            self.assertEqual(list(data),[name])
+            self.assertEqual(data[name]['fqdn'],'console.example.invalid')
+            self.assertIn(name+' ',(workdir/'inventory.ini').read_text())
+            host['host_vars']['k3s_platform_node_name']='another-node'
+            resource.write_text(yaml.safe_dump(source))
+            with mock.patch.object(generate,'terraform_output',return_value=runtime),self.assertRaises(SystemExit):
+                generate.inventory(SimpleNamespace(resources=resource,workdir=workdir))
+            self.assertFalse((workdir/'cmdb.json').exists())
+
     def test_firewall_label_is_stable_and_within_linode_limit(self):
         label = "open-platform-uat-ak-open-platform"
         rendered = generate.firewall_label(label)

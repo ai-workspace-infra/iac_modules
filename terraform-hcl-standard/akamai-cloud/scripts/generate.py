@@ -236,7 +236,7 @@ def validated_data_volume(host, facts, region):
 def inventory(args):
     resources, workdir = Path(args.resources), Path(args.workdir)
     global_config, _, hosts = load_sources(resources)
-    if global_config.get("environment") == "dev" or any(host.get("volume") for host in hosts):
+    if global_config.get("environment") == "dev" or any(host.get("volume") or (host.get("host_vars", {}) or {}).get("k3s_platform_flux_bootstrap_mode") == "declarative_paused" for host in hosts):
         # Only derived deployment artifacts are invalidated. Never leave an
         # earlier address available if the runtime read or validation fails.
         for artifact in ("cmdb.json", "inventory.ini"):
@@ -278,8 +278,13 @@ def inventory(args):
             host_vars["web_saas_data_device_path"] = data_volume["filesystem_path"]
         service_domains = host_vars.get("service_domains", []) or []
         fqdn = str(service_domains[0]).strip() if isinstance(service_domains, list) and service_domains else name
+        inventory_name = fqdn
+        if host_vars.get("k3s_platform_flux_bootstrap_mode") == "declarative_paused":
+            if host_vars.get("k3s_platform_node_name") != name:
+                raise SystemExit("paused K3s inventory must match the declared logical node name")
+            inventory_name = name
         ssh_user = host.get("ansible_user", "root")
-        cmdb[fqdn] = {
+        cmdb[inventory_name] = {
             "name": name,
             "fqdn": fqdn,
             "label": host["label"],
@@ -298,15 +303,15 @@ def inventory(args):
             "host_vars": host_vars,
         }
         if data_volume:
-            cmdb[fqdn]["data_volume"] = data_volume
+            cmdb[inventory_name]["data_volume"] = data_volume
         # INI host values are parsed as Python literals by Ansible. Quote the
         # complete literal so spaces, lists and booleans survive shlex parsing.
         inventory_vars = {**host_vars, "ansible_host": facts.get("ip", ""), "ansible_user": ssh_user}
-        lines[fqdn] = fqdn + " " + " ".join(
+        lines[inventory_name] = inventory_name + " " + " ".join(
             f"{key}={shlex.quote(repr(value))}" for key, value in inventory_vars.items()
         )
         for group in host.get("groups", []) or []:
-            groups.setdefault(str(group), []).append(fqdn)
+            groups.setdefault(str(group), []).append(inventory_name)
     (workdir / "cmdb.json").write_text(
         json.dumps(cmdb, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
