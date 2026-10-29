@@ -125,9 +125,15 @@ class FeatureDnsContract(unittest.TestCase):
             with self.subTest(changes=changes), self.assertRaises(MODULE.base.OperationError):
                 MODULE.requested_domain(dict(env, **changes), 'sit-test-1483', 'console', 'onwalk.net')
         client = MODULE.FeatureCloudflare('test-token', 'a' * 32, 'sit-test-1483', env['FEATURE_TAG'])
-        self.assertIn('feature-tag:smoke-sit-test-1483', client.create_payload({})['tags'])
+        self.assertEqual(client.create_payload({})['comment'], 'iac-modules:sit:smoke-sit-test-1483')
+        self.assertEqual(client.create_payload({})['tags'], [])
         client.request = lambda *_: [{'name': env['FEATURE_HOSTNAME'], 'id': 'r',
                                      'tags': ['feature-id:sit-test-1483', 'owner:iac-modules']}]
+        with self.assertRaises(MODULE.base.OperationError):
+            client.records('zone', env['FEATURE_HOSTNAME'])
+        client.request = lambda *_: [{'name': env['FEATURE_HOSTNAME'], 'id': 'r', 'comment': client.ownership_comment()}]
+        self.assertEqual(len(client.records('zone', env['FEATURE_HOSTNAME'])), 1)
+        client.request = lambda *_: [{'name': env['FEATURE_HOSTNAME'], 'id': 'r', 'comment': 'iac-modules:sit:other-sit-test-1483'}]
         with self.assertRaises(MODULE.base.OperationError):
             client.records('zone', env['FEATURE_HOSTNAME'])
         declaration['zone'] = 'svc.plus'
@@ -139,6 +145,16 @@ class FeatureDnsContract(unittest.TestCase):
         contract_path.write_text(yaml.safe_dump(declaration))
         with self.assertRaises(MODULE.base.OperationError):
             MODULE.requested_domain(env, 'sit-test-1483', 'console', 'onwalk.net')
+
+    def test_tagged_free_zone_sends_no_record_tags(self):
+        client = MODULE.FeatureCloudflare('test-token', 'a' * 32, 'sit-test-1483', 'smoke-sit-test-1483')
+        payload = client.create_payload({'type': 'A', 'tags': []})
+        with patch.object(MODULE.base.Cloudflare, 'request', return_value={'id': 'r'}) as request:
+            client.request('POST', '/zones/z/dns_records', payload)
+            sent = request.call_args.args[2]
+            self.assertNotIn('tags', sent)
+            self.assertEqual(sent['comment'], 'iac-modules:sit:smoke-sit-test-1483')
+        self.assertEqual(payload['tags'], [])
 
     def test_sit_configuration_and_owned_creation_retry(self):
         with tempfile.TemporaryDirectory() as directory:
