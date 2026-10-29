@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 from urllib.parse import urlencode
 
@@ -124,6 +125,54 @@ def verify_current_target(cmdb, target, token):
         raise base.OperationError('fresh Dev provider target verification failed') from None
 
 
+def verify_candidate_receipt(path, feature_id, tag, fingerprint, env):
+    source = Path(path)
+    if source.is_symlink() or not source.is_file() or source.stat().st_size > 1000000:
+        raise base.OperationError('same-run candidate receipt unavailable')
+    raw = source.read_bytes()
+    expected = env.get('FEATURE_CANDIDATE_RECEIPT_SHA256', '')
+    if not re.fullmatch(r'[0-9a-f]{64}', expected) or hashlib.sha256(raw).hexdigest() != expected:
+        raise base.OperationError('candidate receipt digest mismatch')
+    receipt = json.loads(raw)
+    if not isinstance(receipt, dict):
+        raise base.OperationError('invalid candidate receipt')
+    repo = env.get('GITHUB_REPOSITORY', '')
+    ref = repo + '/.github/workflows/feature-lane-deploy.yml@refs/heads/main'
+    producer = receipt.get('source')
+    projection = receipt.get('projection')
+    if not isinstance(producer, dict) or not isinstance(projection, dict):
+        raise base.OperationError('invalid candidate receipt provenance')
+    lane = projection.get('tagged_lane')
+    if (repo != 'ai-workspace-infra/Platform-Orchestrator' or env.get('GITHUB_REF') != 'refs/heads/main' or
+        not re.fullmatch(r'[0-9a-f]{40}', env.get('GITHUB_SHA', '')) or
+        not re.fullmatch(r'[1-9][0-9]*', env.get('GITHUB_RUN_ID', '')) or
+        not re.fullmatch(r'[1-9][0-9]*', env.get('GITHUB_RUN_ATTEMPT', '')) or
+        env.get('GITHUB_WORKFLOW_REF') != ref or receipt.get('schema_version') != 'dev-feature-candidate/v2' or
+        receipt.get('result') != 'verified' or receipt.get('stage') != 'sit' or
+        receipt.get('candidate_sha256') != fingerprint or lane != {'feature_id': feature_id, 'feature_tag': tag, 'candidate_sha256': fingerprint} or
+        producer.get('repository') != repo or producer.get('workflow_ref') != ref or
+        producer.get('workflow_sha') != env.get('GITHUB_SHA') or producer.get('run_id') != env.get('GITHUB_RUN_ID') or
+        producer.get('run_attempt') != env.get('GITHUB_RUN_ATTEMPT')):
+        raise base.OperationError('candidate receipt is not bound to protected same-run tag')
+    gitops = Path(base.required(env, 'FEATURE_GITOPS_ROOT')).resolve(strict=True)
+    contract = Path(base.required(env, 'FEATURE_DOMAIN_CONTRACT')).resolve(strict=True)
+    if contract != gitops / 'docs/features/tagged-sit-domain-contract.yaml':
+        raise base.OperationError('domain declaration outside candidate GitOps checkout')
+    candidate_head = receipt.get('candidate_head', '')
+    if not re.fullmatch(r'[0-9a-f]{40}', candidate_head):
+        raise base.OperationError('candidate GitOps revision missing')
+    try:
+        checked_out = subprocess.run(['git', '-C', str(gitops), 'rev-parse', 'HEAD'], check=True,
+                                     capture_output=True, text=True, timeout=10).stdout.strip()
+        committed_contract = subprocess.run(['git', '-C', str(gitops), 'show',
+                                             'HEAD:docs/features/tagged-sit-domain-contract.yaml'],
+                                            check=True, capture_output=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        raise base.OperationError('candidate GitOps checkout unavailable') from None
+    if checked_out != candidate_head or contract.read_bytes() != committed_contract:
+        raise base.OperationError('domain declaration is not at candidate GitOps revision')
+
+
 class FeatureCloudflare(base.Cloudflare):
     def __init__(self, token: str, account_id: str, feature_id: str, feature_tag: str | None = None):
         super().__init__(token, account_id)
@@ -162,7 +211,12 @@ def main() -> int:
             fingerprint = base.required(os.environ, 'FEATURE_CANDIDATE_SHA256')
             if not re.fullmatch(r'[0-9a-f]{64}', fingerprint):
                 raise base.OperationError('authenticated candidate fingerprint required')
+            verify_candidate_receipt(base.required(os.environ, 'FEATURE_CANDIDATE_RECEIPT'), feature_id, tag, fingerprint, os.environ)
         cmdb_raw = Path(base.required(os.environ, "CMDB_FILE")).read_bytes()
+        if tag is not None:
+            cmdb_sha = base.required(os.environ, 'CMDB_SHA256')
+            if not re.fullmatch(r'[0-9a-f]{64}', cmdb_sha) or hashlib.sha256(cmdb_raw).hexdigest() != cmdb_sha:
+                raise base.OperationError('authenticated CMDB digest mismatch')
         cmdb = json.loads(cmdb_raw)
         node = base.required(os.environ, "DEV_INGRESS_NODE")
         target = dev_ingress_ip(cmdb, node)

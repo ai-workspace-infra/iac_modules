@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 import json
 import tempfile
 import unittest
@@ -38,11 +39,26 @@ class FeatureDnsContract(unittest.TestCase):
                              'groups':['dev','k3s','k3s_server','akamai_cloud']}}
         with tempfile.TemporaryDirectory() as temp:
             path=Path(temp)/'cmdb.json';path.write_text(json.dumps(cmdb))
+            repo='ai-workspace-infra/Platform-Orchestrator';ref=repo+'/.github/workflows/feature-lane-deploy.yml@refs/heads/main'
+            gitops=Path(temp)/'gitops';contract=gitops/'docs/features/tagged-sit-domain-contract.yaml';contract.parent.mkdir(parents=True);contract.write_text('test')
+            candidate_path=Path(temp)/'candidate.json'
+            candidate_path.write_text(json.dumps({'schema_version':'dev-feature-candidate/v2','result':'verified','stage':'sit','candidate_sha256':'a'*64,'candidate_head':'c'*40,
+                'projection':{'tagged_lane':{'feature_id':'sit-test-1483','feature_tag':'smoke-sit-test-1483','candidate_sha256':'a'*64}},
+                'source':{'repository':repo,'workflow_ref':ref,'workflow_sha':'b'*40,'run_id':'123','run_attempt':'1'}}))
             env={'DNS_ZONE':'onwalk.net','DNS_ENVIRONMENT':'sit','FEATURE_ID':'sit-test-1483','FEATURE_DNS_SERVICE':'console',
-                 'CMDB_FILE':str(path),'DEV_INGRESS_NODE':'dev-k3s-v5','LINODE_TOKEN':'fake-read-token','FEATURE_CANDIDATE_SHA256':'a'*64}
+                 'CMDB_FILE':str(path),'DEV_INGRESS_NODE':'dev-k3s-v5','LINODE_TOKEN':'fake-read-token','FEATURE_CANDIDATE_SHA256':'a'*64,
+                 'FEATURE_CANDIDATE_RECEIPT':str(candidate_path),'GITHUB_REPOSITORY':repo,'GITHUB_REF':'refs/heads/main',
+                 'FEATURE_CANDIDATE_RECEIPT_SHA256':hashlib.sha256(candidate_path.read_bytes()).hexdigest(),
+                 'CMDB_SHA256':hashlib.sha256(path.read_bytes()).hexdigest(),
+                 'FEATURE_GITOPS_ROOT':str(gitops),'FEATURE_DOMAIN_CONTRACT':str(contract),
+                 'GITHUB_WORKFLOW_REF':ref,'GITHUB_SHA':'b'*40,'GITHUB_RUN_ID':'123','GITHUB_RUN_ATTEMPT':'1'}
+            git=patch.object(MODULE.subprocess,'run',side_effect=lambda cmd,**kwargs:type('GitResult',(),{'stdout': 'c'*40 if 'rev-parse' in cmd else b'test'})());git.start();self.addCleanup(git.stop)
             with patch.dict(os.environ,env,clear=True), patch.object(MODULE,'requested_domain',return_value=('smoke-sit-test-1483-sit.onwalk.net','smoke-sit-test-1483')), patch.object(TARGET_CHECK,'_linode_get_one',return_value=(403,{})), patch.object(MODULE,'FeatureCloudflare') as client, contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(MODULE.main(),1)
             client.assert_not_called()
+            with patch.dict(os.environ,dict(env,CMDB_SHA256='f'*64),clear=True), patch.object(MODULE,'requested_domain',return_value=('smoke-sit-test-1483-sit.onwalk.net','smoke-sit-test-1483')), patch.object(TARGET_CHECK,'_linode_get_one') as lookup, patch.object(MODULE,'FeatureCloudflare') as client, contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(MODULE.main(),1)
+                lookup.assert_not_called();client.assert_not_called()
             for invalid in ('', 'bad', 'A'*64):
                 with self.subTest(invalid=invalid), patch.dict(os.environ,dict(env,FEATURE_CANDIDATE_SHA256=invalid),clear=True), patch.object(MODULE,'requested_domain',return_value=('smoke-sit-test-1483-sit.onwalk.net','smoke-sit-test-1483')), patch.object(TARGET_CHECK,'_linode_get_one') as lookup, patch.object(MODULE,'FeatureCloudflare') as client, contextlib.redirect_stderr(io.StringIO()):
                     self.assertEqual(MODULE.main(),1)
@@ -58,6 +74,32 @@ class FeatureDnsContract(unittest.TestCase):
                 self.assertEqual(MODULE.main(),0)
             lookup.assert_not_called()
             self.assertNotIn('candidate_sha256',json.loads(output.getvalue()))
+
+    def test_tagged_candidate_receipt_rejects_wrong_run_or_identity(self):
+        repo='ai-workspace-infra/Platform-Orchestrator';ref=repo+'/.github/workflows/feature-lane-deploy.yml@refs/heads/main'
+        env={'GITHUB_REPOSITORY':repo,'GITHUB_REF':'refs/heads/main','GITHUB_WORKFLOW_REF':ref,'GITHUB_SHA':'a'*40,'GITHUB_RUN_ID':'11','GITHUB_RUN_ATTEMPT':'1'}
+        receipt={'schema_version':'dev-feature-candidate/v2','result':'verified','stage':'sit','candidate_sha256':'b'*64,'candidate_head':'d'*40,
+                 'projection':{'tagged_lane':{'feature_id':'sit-test-1483','feature_tag':'smoke-sit-test-1483','candidate_sha256':'b'*64}},
+                 'source':{'repository':repo,'workflow_ref':ref,'workflow_sha':'a'*40,'run_id':'11','run_attempt':'1'}}
+        with tempfile.TemporaryDirectory() as temp:
+            gitops=Path(temp)/'gitops';contract=gitops/'docs/features/tagged-sit-domain-contract.yaml';contract.parent.mkdir(parents=True);contract.write_text('test')
+            env.update(FEATURE_GITOPS_ROOT=str(gitops),FEATURE_DOMAIN_CONTRACT=str(contract))
+            path=Path(temp)/'receipt.json';path.write_text(json.dumps(receipt))
+            env['FEATURE_CANDIDATE_RECEIPT_SHA256']=hashlib.sha256(path.read_bytes()).hexdigest()
+            git=patch.object(MODULE.subprocess,'run',side_effect=lambda cmd,**kwargs:type('GitResult',(),{'stdout': 'd'*40 if 'rev-parse' in cmd else b'test'})());git.start();self.addCleanup(git.stop)
+            MODULE.verify_candidate_receipt(str(path),'sit-test-1483','smoke-sit-test-1483','b'*64,env)
+            for changed in ({'GITHUB_RUN_ID':'12'},{'GITHUB_REF':'refs/heads/other'},{'GITHUB_SHA':'c'*40}):
+                with self.subTest(changed=changed),self.assertRaises(MODULE.base.OperationError):
+                    MODULE.verify_candidate_receipt(str(path),'sit-test-1483','smoke-sit-test-1483','b'*64,{**env,**changed})
+            with self.assertRaises(MODULE.base.OperationError):
+                MODULE.verify_candidate_receipt(str(path),'sit-test-1483','other-sit-test-1483','b'*64,env)
+            with self.assertRaises(MODULE.base.OperationError):
+                MODULE.verify_candidate_receipt(str(path),'sit-test-1483','smoke-sit-test-1483','b'*64,{**env,'FEATURE_CANDIDATE_RECEIPT_SHA256':'c'*64})
+            with patch.object(MODULE.subprocess,'run',side_effect=lambda cmd,**kwargs:type('GitResult',(),{'stdout': 'e'*40 if 'rev-parse' in cmd else b'test'})()), self.assertRaises(MODULE.base.OperationError):
+                MODULE.verify_candidate_receipt(str(path),'sit-test-1483','smoke-sit-test-1483','b'*64,env)
+            contract.write_text('tampered')
+            with self.assertRaises(MODULE.base.OperationError):
+                MODULE.verify_candidate_receipt(str(path),'sit-test-1483','smoke-sit-test-1483','b'*64,env)
 
     def test_tagged_owner_requires_exact_candidate_hostname_and_ownership(self):
         directory = tempfile.TemporaryDirectory()
