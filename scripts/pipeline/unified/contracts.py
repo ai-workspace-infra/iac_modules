@@ -20,6 +20,7 @@ PROVIDERS = {
 }
 STAGES = ("bootstrap", "account", "resources")
 ENVIRONMENTS = {"dev": "dev", "sit": "sit", "uat": "uat", "prod": "prod", "shared": "prod"}
+GENERATION_ENVIRONMENT = re.compile(r"prod-v[0-9]+")
 # Only disposable dev hosts may use the on-demand create/destroy lifecycle.
 ON_DEMAND_ENVIRONMENTS = {"dev"}
 SHA = re.compile(r"[0-9a-f]{40}")
@@ -283,12 +284,18 @@ def prepare(gitops_root, iac_root, manifest, environment, action, scope, bootstr
     require(scope in {"all", *STAGES}, "invalid stage scope")
     require(bootstrap_mode in {"verify", "reconcile"}, "invalid bootstrap mode")
     require(bootstrap_mode != "reconcile" or scope in {"all", "bootstrap"}, "reconcile needs explicit bootstrap scope")
+    # Generation names are dispatch selectors; IaC target manifests use the
+    # canonical prod environment while workspace/state retain batch isolation.
+    requested_environment = environment
+    if GENERATION_ENVIRONMENT.fullmatch(environment):
+        environment = "prod"
     require(environment in ENVIRONMENTS, "invalid environment")
     iac_sha, gitops_sha = checkout_sha(iac_root), checkout_sha(gitops_root)
     source = source_file(gitops_root, manifest)
     selectors = selectors or {}
     require(set(selectors) <= {"environment", "provider", "account", "workspace", "namespace", "project"}, "unknown target selector")
-    require(not selectors.get("environment") or selectors["environment"] == environment, "selector environment mismatch")
+    require(not selectors.get("environment") or selectors["environment"] in {environment, requested_environment}, "selector environment mismatch")
+    selectors = {**selectors, "environment": environment}
     require(not selectors.get("namespace") or not selectors.get("workspace") or selectors["namespace"] == selectors["workspace"], "selector namespace/workspace mismatch")
     targets, _, declaration_files = load_targets(gitops_root, manifest, environment=environment,
         provider=selectors.get("provider") or None, account=selectors.get("account") or None,
