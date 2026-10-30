@@ -83,6 +83,9 @@ def guard_plan(target, stage, plan, action):
     changes = plan.get("resource_changes", [])
     counts = {"create": 0, "update": 0, "delete": 0}
     create_only_violations = []
+    safe_change_fields = {
+        "linode_volume": {"filesystem_path", "label", "linode_id", "region", "size", "tags"},
+    }
     for item in changes:
         if item.get("mode") == "data":
             continue
@@ -92,15 +95,24 @@ def guard_plan(target, stage, plan, action):
         if spec.get("create_only") and action != "destroy":
             if actions not in (["create"], ["no-op"], ["read"]):
                 change = item.get("change") or {}
-                # Include only plan metadata. Before/after values may contain
-                # credentials or other sensitive provider data and must never
-                # be copied into workflow logs.
+                # Only expose allowlisted field names for persistent volumes.
+                # Before/after values may contain credentials or provider data.
+                resource_type = item.get("type", "unknown")
+                safe_fields = safe_change_fields.get(resource_type, set())
+                before = change.get("before") or {}
+                after = change.get("after") or {}
+                after_unknown = change.get("after_unknown") or {}
+                changed_fields = sorted(
+                    field for field in safe_fields
+                    if before.get(field) != after.get(field) or after_unknown.get(field) is True
+                )
                 create_only_violations.append({
                     "address": address,
-                    "type": item.get("type", "unknown"),
+                    "type": resource_type,
                     "actions": actions,
                     "replace_paths": change.get("replace_paths", []),
                     "action_reason": change.get("action_reason"),
+                    "changed_fields": changed_fields,
                 })
         for operation in counts:
             counts[operation] += operation in actions
