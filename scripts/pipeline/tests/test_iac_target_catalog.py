@@ -91,6 +91,27 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual([t['namespace'] for t in self.load()[0]], ['new-domain'])
         self.assertEqual(targets[0]['stages']['resources']['state']['key'], self.targets[0]['stages']['resources']['state']['key'])
 
+    def test_generation_profile_uses_prod_credentials_but_keeps_declared_state_namespace(self):
+        identity = dict(environment='prod', project='svc.plus', provider='akamai-cloud',
+                        account='tenant-a', namespace='prod-k3s-v6')
+        target = dict(id='prod-k3s-v6', **identity, workspace='prod-k3s-v6',
+            lifecycle=dict(status='active', persistent=True), auth=dict(expected_identity='tenant-a'),
+            stages=dict(bootstrap=dict(mode='verify'), account=dict(mode='not_applicable', reason='No account resources'),
+                resources=dict(mode='terraform', manifest='resources/svc.plus/prod/akamai/prod-k3s-v6.yaml',
+                    state=dict(key=canonical_state_key(**identity), cli_workspace='default'),
+                    owners=['module.compute_prod_k3s_v6'], protected=[], destroy_allowed=False, ownership_reviewed=True)))
+        self.targets = [target]
+        self.publish()
+        context = prepare(self.root, self.iac, 'iac/targets/fixture.yaml', 'prod-v6', 'plan',
+                          'resources', 'verify', 'generation-test', {},
+                          selectors={'environment':'prod-v6','provider':'akamai-cloud','account':'tenant-a','workspace':'prod-k3s-v6'})
+        self.assertEqual(context['environment'], 'prod')
+        self.assertEqual(context['github_environment'], 'prod')
+        self.assertEqual(context['targets'][0]['environment'], 'prod')
+        self.assertEqual(context['targets'][0]['workspace'], 'prod-k3s-v6')
+        self.assertEqual(context['targets'][0]['stages']['resources']['state']['key'], identity_state_key := canonical_state_key(**identity))
+        self.assertIn('/prod/svc.plus/akamai-cloud/tenant-a/prod-k3s-v6/', identity_state_key)
+
     def test_migration_direct_execution_and_persistent_destroy_are_blocked(self):
         self.assertRaises(ContractError, self.context, action='destroy', selectors={'workspace':'previous'})
         self.targets[0]['lifecycle']['persistent'] = True
