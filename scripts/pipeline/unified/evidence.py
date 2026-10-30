@@ -82,6 +82,7 @@ def guard_plan(target, stage, plan, action):
     spec = target["stages"][stage]
     changes = plan.get("resource_changes", [])
     counts = {"create": 0, "update": 0, "delete": 0}
+    create_only_violations = []
     for item in changes:
         if item.get("mode") == "data":
             continue
@@ -89,7 +90,18 @@ def guard_plan(target, stage, plan, action):
         require(owner_match(address, spec["owners"]), f"resource outside stage ownership: {address}")
         actions = item["change"]["actions"]
         if spec.get("create_only") and action != "destroy":
-            require(actions in (["create"], ["no-op"], ["read"]), "create-only target cannot update, replace or delete existing resources")
+            if actions not in (["create"], ["no-op"], ["read"]):
+                change = item.get("change") or {}
+                # Include only plan metadata. Before/after values may contain
+                # credentials or other sensitive provider data and must never
+                # be copied into workflow logs.
+                create_only_violations.append({
+                    "address": address,
+                    "type": item.get("type", "unknown"),
+                    "actions": actions,
+                    "replace_paths": change.get("replace_paths", []),
+                    "action_reason": change.get("action_reason"),
+                })
         for operation in counts:
             counts[operation] += operation in actions
         if "delete" in actions:
@@ -110,6 +122,12 @@ def guard_plan(target, stage, plan, action):
             shapes = ["vc2-1c-1gb", "vc2-1c-2gb", "vc2-2c-4gb", "vc2-4c-8gb"]
             if before.get("plan") in shapes and after.get("plan") in shapes:
                 require(shapes.index(after["plan"]) >= shapes.index(before["plan"]), "Vultr downgrade requires controlled replacement maintenance")
+    require(
+        not create_only_violations,
+        "create-only target cannot update, replace or delete existing resources; "
+        "blocked resource actions (metadata only): "
+        + json.dumps(create_only_violations, sort_keys=True, separators=(",", ":")),
+    )
     return counts
 
 
