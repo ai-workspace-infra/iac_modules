@@ -1,0 +1,40 @@
+name: GCP organization identity owner
+description: IaC owner for GCP GitHub OIDC/WIF declaration resolution and the shared-project external IP org policy. Default is read-only.
+inputs:
+  operation: {required: true, description: "resolve-oidc-config or external-ip-policy"}
+  environment: {required: true, description: "uat, prod, or shared"}
+  declaration: {required: true, description: "GitOps YAML declaration path (GitHubActionsOIDCConfig or shared GCPWorkloadNamespace)"}
+  mode: {required: false, default: render, description: "render (default, no side effect) or apply (external-ip-policy only)"}
+outputs:
+  receipt: {description: Owner receipt JSON path, value: '${{ steps.run.outputs.receipt }}'}
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      env:
+        OP: ${{ inputs.operation }}
+        GCP_ENVIRONMENT: ${{ inputs.environment }}
+        DECLARATION: ${{ inputs.declaration }}
+        MODE: ${{ inputs.mode }}
+        OWNER_SHA: ${{ github.action_ref }}
+      run: |
+        set -euo pipefail
+        case "$GCP_ENVIRONMENT" in uat|prod|shared) ;; *) echo '::error::invalid environment'; exit 2 ;; esac
+        case "$MODE" in render|apply) ;; *) echo '::error::mode must be render or apply'; exit 2 ;; esac
+        test -f "$DECLARATION"
+        dir="$GITHUB_ACTION_PATH/../../../scripts/pipeline/maintenance/gcp"
+        case "$OP" in
+          resolve-oidc-config)
+            [[ "$MODE" == render ]] || { echo '::error::resolve-oidc-config is read-only'; exit 2; }
+            GCP_OIDC_CONFIG="$DECLARATION" bash "$dir/resolve_github_oidc_config.sh" >/dev/null ;;
+          external-ip-policy)
+            bash "$dir/seed_shared_external_ip_policy.sh" --manifest "$DECLARATION" "--$MODE" ;;
+          *) echo '::error::Unregistered GCP identity operation'; exit 2 ;;
+        esac
+        receipt="$(mktemp "$RUNNER_TEMP/gcp-identity-receipt.XXXXXX.json")"
+        jq -n --arg op "$OP" --arg env "$GCP_ENVIRONMENT" --arg mode "$MODE" --arg owner "$OWNER_SHA" \
+          --arg run "${GITHUB_RUN_ID:-}" --arg attempt "${GITHUB_RUN_ATTEMPT:-}" \
+          '{schema:1,accepted:true,scope:"gcp-org-identity",owner_repository:"ai-workspace-infra/iac_modules",
+            owner_commit:$owner,run_id:$run,run_attempt:$attempt,environment:$env,operation:$op,mode:$mode}' > "$receipt"
+        echo "receipt=$receipt" >> "$GITHUB_OUTPUT"
