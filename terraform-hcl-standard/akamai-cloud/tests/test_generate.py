@@ -87,6 +87,21 @@ class GenerateTest(unittest.TestCase):
         self.assertEqual(rendered, generate.firewall_label(label))
         self.assertNotEqual(rendered, label + "-firewall")
 
+    def test_declared_firewall_label_is_rendered_and_invalid_labels_rejected(self):
+        source = yaml.safe_load((ROOT / "tests/fixtures/linode.yaml").read_text())
+        with tempfile.TemporaryDirectory() as tmp:
+            resource = Path(tmp) / "source.yaml"
+            workdir = Path(tmp) / "work"
+            source["hosts"][0]["firewall"]["label"] = "web-node-cold-20261031-fw"
+            resource.write_text(yaml.safe_dump(source))
+            generate.render(SimpleNamespace(resources=resource, workdir=workdir, namespace="test"))
+            self.assertRegex((workdir / "generated_hosts.tf").read_text(), r'label\s*=\s*"web-node-cold-20261031-fw"')
+            for label in ("bad--label", "-starts-wrong", "x" * 33, "bad\nlabel", ""):
+                with self.subTest(label=label), self.assertRaises(SystemExit):
+                    source["hosts"][0]["firewall"]["label"] = label
+                    resource.write_text(yaml.safe_dump(source))
+                    generate.load_sources(resource)
+
     def test_render_expands_explicit_linode_blocks(self):
         fixture = ROOT / "tests" / "fixtures" / "linode.yaml"
         with tempfile.TemporaryDirectory() as tempdir:

@@ -65,7 +65,16 @@ def load_sources(resources, *, require_ssh=True):
             prefix = str(source_global.get("name_prefix", "") or "").strip()
             name = str(host["name"])
             host["label"] = f"{prefix}-{name}" if prefix else name
-            host["firewall_label"] = firewall_label(host["label"])
+            configured_firewall_label = (host.get("firewall", {}) or {}).get("label")
+            if configured_firewall_label is not None:
+                if not isinstance(configured_firewall_label, str) or not re.fullmatch(
+                    r"[A-Za-z](?!.*(?:--|__|\.\.))[A-Za-z0-9_.-]{1,30}[A-Za-z0-9]",
+                    configured_firewall_label,
+                ):
+                    raise SystemExit("firewall.label must be a valid 3-32 character Linode firewall label")
+                host["firewall_label"] = configured_firewall_label
+            else:
+                host["firewall_label"] = firewall_label(host["label"])
             ports = (host.get("firewall", {}) or {}).get("additional_tcp_ports", [])
             if not isinstance(ports, list) or any(type(port) is not int or not 1 <= port <= 65535 for port in ports):
                 raise SystemExit("firewall.additional_tcp_ports must be a list of TCP ports between 1 and 65535")
