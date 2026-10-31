@@ -159,3 +159,18 @@ UAT namespaces. That stage transition does not change the host resource name,
 provider/account, or canonical Dev state key. Creating the host, bootstrapping
 K3s/Flux, publishing feature DNS and deploying applications remain separate
 owner-controlled actions and require their respective authorization.
+
+### Canonical node identity
+
+CMDB keys and INI inventory host names always use the declared host `name`.
+Business domains remain in `fqdn` and `host_vars.service_domains`; business groups
+(such as web_saas) and runtime groups (such as k3s) can coexist without changing
+node identity. Flux root names and bootstrap modes do not select inventory names.
+Consumers must regenerate derived inventory after this change; no domain alias
+entry is emitted and no cloud resources or state identities are changed.
+
+Business groups such as `web_saas` describe business scope; runtime groups such
+as `k3s` describe the platform. They are independent attributes of the same node.
+Playbooks should consume `cmdb.json` via its existing
+`inventory/terraform_cmdb.py` dynamic inventory using `AI_WORKSPACE_CMDB_JSON`.
+The derived INI is not the authority for the new K3s handoff.
