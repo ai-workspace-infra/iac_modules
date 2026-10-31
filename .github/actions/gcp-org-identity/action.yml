@@ -1,0 +1,24 @@
+name: GCP organization identity owner
+description: IaC owner for GCP GitHub OIDC/WIF declaration resolution and the shared-project external IP org policy. Default is read-only.
+inputs:
+  operation: {required: true, description: "resolve-oidc-config or external-ip-policy"}
+  environment: {required: true, description: "uat, prod, or shared; external-ip-policy accepts shared only and must match the declaration metadata.environment"}
+  declaration: {required: true, description: "GitOps YAML declaration path (GitHubActionsOIDCConfig or shared GCPWorkloadNamespace)"}
+  mode: {required: false, default: render, description: "render (default, no side effect) or apply (external-ip-policy only)"}
+outputs:
+  receipt: {description: Owner receipt JSON path, value: '${{ steps.run.outputs.receipt }}'}
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      env:
+        OP: ${{ inputs.operation }}
+        GCP_ENVIRONMENT: ${{ inputs.environment }}
+        DECLARATION: ${{ inputs.declaration }}
+        MODE: ${{ inputs.mode }}
+        OWNER_SHA: ${{ github.action_ref }}
+      run: |
+        set -euo pipefail
+        receipt="$(bash "$GITHUB_ACTION_PATH/../../../scripts/pipeline/gcp-org-identity.sh")"
+        echo "receipt=$receipt" >> "$GITHUB_OUTPUT"
