@@ -53,7 +53,7 @@ class GenerateTest(unittest.TestCase):
             with self.subTest(sample=sample), self.assertRaises(SystemExit):
                 generate.validated_data_volume(host, {'instance_id': 123, 'data_volume': sample}, 'us-east')
 
-    def test_paused_k3s_uses_node_name_and_preserves_service_alias(self):
+    def test_node_identity_is_independent_of_business_and_runtime_groups(self):
         source=yaml.safe_load((ROOT/'tests/fixtures/linode.yaml').read_text())
         host=source['hosts'][0];name=host['name']
         host['host_vars']={'service_domains':['console.example.invalid']}
@@ -64,8 +64,9 @@ class GenerateTest(unittest.TestCase):
             runtime={name:{'ip':'198.51.100.10','instance_id':123}}
             with mock.patch.object(generate,'terraform_output',return_value=runtime):
                 generate.inventory(SimpleNamespace(resources=resource,workdir=workdir))
-            self.assertIn('console.example.invalid',json.loads((workdir/'cmdb.json').read_text()))
-            host['host_vars'].update(k3s_platform_flux_bootstrap_mode='declarative_paused',k3s_platform_node_name=name)
+            self.assertIn(name,json.loads((workdir/'cmdb.json').read_text()))
+            host['groups']=['web_saas','k3s']
+            host['host_vars'].update(deployment_mode='kubernetes', k3s_platform_flux_bootstrap_mode='declarative_active',k3s_platform_node_name=name)
             resource.write_text(yaml.safe_dump(source))
             with mock.patch.object(generate,'terraform_output',return_value=runtime):
                 generate.inventory(SimpleNamespace(resources=resource,workdir=workdir))
@@ -150,8 +151,8 @@ class GenerateTest(unittest.TestCase):
                 generate.inventory(SimpleNamespace(resources=fixture, workdir=workdir))
 
             cmdb = json.loads((workdir / "cmdb.json").read_text())
-            self.assertEqual(cmdb["web.example.test"]["groups"], ["web", "debian"])
-            self.assertEqual(cmdb["web.example.test"]["ansible_user"], "root")
+            self.assertEqual(cmdb["web-node"]["groups"], ["web", "debian"])
+            self.assertEqual(cmdb["web-node"]["ansible_user"], "root")
 
     def test_inventory_and_firewall_preserve_regional_contract(self):
         source = yaml.safe_load((ROOT / "tests/fixtures/linode.yaml").read_text())
@@ -167,7 +168,7 @@ class GenerateTest(unittest.TestCase):
             with mock.patch.object(generate, "terraform_output", return_value={"web-node": {"ip": "198.51.100.10"}}):
                 generate.inventory(SimpleNamespace(resources=resource, workdir=workdir))
             inventory = json.loads(subprocess.check_output(["ansible-inventory", "-i", str(workdir / "inventory.ini"), "--list"], text=True))
-            variables = inventory["_meta"]["hostvars"]["web.example.test"]
+            variables = inventory["_meta"]["hostvars"]["web-node"]
             self.assertEqual(variables["xconnect_pool"], "sg pool")
             self.assertEqual(variables["xconnect_region"], "sg")
             self.assertFalse(variables["xconnect_open_to_users"])
@@ -184,10 +185,10 @@ class GenerateTest(unittest.TestCase):
             for instance_id, ip in [(123, "198.51.100.10"), (456, "198.51.100.20")]:
                 with mock.patch.object(generate, "terraform_output", return_value={"web-node": {"instance_id": instance_id, "ip": ip}}):
                     generate.inventory(SimpleNamespace(resources=resource, workdir=workdir))
-                cmdb = json.loads((workdir / "cmdb.json").read_text())["web.example.test"]
+                cmdb = json.loads((workdir / "cmdb.json").read_text())["web-node"]
                 self.assertEqual((cmdb["instance_id"], cmdb["ip"]), (instance_id, ip))
                 inventory = json.loads(subprocess.check_output(["ansible-inventory", "-i", str(workdir / "inventory.ini"), "--list"], text=True))
-                self.assertEqual(inventory["_meta"]["hostvars"]["web.example.test"]["ansible_host"], ip)
+                self.assertEqual(inventory["_meta"]["hostvars"]["web-node"]["ansible_host"], ip)
                 if instance_id == 456:
                     self.assertNotIn("198.51.100.10", (workdir / "inventory.ini").read_text())
 

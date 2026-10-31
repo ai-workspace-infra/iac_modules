@@ -245,11 +245,9 @@ def validated_data_volume(host, facts, region):
 def inventory(args):
     resources, workdir = Path(args.resources), Path(args.workdir)
     global_config, _, hosts = load_sources(resources)
-    if global_config.get("environment") == "dev" or any(host.get("volume") or (host.get("host_vars", {}) or {}).get("k3s_platform_flux_bootstrap_mode") == "declarative_paused" for host in hosts):
-        # Only derived deployment artifacts are invalidated. Never leave an
-        # earlier address available if the runtime read or validation fails.
-        for artifact in ("cmdb.json", "inventory.ini"):
-            (workdir / artifact).unlink(missing_ok=True)
+    # Never let a failed refresh expose stale deployment targets.
+    for artifact in ("cmdb.json", "inventory.ini"):
+        (workdir / artifact).unlink(missing_ok=True)
     runtime = terraform_output(workdir)
     # Dev is disposable: never publish an inventory from missing/other-host
     # output or retain an old address when its runtime identity is incomplete.
@@ -287,11 +285,11 @@ def inventory(args):
             host_vars["web_saas_data_device_path"] = data_volume["filesystem_path"]
         service_domains = host_vars.get("service_domains", []) or []
         fqdn = str(service_domains[0]).strip() if isinstance(service_domains, list) and service_domains else name
-        inventory_name = fqdn
-        if host_vars.get("k3s_platform_flux_bootstrap_mode") == "declarative_paused":
-            if host_vars.get("k3s_platform_node_name") != name:
-                raise SystemExit("paused K3s inventory must match the declared logical node name")
-            inventory_name = name
+        # A host is identified by its declared node name, never a business
+        # domain or its position in the groups list.
+        inventory_name = name
+        if host_vars.get("k3s_platform_node_name", name) != name:
+            raise SystemExit("K3s inventory must match the declared logical node name")
         ssh_user = host.get("ansible_user", "root")
         cmdb[inventory_name] = {
             "name": name,
