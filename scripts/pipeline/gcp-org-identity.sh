@@ -19,7 +19,7 @@ case "$OP" in
     # The org policy only exists for the shared project; uat/prod would act on
     # shared while labelling the receipt with another environment.
     [[ "$GCP_ENVIRONMENT" == shared ]] || die "external-ip-policy is shared-only, got environment=$GCP_ENVIRONMENT"
-    bash "$dir/seed_shared_external_ip_policy.sh" --manifest "$DECLARATION" --environment "$GCP_ENVIRONMENT" "--$MODE" ;;
+    bash "$dir/seed_shared_external_ip_policy.sh" --manifest "$DECLARATION" --environment "$GCP_ENVIRONMENT" "--$MODE" >&2 ;;
   *) die 'Unregistered GCP identity operation' ;;
 esac
 receipt="$(mktemp "${RUNNER_TEMP:-/tmp}/gcp-identity-receipt.XXXXXX.json")"
