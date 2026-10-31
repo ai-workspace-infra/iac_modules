@@ -5,21 +5,25 @@
 set -euo pipefail
 
 usage() {
-  echo 'usage: seed_shared_external_ip_policy.sh --manifest GITOPS_YAML [--render|--apply]' >&2
+  echo 'usage: seed_shared_external_ip_policy.sh --manifest GITOPS_YAML [--environment shared] [--render|--apply]' >&2
   exit 2
 }
 
 manifest=''
+environment=shared
 action=render
 while (($#)); do
   case "$1" in
     --manifest) (($# >= 2)) || usage; manifest="$2"; shift 2 ;;
+    --environment) (($# >= 2)) || usage; environment="$2"; shift 2 ;;
     --render) action=render; shift ;;
     --apply) action=apply; shift ;;
     *) usage ;;
   esac
 done
 [[ -f "${manifest}" ]] || usage
+# shared-only: refuse before parsing or touching gcloud
+[[ "${environment}" == shared ]] || { echo "external IP policy is shared-only, got environment=${environment}" >&2; exit 2; }
 command -v ruby >/dev/null || { echo 'ruby is required' >&2; exit 1; }
 
 policy_file="$(mktemp)"
@@ -36,7 +40,7 @@ ruby -ryaml -rjson -e '
   doc = YAML.safe_load(File.read(ARGV.fetch(0)))
   abort "expected a shared GCPWorkloadNamespace" unless
     doc.dig("kind") == "GCPWorkloadNamespace" &&
-    doc.dig("metadata", "environment") == "shared" &&
+    doc.dig("metadata", "environment") == ARGV.fetch(1) &&
     doc.dig("metadata", "provider") == "gcp"
   spec = doc.fetch("spec")
   project = spec.fetch("project_id")
@@ -56,7 +60,7 @@ ruby -ryaml -rjson -e '
   abort "duplicate allowlist entry" unless values.uniq.length == values.length
   puts JSON.pretty_generate({name: "projects/#{project}/policies/compute.vmExternalIpAccess",
                              spec: {rules: [{values: {allowedValues: values}}]}})
-' "${manifest}" >"${policy_file}"
+' "${manifest}" "${environment}" >"${policy_file}"
 
 project_id="$(ruby -rjson -e 'puts JSON.parse(File.read(ARGV.fetch(0))).fetch("name").split("/")[1]' "${policy_file}")"
 if [[ "${action}" == render ]]; then

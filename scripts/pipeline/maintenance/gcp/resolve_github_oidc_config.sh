@@ -4,6 +4,17 @@ set -euo pipefail
 
 environment="${GCP_ENVIRONMENT:?GCP_ENVIRONMENT is required}"
 config_file="${GCP_OIDC_CONFIG:?GCP_OIDC_CONFIG is required}"
+# TODO(Task 5 / gitops#677): hardcoded identity contract still lives here and
+# must move to GitOps declarations (GitHubActionsOIDCConfig / provider
+# registry) before Task 2 is complete:
+#   - expected_repository  ai-workspace-infra/platform-ops-toolkit
+#   - expected_organization_id 744119519286
+#   - project_by_environment uat/prod/shared -> open-platform-{uat,prod}
+#   - shared override open-platform-shared -> open-platform-shared-510113
+#   - state key layout platform-ops-toolkit/<env>/<account>/gcp-oidc-bootstrap
+#   - custom audience prefix https://github.com/ai-workspace-infra/platform-ops-toolkit/
+#   - github_environment mapping shared -> prod
+#   - service_account_id convention github-actions-<env>
 readonly expected_repository="ai-workspace-infra/platform-ops-toolkit"
 readonly expected_organization_id="744119519286"
 

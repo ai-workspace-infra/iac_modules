@@ -46,3 +46,5 @@ jobs:
           bash scripts/pipeline/tests/serverless-image-release-test.sh
           python3 -m unittest scripts/pipeline/tests/test_unified_actions.py -v
           bash scripts/pipeline/tests/cloud_run_serving_facts_test.sh
+          bash scripts/pipeline/tests/gcp_org_identity_owner_test.sh
+          bash scripts/pipeline/tests/gcp-org-identity-env-test.sh
