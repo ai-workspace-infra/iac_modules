@@ -26,6 +26,11 @@ The artifact uses `schema_version: cmdb.v1` and has this canonical shape:
 }
 ```
 
+`host_vars` contains only an allowlisted subset of non-secret declaration metadata.
+It preserves `deployment_mode` so generic callers can select the declared runtime
+owner without inferring it from a hostname or environment-specific path. Arbitrary
+host variables and credential-like values are excluded.
+
 `hosts` is the canonical SSH-capable compute consumer interface (`vm` and `k3s_node`).
 Serverless resources (Cloud Run, Cloudflare Workers/Pages, Supabase, etc.) allow
 `ssh_host: null` and `primary_ip: null` and are emitted under `serverless_resources`

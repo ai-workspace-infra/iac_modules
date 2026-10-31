@@ -146,7 +146,7 @@ def guard_plan(target, stage, plan, action):
 def sanitize_inventory(raw):
     require(isinstance(raw, dict), "inventory must be a mapping")
     permitted = {"name", "fqdn", "label", "ip", "private_ip", "ipv6", "instance_id", "region", "type", "image", "groups", "ansible_user", "cloud_provider", "data_volume"}
-    vars_allowed = {"role", "cloud_provider", "cloud_region", "plan", "image", "service_domains", "xconnect_role", "target_generation"}
+    vars_allowed = {"role", "cloud_provider", "cloud_region", "plan", "image", "service_domains", "xconnect_role", "target_generation", "deployment_mode"}
     clean = {}
     for name, facts in raw.items():
         require(isinstance(name, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,252}", name), "invalid inventory hostname")

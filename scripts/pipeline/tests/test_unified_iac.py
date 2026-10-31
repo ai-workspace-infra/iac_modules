@@ -102,6 +102,24 @@ class ContractTests(unittest.TestCase):
         other = sanitize_inventory({"host": {"groups": ["prod"], "host_vars": variables}})["host"]["host_vars"]
         self.assertFalse(other)
 
+    def test_runtime_bundle_preserves_deployment_mode_without_copying_other_host_vars(self):
+        variables = {
+            "deployment_mode": "kubernetes",
+            "k3s_platform_identity_writer_token": "must-not-copy",
+            "service_domains": ["console.example.invalid"],
+        }
+        clean = sanitize_inventory({
+            "prod-k3s-node": {
+                "groups": ["web_saas", "prod", "k3s_server", "k3s"],
+                "host_vars": variables,
+            },
+        })["prod-k3s-node"]["host_vars"]
+        self.assertEqual(clean, {
+            "deployment_mode": "kubernetes",
+            "service_domains": ["console.example.invalid"],
+        })
+        self.assertNotIn("must-not-copy", json.dumps(clean))
+
     def test_namespace_lock_survives_target_id_alias(self):
         renamed = copy.deepcopy(self.target)
         renamed["id"] = "other-manifest-id"
