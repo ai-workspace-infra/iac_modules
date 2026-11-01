@@ -42,3 +42,23 @@ Use immutable reviewed commits, run offline contracts, then run read-only UAT
 preflight. Historical workdirs remain until the state is verified empty or a
 separately reviewed state handoff is complete. This implementation does not apply
 Terraform, move/remove state, or mutate provider resources.
+## Explicit existing-resource consumption
+
+For a deployment that must use already managed resources, the GitOps target's
+`stages.resources` can declare these policies together:
+
+```yaml
+existing_only: true
+requires_existing_state: true
+destroy_allowed: false
+```
+
+This is a stricter execution policy on the canonical GitOps target, not a new
+inventory or a resource import. The target must already own its declared
+Terraform state. `plan` and `apply` allow only no-op managed-resource plans;
+creation, updates, replacement, deletion and destroy requests fail before
+resource application. A no-op apply may refresh Terraform state and publish
+the verified runtime inventory through the ordinary IaC receipt contract.
+Downstream deployments still verify the summary, source commits, run binding
+and inventory checksums. Missing state or resource drift requires explicit
+maintenance instead of silently provisioning a replacement.

@@ -137,6 +137,35 @@ class ContractTests(unittest.TestCase):
             item['change']['actions'] = actions
             with self.assertRaises(ContractError): guard_plan(target, 'resources', {'resource_changes': [item]}, 'apply')
 
+    def test_existing_only_requires_retained_state_and_no_destroy(self):
+        spec = self.target['stages']['resources']
+        spec.update(existing_only=True, requires_existing_state=True, destroy_allowed=False)
+        self.publish([self.target])
+        self.context()
+        for changes in ({'requires_existing_state': False}, {'destroy_allowed': True},
+                        {'create_only': True}, {'existing_only': 'true'}):
+            target = copy.deepcopy(self.target)
+            target['stages']['resources'].update(changes)
+            self.publish([target])
+            with self.subTest(changes=changes), self.assertRaises(ContractError):
+                self.context()
+
+    def test_existing_only_rejects_all_resource_changes_before_apply(self):
+        target = copy.deepcopy(self.target)
+        target['stages']['resources'].update(existing_only=True, requires_existing_state=True, destroy_allowed=False)
+        item = {'address': target['stages']['resources']['owners'][0],
+                'type': 'linode_instance', 'change': {'actions': ['no-op']}}
+        for action in ('plan', 'apply'):
+            self.assertEqual(guard_plan(target, 'resources', {'resource_changes': [item]}, action),
+                             {'create': 0, 'update': 0, 'delete': 0})
+            for actions in (['create'], ['update'], ['delete'], ['delete', 'create'], ['forget']):
+                changed = copy.deepcopy(item)
+                changed['change']['actions'] = actions
+                with self.subTest(action=action, actions=actions), self.assertRaises(ContractError):
+                    guard_plan(target, 'resources', {'resource_changes': [changed]}, action)
+        with self.assertRaises(ContractError):
+            guard_plan(target, 'resources', {'resource_changes': []}, 'destroy')
+
     def test_runtime_volume_binding_survives_receipts_without_untrusted_fields(self):
         volume = {'volume_id': 42, 'linode_id': 123, 'size_gb': 100, 'region': 'us-east',
                   'label': 'retained-data', 'filesystem_path': '/dev/disk/by-id/scsi-0Linode_Volume_retained-data',

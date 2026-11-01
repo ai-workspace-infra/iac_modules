@@ -150,6 +150,12 @@ def validate_target(target, gitops_root):
             source_file(gitops_root, spec["manifest"])
         if spec["mode"] == "terraform":
             require(type(spec.get("create_only", False)) is bool, "stage.create_only must be a boolean")
+            require(type(spec.get("existing_only", False)) is bool, "stage.existing_only must be a boolean")
+            if spec.get("existing_only"):
+                require(stage == "resources", "existing-only selection is a resource-stage policy")
+                require(spec.get("requires_existing_state") is True, "existing-only selection requires existing state")
+                require(spec.get("destroy_allowed") is False and not spec.get("create_only"),
+                        "existing-only selection forbids destroy and create-only policies")
             require(target["provider"] != "azure-cloud", "Azure renderer not implemented; declare unsupported")
             if stage != "resources":
                 require(target["provider"] == "gcp-cloud" and stage == "bootstrap", "account state split/adapter not implemented; declare unsupported or verify")
