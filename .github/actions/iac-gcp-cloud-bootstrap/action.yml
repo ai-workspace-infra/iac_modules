@@ -1,6 +1,9 @@
 name: GCP bootstrap lifecycle and credential owner
 description: Saved Terraform plan, runtime WIF verification, metadata publication and fail-closed cleanup.
 inputs:
+  action:
+    description: Planned IaC operation; post-apply identity handoff runs only after apply.
+    required: true
   target-contract-file:
     description: Prepared exact GitOps contract path
     required: true
@@ -49,14 +52,14 @@ runs:
         dependencies-dir: ${{ inputs.dependencies-dir }}
         stage: bootstrap
     - name: Switch to the new GCP runtime WIF identity
-      if: inputs.reconcile == 'true' && steps.execute.outcome == 'success'
+      if: inputs.action == 'apply' && inputs.reconcile == 'true' && steps.execute.outcome == 'success'
       uses: google-github-actions/auth@v2
       with:
         workload_identity_provider: ${{ inputs.provider-resource }}
         service_account: ${{ inputs.service-account }}
         audience: ${{ inputs.audience }}
     - name: Remove bootstrap credential overrides before runtime validation
-      if: inputs.reconcile == 'true'
+      if: inputs.action == 'apply' && inputs.reconcile == 'true'
       shell: bash
       run: printf "%s\n" "CLOUDSDK_AUTH_ACCESS_TOKEN=" "GOOGLE_OAUTH_ACCESS_TOKEN=" >> "$GITHUB_ENV"
     - name: verify-runtime
@@ -71,7 +74,7 @@ runs:
         IAC_DEPENDENCIES: ${{ inputs.dependencies-dir }}
         IAC_STAGE: bootstrap
       run: python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/unified_cli.py" verify-runtime
-      if: inputs.reconcile == 'true' && steps.execute.outcome == 'success'
+      if: inputs.action == 'apply' && inputs.reconcile == 'true' && steps.execute.outcome == 'success'
     - name: publish-runtime
       shell: bash
       env:
@@ -84,7 +87,7 @@ runs:
         IAC_DEPENDENCIES: ${{ inputs.dependencies-dir }}
         IAC_STAGE: bootstrap
       run: python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/unified_cli.py" publish-runtime
-      if: inputs.reconcile == 'true' && steps.execute.outcome == 'success'
+      if: inputs.action == 'apply' && inputs.reconcile == 'true' && steps.execute.outcome == 'success'
     - name: bootstrap-cleanup
       shell: bash
       env:
@@ -97,4 +100,4 @@ runs:
         IAC_DEPENDENCIES: ${{ inputs.dependencies-dir }}
         IAC_STAGE: bootstrap
       run: python3 "${GITHUB_ACTION_PATH}/../../../scripts/pipeline/unified_cli.py" bootstrap-cleanup
-      if: always() && inputs.reconcile == 'true'
+      if: always() && inputs.action == 'apply' && inputs.reconcile == 'true'

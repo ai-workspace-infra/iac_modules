@@ -236,6 +236,16 @@ def execute(context, target_id, stage, iac_root, gitops_root, evidence, private,
                 receipt["changes"] = guard_plan(
                     target, stage, plan_doc, context["action"], bootstrap_repository=bootstrap_repository
                 )
+                receipt["change_summary"] = [
+                    {
+                        "address": item["address"],
+                        "type": item.get("type", "unknown"),
+                        "actions": item["change"]["actions"],
+                        "replace_paths": item["change"].get("replace_paths", []),
+                    }
+                    for item in plan_doc.get("resource_changes", [])
+                    if item.get("mode") != "data" and item.get("change", {}).get("actions") != ["no-op"]
+                ]
                 if validation:
                     require(receipt["changes"]["delete"] == 1, "validation cleanup must delete exactly one candidate instance")
                 receipt["plan_sha256"] = digest(plan)
