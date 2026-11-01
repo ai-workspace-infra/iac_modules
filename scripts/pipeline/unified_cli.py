@@ -168,7 +168,7 @@ def main(command):
         require(context["action"] != "check", "check cannot authenticate/execute")
         require(spec["mode"] != "unsupported", "stage unsupported")
         write_json(Path(env("EVIDENCE")) / "receipt.json", receipt_base(context, target, stage))
-        values = {"provider": target["provider"], "mode": spec["mode"], "reconcile": "true" if stage == "bootstrap" and context["bootstrap_mode"] == "reconcile" else "false"}
+        values = {"action": context["action"], "provider": target["provider"], "mode": spec["mode"], "reconcile": "true" if stage == "bootstrap" and context["bootstrap_mode"] == "reconcile" else "false"}
         output(values)
     elif command == "auth":
         context, target = context_target()

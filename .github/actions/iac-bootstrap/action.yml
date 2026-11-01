@@ -122,6 +122,7 @@ runs:
     - if: steps.route.outputs.provider == 'gcp-cloud'
       uses: ./iac_modules/.github/actions/iac-gcp-cloud-bootstrap
       with:
+        action: ${{ steps.route.outputs.action }}
         target-contract-file: ${{ inputs.target-contract-file }}
         target-id: ${{ inputs.target-id }}
         iac-root: ${{ inputs.iac-root }}
