@@ -16,7 +16,8 @@ def select(path, checksum, node):
     data = json.loads(raw)
     require(isinstance(data, dict) and len(data) == 1, "one candidate is required")
     facts = next(iter(data.values()))
-    require(facts.get("name") == node and facts.get("label") == node, "candidate node identity differs")
+    require(facts.get("name") == node, "candidate logical node identity differs")
+    require(isinstance(facts.get("label"), str) and facts["label"].strip(), "candidate provider label missing")
     require(str(facts.get("instance_id", "")).isdigit(), "candidate instance ID missing")
     require(facts.get("host_vars", {}).get("cloud_provider") == "akamai-cloud", "candidate provider differs")
     return facts
