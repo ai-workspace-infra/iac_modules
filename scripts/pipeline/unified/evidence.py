@@ -83,6 +83,8 @@ def guard_plan(target, stage, plan, action):
     changes = plan.get("resource_changes", [])
     counts = {"create": 0, "update": 0, "delete": 0}
     create_only_violations = []
+    persistent_destroy = {item["address"]: item for item in spec.get("destroy_persistent_resources", [])}
+    persistent_destroy_seen = set()
     safe_change_fields = {
         "linode_volume": {"filesystem_path", "label", "linode_id", "region", "size", "tags"},
     }
@@ -120,7 +122,26 @@ def guard_plan(target, stage, plan, action):
             change = item.get("change") or {}
             detail = f"{address} actions={actions} replace_paths={change.get('replace_paths')} action_reason={change.get('action_reason')}"
             require(not owner_match(address, spec.get("protected", [])), f"protected resource deletion/replacement: {detail}")
-            require(item.get("type") not in {"google_compute_disk", "aws_ebs_volume", "linode_volume", "vultr_block_storage", "ucloud_udisk"}, f"persistent disk deletion/replacement requires maintenance: {detail}")
+            if item.get("type") in {"google_compute_disk", "aws_ebs_volume", "linode_volume", "vultr_block_storage", "ucloud_udisk"}:
+                approval = persistent_destroy.get(address)
+                require(action == "destroy" and approval is not None and target.get("lifecycle", {}).get("persistent") is False
+                        and spec.get("destroy_allowed") is True,
+                        f"persistent disk deletion/replacement requires an exact declared destroy authorization: {detail}")
+                require(actions == ["delete"], f"persistent disk replacement is forbidden even during destroy: {detail}")
+                before = change.get("before") or {}
+                require(item.get("type") == "linode_volume" and before.get("label") == approval["label"]
+                        and before.get("size") == approval["size_gb"],
+                        f"persistent disk identity differs from the declared maintenance target: {detail}")
+                host_id = before.get("linode_id")
+                host_module = re.sub(r"[^0-9A-Za-z_]", "_", approval["host"])
+                host_address = f"module.compute_{host_module}.linode_instance.this"
+                host_changes = [entry for entry in changes if entry.get("address") == host_address
+                                and entry.get("type") == "linode_instance"
+                                and entry.get("change", {}).get("actions") == ["delete"]]
+                require(host_id and len(host_changes) == 1
+                        and (host_changes[0].get("change", {}).get("before") or {}).get("id") == host_id,
+                        "persistent disk is not attached to the exact host declared for retirement")
+                persistent_destroy_seen.add(address)
             require(action == "destroy", f"ordinary plan/apply cannot delete or replace resources: {detail}")
             if target.get("validation"):
                 require(owner_match(address, target["validation"]["destroy_owners"]) and item.get("type") == "linode_instance", "validation may delete only the selected compute instance")
@@ -134,6 +155,8 @@ def guard_plan(target, stage, plan, action):
             shapes = ["vc2-1c-1gb", "vc2-1c-2gb", "vc2-2c-4gb", "vc2-4c-8gb"]
             if before.get("plan") in shapes and after.get("plan") in shapes:
                 require(shapes.index(after["plan"]) >= shapes.index(before["plan"]), "Vultr downgrade requires controlled replacement maintenance")
+    require(persistent_destroy_seen == set(persistent_destroy),
+            "destroy plan must include every explicitly authorized persistent disk and no undeclared disk")
     require(
         not create_only_violations,
         "create-only target cannot update, replace or delete existing resources; "

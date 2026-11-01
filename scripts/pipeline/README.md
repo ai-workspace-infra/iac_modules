@@ -132,3 +132,15 @@ failure must fail the workflow. The adapter executes no host or database command
 An ephemeral rule does not supersede any broader permanent firewall rule:
 public SSH isolation also requires the canonical GitOps declaration to remove
 the public catch-all rule through the normal audited IaC plan/apply path.
+
+## Explicit persistent-volume retirement
+
+Persistent-volume deletion stays blocked unless a reviewed target explicitly lists
+the exact volume address, host, label, and size under
+`stages.resources.destroy_persistent_resources`, while the target is declared
+non-persistent and `destroy_allowed: true`. The saved plan must show a direct delete
+of that volume attached to the exact host deletion; replacements, mismatched labels,
+sizes, attachments, undeclared disks, and protected resources fail closed. The renderer
+uses a private destroy-only copy to remove Terraform `prevent_destroy`; the committed
+resource manifest remains protected. Remove the temporary target permission and restore
+the persistent lifecycle after the approved cleanup.

@@ -164,6 +164,29 @@ def validate_target(target, gitops_root):
             require(isinstance(spec.get("owners"), list) and spec["owners"], "explicit Terraform address ownership required")
             require(all(re.fullmatch(r"[\w.\[\]\"-]+", x) for x in spec["owners"]), "invalid resource address")
             require(isinstance(spec.get("protected", []), list), "protected addresses must be a list")
+            persistent_destroy = spec.get("destroy_persistent_resources", [])
+            require(isinstance(persistent_destroy, list), "destroy_persistent_resources must be a list")
+            require(all(isinstance(item, dict) and set(item) == {"address", "host", "label", "size_gb"} for item in persistent_destroy),
+                    "persistent resource destroy entries must declare address, host, label, and size_gb")
+            if persistent_destroy:
+                require(stage == "resources" and target["provider"] == "akamai-cloud", "persistent resource destroy is supported only for Akamai resources")
+                require(lifecycle["persistent"] is False and spec.get("destroy_allowed") is True,
+                        "persistent resource destroy requires a non-persistent target and explicit destroy authorization")
+                require(len({item["address"] for item in persistent_destroy}) == len(persistent_destroy), "duplicate persistent destroy address")
+                resource_document = yaml.safe_load(source_file(gitops_root, manifest).read_text())
+                for item in persistent_destroy:
+                    require(all(isinstance(item.get(field), str) and item[field] for field in ("address", "host", "label")),
+                            "persistent resource destroy identity fields must be nonempty strings")
+                    require(type(item.get("size_gb")) is int and item["size_gb"] > 0, "persistent resource size_gb must be a positive integer")
+                    require(any(owner_match(item["address"], [owner]) for owner in spec["owners"]),
+                            "persistent destroy address must be owned by this stage")
+                    host = next((host for host in resource_document.get("hosts", []) if host.get("name") == item["host"]), None)
+                    require(host is not None and isinstance(host.get("volume"), dict), "persistent destroy host/volume is not declared in the resource manifest")
+                    volume = host["volume"]
+                    expected_address = f"module.volume_{re.sub(r'[^0-9A-Za-z_]', '_', item['host'])}.linode_volume.this"
+                    require(item["address"] == expected_address, "persistent destroy address does not match the declared host module")
+                    require(volume.get("label", host.get("label")) == item["label"] and volume.get("size") == item["size_gb"],
+                            "persistent destroy label/size must match the declared volume")
             canonical = canonical_state_key(environment=target["environment"], project=target["project"], provider=target["provider"], account=target["account"], namespace=namespace)
             state = spec.get("state", {})
             key = state.get("key")

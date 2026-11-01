@@ -12,7 +12,7 @@ from unittest.mock import patch
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from unified.contracts import ContractError, PROVIDERS, STAGES, digest, prepare, revalidate, state_lock_key, write_json
+from unified.contracts import ContractError, PROVIDERS, STAGES, digest, prepare, revalidate, state_lock_key, validate_target, write_json
 from unified.evidence import collect, guard_plan, receipt_base, sanitize_inventory, summarize, verify_summary
 from unified import runtime, auth
 import unified_cli
@@ -377,6 +377,54 @@ class ContractTests(unittest.TestCase):
         self.target["stages"]["resources"]["protected"] = ["module.compute_web_saas"]
         with self.assertRaises(ContractError):
             guard_plan(self.target, "resources", change(actions=["delete"]), "destroy")
+
+    def test_declared_persistent_volume_destroy_is_exact_and_host_bound(self):
+        target = copy.deepcopy(self.target)
+        target.update({"id": "prod-akamai-k3s-test", "environment": "prod", "account": "prod-account",
+            "workspace": "prod-k3s-test", "namespace": "prod-k3s-test",
+            "lifecycle": {"status": "active", "persistent": False}})
+        target["stages"]["resources"].update({
+            "manifest": "resources/svc.plus/prod/akamai/prod-k3s-test.yaml",
+            "state": {"key": "terraform/prod/svc.plus/akamai-cloud/prod-account/prod-k3s-test/terraform.tfstate", "cli_workspace": "default"},
+            "owners": ["module.compute_prod_k3s_test", "module.volume_prod_k3s_test", "linode_firewall.fw_prod_k3s_test"],
+            "protected": ["linode_firewall.fw_prod_k3s_test"], "destroy_allowed": True,
+            "destroy_persistent_resources": [{"address": "module.volume_prod_k3s_test.linode_volume.this",
+                "host": "prod-k3s-test", "label": "prod-k3s-test-data", "size_gb": 100}],
+        })
+        resource_path = self.gitops / target["stages"]["resources"]["manifest"]
+        resource_path.parent.mkdir(parents=True, exist_ok=True)
+        resource_path.write_text(yaml.safe_dump({"global": {"environment": "prod", "workspace": "prod-k3s-test",
+            "state_namespace": "prod-k3s-test", "provider": "akamai-cloud", "project": "svc.plus", "account": "prod-account",
+            "prevent_destroy": True}, "hosts": [{"name": "prod-k3s-test", "volume": {"label": "prod-k3s-test-data", "size": 100}}]}))
+        git(self.gitops, "add", ".")
+        git(self.gitops, "commit", "-qm", "add retirement fixture")
+        validate_target(target, self.gitops)
+        spec = target["stages"]["resources"]
+        spec["manifest_sha256"] = digest(resource_path)
+        private = self.root / "private-destroy-render"
+        private.mkdir()
+        context = {"action": "destroy"}
+        with patch.object(runtime, "run") as invoke:
+            runtime.render(context, target, "resources", Path(__file__).resolve().parents[3], self.gitops, private)
+        command = invoke.call_args.args[0]
+        rendered_source = Path(command[command.index("--resources") + 1])
+        self.assertIn("--allow-prod-replacement", command)
+        self.assertFalse(yaml.safe_load(rendered_source.read_text())["global"]["prevent_destroy"])
+        self.assertTrue(yaml.safe_load(resource_path.read_text())["global"]["prevent_destroy"])
+        changes = [
+            {"address": "module.compute_prod_k3s_test.linode_instance.this", "type": "linode_instance",
+                "change": {"actions": ["delete"], "before": {"id": 4455, "label": "prod-k3s-test"}}},
+            {"address": "module.volume_prod_k3s_test.linode_volume.this", "type": "linode_volume",
+                "change": {"actions": ["delete"], "before": {"id": 7788, "label": "prod-k3s-test-data", "size": 100, "linode_id": 4455}}},
+        ]
+        plan = {"resource_changes": changes}
+        self.assertEqual(guard_plan(target, "resources", plan, "destroy")["delete"], 2)
+        plan["resource_changes"][1]["change"]["before"]["linode_id"] = 9911
+        with self.assertRaisesRegex(ContractError, "not attached to the exact host"):
+            guard_plan(target, "resources", plan, "destroy")
+        target["stages"]["resources"]["destroy_persistent_resources"][0]["label"] = "other-volume"
+        with self.assertRaisesRegex(ContractError, "must match the declared volume"):
+            validate_target(target, self.gitops)
 
     def test_sanitization_does_not_copy_credential_host_vars(self):
         raw = {"host": {"ip": "192.0.2.1", "password": "should-not-copy", "host_vars": {"secret": "should-not-copy", "service_domains": ["example.invalid"]}}}

@@ -90,9 +90,20 @@ def render(context, target, stage, iac_root, gitops_root, private):
         args = [sys.executable, str(tree / "scripts" / "generate.py"), "render", "--resources", str(source), "--workdir", str(root)]
         if target["provider"] == "akamai-cloud":
             args += ["--namespace", target["workspace"]]
-            if context["action"] == "destroy" and target.get("validation"):
-                # The reviewed declaration remains protected. Only this private,
-                # saved-plan cleanup render uses the explicit replacement flag.
+            if context["action"] == "destroy" and not target.get("validation") and target["stages"][stage].get("destroy_allowed") is True:
+                # Keep the reviewed resource declaration protected. For this
+                # destroy-only execution, the explicit non-persistent target and
+                # its owner-scoped saved-plan guard authorize a private render.
+                document = yaml.safe_load(source.read_text())
+                document["global"]["prevent_destroy"] = False
+                temporary_source = Path(private) / "destroy-resources.yaml"
+                temporary_source.write_text(yaml.safe_dump(document))
+                args[args.index("--resources") + 1] = str(temporary_source)
+                if target["environment"] == "prod":
+                    args.append("--allow-prod-replacement")
+            elif context["action"] == "destroy" and target.get("validation"):
+                # Cleanroom validation remains independently bounded by its
+                # source-state witness and compute-only owner allowlist.
                 document = yaml.safe_load(source.read_text())
                 document["global"]["prevent_destroy"] = False
                 temporary_source = Path(private) / "validation-resources.yaml"
