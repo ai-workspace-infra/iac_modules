@@ -71,10 +71,18 @@ def render(context, target, stage, iac_root, gitops_root, private):
         spec_doc = yaml.safe_load(source.read_text())["spec"]
         for key, expected in {"project_id": target["auth"]["expected_identity"], "gcp_account_id": target["account"]}.items():
             require(spec_doc.get(key) == expected, "bootstrap identity/manifest mismatch")
-        require(spec_doc.get("repository") == "ai-workspace-infra/platform-ops-toolkit", "bootstrap repository mismatch")
+        repository = str(spec_doc.get("repository", ""))
+        require(
+            re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9][A-Za-z0-9_.-]{0,98}", repository) is not None,
+                "bootstrap repository declaration is missing or malformed")
+        subjects = spec_doc.get("subjects")
+        require(isinstance(subjects, list) and subjects and
+                all(isinstance(subject, str) and subject.startswith(f"repo:{repository}:") for subject in subjects),
+                "bootstrap subjects must bind only to the declared repository")
+        github_owner, github_repository = repository.split("/", 1)
         values = {
             "project_id": spec_doc["project_id"], "environment": target["environment"],
-            "github_owner": "ai-workspace-infra", "github_repository": "platform-ops-toolkit",
+            "github_owner": github_owner, "github_repository": github_repository,
             "pool_id": spec_doc["pool_id"], "provider_id": spec_doc["provider_id"],
             "audience": spec_doc["audience"], "deploy_service_account_id": spec_doc["service_account_id"],
             "allowed_subjects": spec_doc["subjects"],
