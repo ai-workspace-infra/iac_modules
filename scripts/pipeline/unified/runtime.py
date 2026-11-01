@@ -227,7 +227,15 @@ def execute(context, target_id, stage, iac_root, gitops_root, evidence, private,
                         args += [f"-target={owner}" for owner in validation["destroy_owners"]]
                 terraform(root, private, *args)
                 plan_doc = json.loads(terraform(root, private, "show", "-json", str(plan)).stdout)
-                receipt["changes"] = guard_plan(target, stage, plan_doc, context["action"])
+                bootstrap_repository = None
+                if stage == "bootstrap":
+                    bootstrap_values = read_json(root / "unified.auto.tfvars.json")
+                    bootstrap_repository = (
+                        f"{bootstrap_values['github_owner']}/{bootstrap_values['github_repository']}"
+                    )
+                receipt["changes"] = guard_plan(
+                    target, stage, plan_doc, context["action"], bootstrap_repository=bootstrap_repository
+                )
                 if validation:
                     require(receipt["changes"]["delete"] == 1, "validation cleanup must delete exactly one candidate instance")
                 receipt["plan_sha256"] = digest(plan)

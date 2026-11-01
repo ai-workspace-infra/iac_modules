@@ -442,6 +442,60 @@ class ContractTests(unittest.TestCase):
         with self.assertRaises(ContractError):
             guard_plan(self.target, "resources", change(actions=["delete"]), "destroy")
 
+    def test_bootstrap_federation_rebind_is_additive_and_narrowly_allowed(self):
+        target = copy.deepcopy(self.target)
+        target["provider"] = "gcp-cloud"
+        target["stages"]["bootstrap"] = {
+            "mode": "terraform", "create_only": True,
+            "owners": ["google_service_account_iam_member.federation"],
+        }
+        pool = "projects/123456789/locations/global/workloadIdentityPools/github-actions"
+        prefix = f"principalSet://iam.googleapis.com/{pool}/attribute.repository/"
+        item = {
+            "address": "google_service_account_iam_member.federation",
+            "type": "google_service_account_iam_member",
+            "change": {
+                "actions": ["create", "delete"],
+                "replace_paths": [["member"]],
+                "before": {"role": "roles/iam.workloadIdentityUser", "member": prefix + "new-org/old-repo"},
+                "after": {"role": "roles/iam.workloadIdentityUser", "member": prefix + "new-org/new-repo"},
+            },
+        }
+        for action in ("plan", "apply"):
+            with self.subTest(action=action):
+                counts = guard_plan(target, "bootstrap", {"resource_changes": [item]}, action,
+                                    bootstrap_repository="new-org/new-repo")
+                self.assertEqual(counts, {"create": 1, "update": 0, "delete": 1})
+
+        invalid = [
+            ("wrong_action_order", {"actions": ["delete", "create"]}),
+            ("wrong_replace_path", {"replace_paths": [["role"]]}),
+            ("wrong_pool", {"after": {"role": "roles/iam.workloadIdentityUser", "member":
+                "principalSet://iam.googleapis.com/projects/999/locations/global/workloadIdentityPools/other/attribute.repository/new-org/new-repo"}}),
+            ("wrong_repository", {"after": {"role": "roles/iam.workloadIdentityUser", "member":
+                prefix + "another-org/another-repo"}}),
+            ("wrong_owner", {"before": {"role": "roles/iam.workloadIdentityUser", "member":
+                prefix + "old-org/old-repo"}}),
+        ]
+        for label, override in invalid:
+            changed = copy.deepcopy(item)
+            changed["change"].update(override)
+            with self.subTest(invalid=label), self.assertRaises(ContractError):
+                guard_plan(target, "bootstrap", {"resource_changes": [changed]}, "apply",
+                           bootstrap_repository="new-org/new-repo")
+
+        protected = copy.deepcopy(target)
+        protected["stages"]["bootstrap"]["protected"] = ["google_service_account_iam_member.federation"]
+        with self.assertRaises(ContractError):
+            guard_plan(protected, "bootstrap", {"resource_changes": [item]}, "apply",
+                       bootstrap_repository="new-org/new-repo")
+
+        unrelated = copy.deepcopy(item)
+        unrelated["address"] = "google_project_iam_member.federation"
+        with self.assertRaises(ContractError):
+            guard_plan(target, "bootstrap", {"resource_changes": [unrelated]}, "apply",
+                       bootstrap_repository="new-org/new-repo")
+
     def test_sanitization_does_not_copy_credential_host_vars(self):
         raw = {"host": {"ip": "192.0.2.1", "password": "should-not-copy", "host_vars": {"secret": "should-not-copy", "service_domains": ["example.invalid"]}}}
         self.assertNotIn("should-not-copy", json.dumps(sanitize_inventory(raw)))

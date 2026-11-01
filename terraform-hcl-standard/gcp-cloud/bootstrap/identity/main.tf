@@ -218,6 +218,12 @@ resource "google_service_account_iam_member" "federation" {
   service_account_id = google_service_account.github_actions.name
   role               = "roles/iam.workloadIdentityUser"
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository/${var.github_owner}/${var.github_repository}"
+
+  # Rebind GitHub repository access additively: create the declared principal
+  # before removing the previous member so a normal apply cannot interrupt OIDC.
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 output "service_account_email" {
