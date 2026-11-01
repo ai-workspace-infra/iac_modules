@@ -78,7 +78,40 @@ def collect(context, root, stages=None):
     return found
 
 
-def guard_plan(target, stage, plan, action):
+def _safe_gcp_federation_rebind(target, stage, item, declared_repository):
+    """Allow only an additive bootstrap OIDC repository-member rebind."""
+    if target.get("provider") != "gcp-cloud" or stage != "bootstrap":
+        return False
+    if item.get("address") != "google_service_account_iam_member.federation":
+        return False
+    if item.get("type") != "google_service_account_iam_member":
+        return False
+
+    change = item.get("change") or {}
+    if change.get("actions") != ["create", "delete"] or change.get("replace_paths") != [["member"]]:
+        return False
+    before, after = change.get("before") or {}, change.get("after") or {}
+    expected_role = "roles/iam.workloadIdentityUser"
+    if before.get("role") != expected_role or after.get("role") != expected_role:
+        return False
+
+    member_pattern = re.compile(
+        r"principalSet://iam\.googleapis\.com/(projects/[0-9]+/locations/global/"
+        r"workloadIdentityPools/[A-Za-z0-9_-]+)/attribute\.repository/"
+        r"([A-Za-z0-9][A-Za-z0-9-]{0,38})/([A-Za-z0-9][A-Za-z0-9_.-]{0,98})"
+    )
+    old_match = member_pattern.fullmatch(str(before.get("member", "")))
+    new_match = member_pattern.fullmatch(str(after.get("member", "")))
+    if not old_match or not new_match or old_match.group(1) != new_match.group(1):
+        return False
+    if old_match.group(2, 3) == new_match.group(2, 3):
+        return False
+    if old_match.group(2) != new_match.group(2):
+        return False
+    return f"{new_match.group(2)}/{new_match.group(3)}" == declared_repository
+
+
+def guard_plan(target, stage, plan, action, bootstrap_repository=None):
     spec = target["stages"][stage]
     if spec.get("existing_only"):
         require(action in {"plan", "apply"}, "existing-only targets cannot be destroyed")
@@ -96,6 +129,7 @@ def guard_plan(target, stage, plan, action):
         actions = item["change"]["actions"]
         if spec.get("existing_only"):
             require(actions == ["no-op"], "existing-only target cannot create, update, replace or delete managed resources")
+        federation_rebind = _safe_gcp_federation_rebind(target, stage, item, bootstrap_repository)
         if spec.get("create_only") and action != "destroy":
             if actions not in (["create"], ["no-op"], ["read"]):
                 change = item.get("change") or {}
@@ -110,14 +144,15 @@ def guard_plan(target, stage, plan, action):
                     field for field in safe_fields
                     if before.get(field) != after.get(field) or after_unknown.get(field) is True
                 )
-                create_only_violations.append({
-                    "address": address,
-                    "type": resource_type,
-                    "actions": actions,
-                    "replace_paths": change.get("replace_paths", []),
-                    "action_reason": change.get("action_reason"),
-                    "changed_fields": changed_fields,
-                })
+                if not federation_rebind:
+                    create_only_violations.append({
+                        "address": address,
+                        "type": resource_type,
+                        "actions": actions,
+                        "replace_paths": change.get("replace_paths", []),
+                        "action_reason": change.get("action_reason"),
+                        "changed_fields": changed_fields,
+                    })
         for operation in counts:
             counts[operation] += operation in actions
         if "delete" in actions:
@@ -125,7 +160,8 @@ def guard_plan(target, stage, plan, action):
             detail = f"{address} actions={actions} replace_paths={change.get('replace_paths')} action_reason={change.get('action_reason')}"
             require(not owner_match(address, spec.get("protected", [])), f"protected resource deletion/replacement: {detail}")
             require(item.get("type") not in {"google_compute_disk", "aws_ebs_volume", "linode_volume", "vultr_block_storage", "ucloud_udisk"}, f"persistent disk deletion/replacement requires maintenance: {detail}")
-            require(action == "destroy", f"ordinary plan/apply cannot delete or replace resources: {detail}")
+            require(action == "destroy" or federation_rebind,
+                    f"ordinary plan/apply cannot delete or replace resources: {detail}")
             if target.get("validation"):
                 require(owner_match(address, target["validation"]["destroy_owners"]) and item.get("type") == "linode_instance", "validation may delete only the selected compute instance")
                 expected = target["validation"]["expected_instance"]
