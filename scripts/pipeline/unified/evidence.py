@@ -80,6 +80,8 @@ def collect(context, root, stages=None):
 
 def guard_plan(target, stage, plan, action):
     spec = target["stages"][stage]
+    if spec.get("existing_only"):
+        require(action in {"plan", "apply"}, "existing-only targets cannot be destroyed")
     changes = plan.get("resource_changes", [])
     counts = {"create": 0, "update": 0, "delete": 0}
     create_only_violations = []
@@ -92,6 +94,8 @@ def guard_plan(target, stage, plan, action):
         address = item["address"]
         require(owner_match(address, spec["owners"]), f"resource outside stage ownership: {address}")
         actions = item["change"]["actions"]
+        if spec.get("existing_only"):
+            require(actions == ["no-op"], "existing-only target cannot create, update, replace or delete managed resources")
         if spec.get("create_only") and action != "destroy":
             if actions not in (["create"], ["no-op"], ["read"]):
                 change = item.get("change") or {}
