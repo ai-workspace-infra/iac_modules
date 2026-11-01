@@ -42,7 +42,8 @@ def main(command):
                 selectors[key] = value
         context = prepare(env("GITOPS_ROOT"), env("ROOT"), env("MANIFEST"), env("ENVIRONMENT"), env("ACTION"),
                           env("SCOPE"), env("BOOTSTRAP_MODE", "verify"), env("CORRELATION", ""),
-                          {"gitops": env("GITOPS_REF"), "iac": env("REF")}, selectors=selectors)
+                          {"gitops": env("GITOPS_REF"), "iac": env("REF")}, selectors=selectors,
+                          resource_mode=env("RESOURCE_MODE", "create"))
         for key, value in selectors.items():
             if value:
                 require(all(t.get(key) == value for t in context["targets"]), f"legacy selector conflicts with declaration: {key}")
