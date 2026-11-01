@@ -75,9 +75,14 @@ def render(context, target, stage, iac_root, gitops_root, private):
         require(
             re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9][A-Za-z0-9_.-]{0,98}", repository) is not None,
                 "bootstrap repository declaration is missing or malformed")
+        owner_id = str(spec_doc.get("repository_owner_id", ""))
+        repository_id = str(spec_doc.get("repository_id", ""))
+        require((not owner_id and not repository_id) or (owner_id.isascii() and owner_id.isdigit() and repository_id.isascii() and repository_id.isdigit()), "invalid immutable repository identifiers")
+        owner, repo = repository.split("/", 1)
+        subject_repository = f"{owner}@{owner_id}/{repo}@{repository_id}" if owner_id else repository
         subjects = spec_doc.get("subjects")
         require(isinstance(subjects, list) and subjects and
-                all(isinstance(subject, str) and subject.startswith(f"repo:{repository}:") for subject in subjects),
+                all(isinstance(subject, str) and subject.startswith(f"repo:{subject_repository}:") for subject in subjects),
                 "bootstrap subjects must bind only to the declared repository")
         github_owner, github_repository = repository.split("/", 1)
         values = {
