@@ -285,7 +285,23 @@ def validate_catalog_transition(before_root, after_root, catalog):
     return len(previous_keys)
 
 
-def prepare(gitops_root, iac_root, manifest, environment, action, scope, bootstrap_mode, correlation, requested_refs, selectors=None):
+def apply_resource_mode(targets, resource_mode, action, scope):
+    require(resource_mode in {"create", "existing"}, "invalid resource mode")
+    if resource_mode == "existing":
+        require(action in {"plan", "apply"} and scope == "resources",
+                "existing resource mode supports only plan/apply on the resources stage")
+        require(len(targets) == 1, "existing resource mode requires exactly one selected target")
+        target = targets[0]
+        require(target.get("provider") == "akamai-cloud"
+                and target.get("lifecycle", {}).get("persistent") is True,
+                "existing resource mode is limited to one persistent Akamai target")
+        spec = target.get("stages", {}).get("resources", {})
+        require(spec.get("mode") == "terraform", "existing resource mode requires a Terraform resources stage")
+        spec.update(existing_only=True, requires_existing_state=True, destroy_allowed=False, create_only=False)
+    return targets
+
+
+def prepare(gitops_root, iac_root, manifest, environment, action, scope, bootstrap_mode, correlation, requested_refs, selectors=None, resource_mode="create"):
     require(action in {"check", "plan", "apply", "destroy"}, "invalid action")
     require(scope in {"all", *STAGES}, "invalid stage scope")
     require(bootstrap_mode in {"verify", "reconcile"}, "invalid bootstrap mode")
@@ -307,6 +323,7 @@ def prepare(gitops_root, iac_root, manifest, environment, action, scope, bootstr
         provider=selectors.get("provider") or None, account=selectors.get("account") or None,
         namespace=selectors.get("namespace") or selectors.get("workspace") or None,
         project=selectors.get("project") or None, include_migrations=action == "check")
+    apply_resource_mode(targets, resource_mode, action, scope)
     ids, keys = set(), set()
     selected = list(STAGES) if scope == "all" else [scope]
     if action == "destroy" and any(target.get("validation") for target in targets):
@@ -351,6 +368,7 @@ def prepare(gitops_root, iac_root, manifest, environment, action, scope, bootstr
         "workflow_ref": os.environ.get("GITHUB_WORKFLOW_REF", "local"),
         "workflow_sha": os.environ.get("GITHUB_WORKFLOW_SHA", "local"),
         "gitops_sha": gitops_sha, "iac_sha": iac_sha, "requested_refs": requested_refs,
+        "resource_mode": resource_mode,
         "manifest_path": manifest, "manifest_sha256": digest(source), "selectors": selectors, "declaration_files": declaration_files, "targets": targets,
     }
     context["contract_sha256"] = hashlib.sha256(json.dumps(context, sort_keys=True).encode()).hexdigest()
@@ -370,6 +388,7 @@ def revalidate(context, gitops_root, iac_root):
         provider=selectors.get("provider") or None, account=selectors.get("account") or None,
         namespace=selectors.get("namespace") or selectors.get("workspace") or None,
         project=selectors.get("project") or None, include_migrations=context["action"] == "check")
+    apply_resource_mode(declaration, context.get("resource_mode", "create"), context["action"], context["stage_scope"])
     require(files == context.get("declaration_files", files), "catalog target references changed")
     normalized = json.loads(json.dumps(declaration))
     for target in normalized:

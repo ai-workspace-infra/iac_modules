@@ -12,7 +12,7 @@ from unittest.mock import patch
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from unified.contracts import ContractError, PROVIDERS, STAGES, digest, prepare, revalidate, state_lock_key, write_json
+from unified.contracts import ContractError, PROVIDERS, STAGES, apply_resource_mode, digest, prepare, revalidate, state_lock_key, write_json
 from unified.evidence import collect, guard_plan, receipt_base, sanitize_inventory, summarize, verify_summary
 from unified import runtime, auth
 import unified_cli
@@ -165,6 +165,41 @@ class ContractTests(unittest.TestCase):
                     guard_plan(target, 'resources', {'resource_changes': [changed]}, action)
         with self.assertRaises(ContractError):
             guard_plan(target, 'resources', {'resource_changes': []}, 'destroy')
+
+    def test_explicit_existing_mode_tightens_one_persistent_akamai_target(self):
+        target = copy.deepcopy(self.target)
+        target['lifecycle']['persistent'] = True
+        target['stages']['resources']['create_only'] = True
+        targets = apply_resource_mode([target], 'existing', 'apply', 'resources')
+        spec = targets[0]['stages']['resources']
+        self.assertTrue(spec['existing_only'])
+        self.assertTrue(spec['requires_existing_state'])
+        self.assertFalse(spec['destroy_allowed'])
+        self.assertFalse(spec['create_only'])
+
+        target['lifecycle']['persistent'] = True
+        target['stages']['resources'].pop('existing_only', None)
+        target['stages']['resources'].pop('requires_existing_state', None)
+        target['stages']['resources']['create_only'] = True
+        target['stages']['resources']['destroy_allowed'] = True
+        self.publish([target])
+        context = prepare(self.gitops, self.iac, self.manifest, 'uat', 'apply', 'resources', 'verify',
+                          'correlation', {'iac': 'main', 'gitops': 'main'}, resource_mode='existing')
+        self.assertEqual(context['resource_mode'], 'existing')
+        self.assertTrue(context['targets'][0]['stages']['resources']['existing_only'])
+        revalidate(context, self.gitops, self.iac)
+
+    def test_existing_mode_rejects_ambiguous_or_unsafe_selection(self):
+        target = copy.deepcopy(self.target)
+        target['lifecycle']['persistent'] = True
+        with self.assertRaises(ContractError):
+            apply_resource_mode([target, copy.deepcopy(target)], 'existing', 'apply', 'resources')
+        for action, scope in (('destroy', 'resources'), ('apply', 'all'), ('apply', 'bootstrap')):
+            with self.subTest(action=action, scope=scope), self.assertRaises(ContractError):
+                apply_resource_mode([target], 'existing', action, scope)
+        target['provider'] = 'gcp-cloud'
+        with self.assertRaises(ContractError):
+            apply_resource_mode([target], 'existing', 'apply', 'resources')
 
     def test_runtime_volume_binding_survives_receipts_without_untrusted_fields(self):
         volume = {'volume_id': 42, 'linode_id': 123, 'size_gb': 100, 'region': 'us-east',

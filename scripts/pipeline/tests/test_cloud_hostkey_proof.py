@@ -21,13 +21,14 @@ class CloudHostkeyProofTests(unittest.TestCase):
         spec = importlib.util.spec_from_file_location('candidate_hostkey', Path(__file__).resolve().parents[1] / 'akamai-candidate-hostkey.py')
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        sample = {'node': {'name': 'candidate', 'label': 'candidate', 'instance_id': 123,
+        sample = {'node': {'name': 'candidate', 'label': 'uat-ai-gateway.svc.plus', 'instance_id': 123,
                            'host_vars': {'cloud_provider': 'akamai-cloud'}}}
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'cmdb.json'
             path.write_text(json.dumps(sample))
             checksum = hashlib.sha256(path.read_bytes()).hexdigest()
             self.assertEqual(module.select(path, checksum, 'candidate')['instance_id'], 123)
+            self.assertEqual(module.select(path, checksum, 'candidate')['label'], 'uat-ai-gateway.svc.plus')
             with self.assertRaises(ContractError): module.select(path, '0'*64, 'candidate')
             with self.assertRaises(ContractError): module.select(path, checksum, 'another')
 

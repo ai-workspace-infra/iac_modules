@@ -16,6 +16,10 @@ inputs:
   action:
     description: check/plan/apply/destroy
     required: true
+  resource-mode:
+    description: create follows declared lifecycle; existing requires a retained no-change Terraform state
+    required: false
+    default: create
   stage-scope:
     description: all/bootstrap/account/resources
     required: true
@@ -55,6 +59,7 @@ runs:
         IAC_MANIFEST: ${{ inputs.target-manifest }}
         IAC_ENVIRONMENT: ${{ inputs.environment }}
         IAC_ACTION: ${{ inputs.action }}
+        IAC_RESOURCE_MODE: ${{ inputs.resource-mode }}
         IAC_SCOPE: ${{ inputs.stage-scope }}
         IAC_BOOTSTRAP_MODE: ${{ inputs.bootstrap-mode }}
         IAC_GITOPS_REF: ${{ inputs.gitops-ref }}

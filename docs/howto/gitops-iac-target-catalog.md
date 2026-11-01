@@ -44,8 +44,10 @@ separately reviewed state handoff is complete. This implementation does not appl
 Terraform, move/remove state, or mutate provider resources.
 ## Explicit existing-resource consumption
 
-For a deployment that must use already managed resources, the GitOps target's
-`stages.resources` can declare these policies together:
+For a workflow that must use already managed resources, the caller may select
+`resource-mode: existing` on the `iac-targets` owner action. This runtime
+selection is part of the signed execution context and tightens one persistent
+Akamai target's `stages.resources` policy to:
 
 ```yaml
 existing_only: true
