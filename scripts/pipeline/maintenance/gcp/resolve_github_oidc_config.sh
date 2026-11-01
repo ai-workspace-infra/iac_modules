@@ -39,10 +39,15 @@ else
 end
 expected_audience_prefix = "https://iam.googleapis.com/"
 github_environment = environment == "shared" ? "prod" : environment
-required_subject = "repo:#{repository}:environment:#{github_environment}"
+owner_id = spec["repository_owner_id"].to_s
+repository_id = spec["repository_id"].to_s
+ids_valid = (owner_id.empty? && repository_id.empty?) || (owner_id.match?(/\A[0-9]+\z/) && repository_id.match?(/\A[0-9]+\z/))
+owner, name = repository.split("/", 2)
+subject_repository = owner_id.empty? ? repository : "#{owner}@#{owner_id}/#{name}@#{repository_id}"
+required_subject = "repo:#{subject_repository}:environment:#{github_environment}"
 subjects = spec["subjects"]
 subjects_match_repository = subjects.is_a?(Array) && !subjects.empty? &&
-  subjects.all? { |subject| subject.is_a?(String) && subject.start_with?("repo:#{repository}:") }
+  subjects.all? { |subject| subject.is_a?(String) && subject.start_with?("repo:#{subject_repository}:") }
 
 checks = {
   "apiVersion" => config["apiVersion"] == "gitops.svc.plus/v1alpha1",
@@ -58,7 +63,7 @@ checks = {
   "spec.provider_id" => spec["provider_id"].to_s.match?(/\A[a-z][a-z0-9-]{0,31}\z/),
   "spec.service_account_id" => spec["service_account_id"].to_s == "github-actions-#{environment}",
   "spec.repository" => repository_format_valid,
-  "spec.subjects" => subjects_match_repository && subjects.include?(required_subject),
+  "spec.subjects" => ids_valid && subjects_match_repository && subjects.include?(required_subject),
   "spec.state.bucket" => spec.dig("state", "bucket").to_s.match?(/\A[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]\z/),
   "spec.state.key" => spec.dig("state", "key") == expected_state_key
 }
