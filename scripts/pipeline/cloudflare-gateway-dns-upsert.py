@@ -38,7 +38,7 @@ def domain(value: str) -> str:
     value = value.lower().rstrip(".")
     labels = value.split(".")
     if len(value) > 253 or len(labels) < 2 or any(
-        not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?[a-z0-9]?", label)
+        not re.fullmatch(r"[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?", label)
         for label in labels
     ):
         raise OperationError("invalid DNS name")
@@ -75,7 +75,7 @@ class Config:
     resolver_wait: bool
 
     @classmethod
-    def from_env(cls, env: dict[str, str], allowed_environments=("uat", "prod")) -> "Config":
+    def from_env(cls, env: dict[str, str], allowed_environments=("sit", "uat", "prod")) -> "Config":
         environment = required(env, "DNS_ENVIRONMENT")
         if environment not in allowed_environments:
             raise OperationError("DNS_ENVIRONMENT is outside the allowed execution scope")

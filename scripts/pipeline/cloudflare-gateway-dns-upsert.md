@@ -8,13 +8,18 @@ workflow wrapper.
 
 The caller must provide:
 
-- `DNS_ENVIRONMENT`: exactly `uat` or `prod`.
+- `DNS_ENVIRONMENT`: exactly `sit`, `uat`, or `prod`.
 - `CLOUDFLARE_ACCOUNT_ID`: one 32-character account id.
 - `DNS_ZONE`: the exact active zone to query.
 - `DNS_RECORD_NAME`: the record name, within `DNS_ZONE`.
 - `DNS_TARGET_IP`: one public IPv4 address.
 - `DNS_CHECKPOINT_PATH`: an absolute, non-symlink path on a private run volume.
 - `CLOUDFLARE_DNS_API_TOKEN`: runtime-only provider credential.
+
+The record-name validator accepts DNS labels containing underscores because
+DNS records can carry labels that are not valid hostnames. Callers remain
+responsible for validating TLS and HTTP client compatibility before publishing
+a service URL.
 
 `DNS_WAIT_FOR_RESOLVER` defaults to `true`; setting it to `false` is only
 appropriate for a caller that performs an equivalent post-step convergence
