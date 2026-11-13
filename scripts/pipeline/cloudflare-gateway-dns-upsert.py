@@ -34,11 +34,12 @@ def required(env: dict[str, str], key: str) -> str:
     return value
 
 
-def domain(value: str) -> str:
+def domain(value: str, allow_underscores: bool = False) -> str:
     value = value.lower().rstrip(".")
     labels = value.split(".")
+    label_pattern = r"[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?" if allow_underscores else r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?[a-z0-9]?"
     if len(value) > 253 or len(labels) < 2 or any(
-        not re.fullmatch(r"[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?", label)
+        not re.fullmatch(label_pattern, label)
         for label in labels
     ):
         raise OperationError("invalid DNS name")
@@ -75,15 +76,15 @@ class Config:
     resolver_wait: bool
 
     @classmethod
-    def from_env(cls, env: dict[str, str], allowed_environments=("sit", "uat", "prod")) -> "Config":
+    def from_env(cls, env: dict[str, str], allowed_environments=("uat", "prod"), allow_underscores=False) -> "Config":
         environment = required(env, "DNS_ENVIRONMENT")
         if environment not in allowed_environments:
             raise OperationError("DNS_ENVIRONMENT is outside the allowed execution scope")
         account_id = required(env, "CLOUDFLARE_ACCOUNT_ID")
         if not re.fullmatch(r"[a-f0-9]{32}", account_id):
             raise OperationError("CLOUDFLARE_ACCOUNT_ID must be a 32-character id")
-        zone = domain(required(env, "DNS_ZONE"))
-        name = domain(required(env, "DNS_RECORD_NAME"))
+        zone = domain(required(env, "DNS_ZONE"), allow_underscores=allow_underscores)
+        name = domain(required(env, "DNS_RECORD_NAME"), allow_underscores=allow_underscores)
         if name != zone and not name.endswith("." + zone):
             raise OperationError("DNS_RECORD_NAME must belong to DNS_ZONE")
         checkpoint = Path(required(env, "DNS_CHECKPOINT_PATH"))
