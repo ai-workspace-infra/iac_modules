@@ -117,8 +117,8 @@ jobs:
           jwtGithubAudience: vault
           exportToken: true
           secrets: |
-            kv/data/prod/platform/cloudflare account_id | TF_VAR_cloudflare_account_id ;
-            kv/data/prod/platform/cloudflare api_token | CLOUDFLARE_API_TOKEN ;
+            kv/data/prod/serverless/cloudflare CLOUDFLARE_ACCOUNT_ID | TF_VAR_cloudflare_account_id ;
+            kv/data/prod/serverless/cloudflare CLOUDFLARE_API_TOKEN | CLOUDFLARE_API_TOKEN ;
             kv/data/prod/platform/alicloud access_key_id | ALICLOUD_ACCESS_KEY ;
             kv/data/prod/platform/alicloud access_key_secret | ALICLOUD_SECRET_KEY ;
             kv/data/CICD/prod/iac_state TF_STATE_ENDPOINT | TF_STATE_ENDPOINT ;

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Interactive CAS-protected helper to bootstrap the two one-time admin secrets in Vault KV v2:
-#   kv/prod/platform/cloudflare (api_token, account_id)
-#   kv/prod/platform/alicloud   (access_key_id, access_key_secret)
+# Interactive CAS-protected helper to inspect or populate admin secrets in Vault KV v2:
+#   kv/prod/serverless/cloudflare (CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID) - already provisioned; reused by default
+#   kv/prod/platform/alicloud       (access_key_id, access_key_secret)
 set -euo pipefail
 set +x
 
@@ -31,7 +31,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$provider" in
-  cloudflare) secret_path='prod/platform/cloudflare' ;;
+  cloudflare) secret_path='prod/serverless/cloudflare' ;;
   alicloud) secret_path='prod/platform/alicloud' ;;
   *) usage >&2; exit 2 ;;
 esac
@@ -68,11 +68,11 @@ field_a='' field_b=''
 trap 'unset field_a field_b' EXIT
 
 if [[ "$provider" == cloudflare ]]; then
-  read -r -p 'Enter Cloudflare account_id (non-secret): ' field_b
-  read -r -s -p 'Enter Cloudflare api_token: ' field_a
+  read -r -p 'Enter CLOUDFLARE_ACCOUNT_ID (non-secret): ' field_b
+  read -r -s -p 'Enter CLOUDFLARE_API_TOKEN: ' field_a
   printf '\n'
-  [[ -n "$field_a" && -n "$field_b" ]] || { printf 'Both api_token and account_id are required.\n' >&2; exit 1; }
-  payload="$(python3 -c 'import json, os; print(json.dumps({"api_token": os.environ["A"], "account_id": os.environ["B"]}))' A="$field_a" B="$field_b")"
+  [[ -n "$field_a" && -n "$field_b" ]] || { printf 'Both CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are required.\n' >&2; exit 1; }
+  payload="$(python3 -c 'import json, os; print(json.dumps({"CLOUDFLARE_API_TOKEN": os.environ["A"], "CLOUDFLARE_ACCOUNT_ID": os.environ["B"]}))' A="$field_a" B="$field_b")"
 else
   read -r -p 'Enter Aliyun access_key_id: ' field_a
   read -r -s -p 'Enter Aliyun access_key_secret: ' field_b
