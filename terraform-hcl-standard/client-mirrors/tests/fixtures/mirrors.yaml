@@ -1,0 +1,61 @@
+---
+apiVersion: gitops.svc.plus/v1alpha1
+kind: ClientMirrorStack
+metadata:
+  name: svc-plus-client-mirrors
+  project: svc.plus
+  environment: prod
+spec:
+  global:
+    zone_name: svc.plus
+    managed_by: terraform-client-mirrors
+    state:
+      project: svc.plus
+      environment: prod
+      account: svc-plus-prod
+      namespace: mirrors
+  products:
+    - slug: xconnect
+      prefixes:
+        - releases/xconnect/
+    - slug: xworkmate
+      prefixes:
+        - releases/xworkmate/
+  cloudflare_r2:
+    id: global_r2
+    bucket_name: svc-plus-releases-global
+    custom_domain: dl.svc.plus
+    location: apac
+    min_tls: "1.2"
+    cors_allowed_origins:
+      - https://console.svc.plus
+      - https://xworktech.com
+    cors_allowed_methods:
+      - GET
+      - HEAD
+    cors_max_age_seconds: 3600
+    token_name: svc-plus-client-mirrors-r2-rw
+    vault_kv_path: prod/platform/storage/cloudflare-r2
+  aliyun_oss_cdn:
+    id: cn_oss_cdn
+    bucket_name: svc-plus-releases-cn-hk
+    oss_region: cn-hongkong
+    oss_acl: public-read
+    cdn_domain: cn-dl.svc.plus
+    cdn_type: download
+    cdn_scope: overseas
+    cdn_rate_limit: 10m
+    cdn_rate_limit_after: 1m
+    cdn_bandwidth_alarm_bps: 500000000
+    cdn_alarm_contact_group: ""
+    cdn_cas_cert_id: ""
+    cors_allowed_origins:
+      - https://console.svc.plus
+      - https://xworktech.com
+    cors_allowed_methods:
+      - GET
+      - HEAD
+    cors_max_age_seconds: 3600
+    ram_user_name: ci-client-mirrors-oss-rw
+    ram_policy_name: ci-client-mirrors-oss-rw-policy
+    vault_kv_path: prod/platform/storage/aliyun-oss

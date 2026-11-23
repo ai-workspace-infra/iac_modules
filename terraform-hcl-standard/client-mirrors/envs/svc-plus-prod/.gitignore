@@ -1,0 +1,15 @@
+# generate.py render artifacts (derived from GitOps mirrors.yaml + templates/)
+generated_mirrors.tf
+backend.tf
+provider.tf
+variables.tf
+terraform.auto.tfvars.json
+rendered_manifest.json
+
+# terraform runtime
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+__pycache__/
