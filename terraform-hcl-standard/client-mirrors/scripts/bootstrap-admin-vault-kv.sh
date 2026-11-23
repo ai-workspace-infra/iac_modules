@@ -113,9 +113,9 @@ else
 fi
 
 if [[ "$provider" == cloudflare ]]; then
-  payload="$(python3 -c 'import json, os; print(json.dumps({"CLOUDFLARE_API_TOKEN": os.environ["A"], "CLOUDFLARE_ACCOUNT_ID": os.environ["B"]}))' A="$field_a" B="$field_b")"
+  payload="$(printf '%s\n%s' "$field_a" "$field_b" | python3 -c 'import json, sys; a, b = sys.stdin.read().split("\n", 1); print(json.dumps({"CLOUDFLARE_API_TOKEN": a, "CLOUDFLARE_ACCOUNT_ID": b}))')"
 else
-  payload="$(python3 -c 'import json, os; print(json.dumps({"access_key_id": os.environ["A"], "access_key_secret": os.environ["B"]}))' A="$field_a" B="$field_b")"
+  payload="$(printf '%s\n%s' "$field_a" "$field_b" | python3 -c 'import json, sys; a, b = sys.stdin.read().split("\n", 1); print(json.dumps({"access_key_id": a, "access_key_secret": b}))')"
 fi
 
 if ! printf '%s' "$payload" | "$vault_bin" kv put -mount=kv -cas="$cas" "$secret_path" - >/dev/null 2>&1; then
