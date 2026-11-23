@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
-# Interactive CAS-protected helper to inspect or populate admin secrets in Vault KV v2:
-#   kv/prod/serverless/cloudflare (CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID) - already provisioned; reused by default
+# CAS-protected helper to inspect or populate admin secrets in Vault KV v2:
+#   kv/prod/serverless/cloudflare (CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID) - reused by default
 #   kv/prod/platform/alicloud       (access_key_id, access_key_secret)
 set -euo pipefail
 set +x
 
 usage() {
   printf '%s\n' \
-    'Usage: bootstrap-admin-vault-kv.sh --provider cloudflare|alicloud [--rotate --expected-version N] [--preflight]' \
+    'Usage: bootstrap-admin-vault-kv.sh --provider cloudflare|alicloud [--non-interactive] [--rotate --expected-version N] [--preflight]' \
     'Requires: vault CLI, VAULT_ADDR, and an existing Vault login (VAULT_TOKEN or CLI token helper).' \
-    'Prompts without echo and writes via stdin JSON using CAS=0 by default.'
+    'In --non-interactive (--yes) mode reads ALICLOUD_ACCESS_KEY/ALICLOUD_SECRET_KEY or CLOUDFLARE_ACCOUNT_ID/CLOUDFLARE_API_TOKEN from env.' \
+    'Writes via stdin JSON using CAS=0 by default without echoing credentials.'
 }
 
-provider='' rotate=false expected_version='' preflight=false
+vault_bin="${VAULT_BIN:-vault}"
+provider='' rotate=false expected_version='' preflight=false non_interactive=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --provider|--expected-version)
@@ -23,6 +25,7 @@ while [[ $# -gt 0 ]]; do
       esac
       shift 2
       ;;
+    --non-interactive|--yes) non_interactive=true; shift ;;
     --rotate) rotate=true; shift ;;
     --preflight) preflight=true; shift ;;
     --help|-h) usage; exit 0 ;;
@@ -45,13 +48,13 @@ elif [[ -n "$expected_version" ]]; then
   exit 2
 fi
 
-command -v vault >/dev/null || { printf 'vault CLI is required.\n' >&2; exit 1; }
+command -v "$vault_bin" >/dev/null || { printf 'vault CLI is required.\n' >&2; exit 1; }
 command -v python3 >/dev/null || { printf 'python3 is required.\n' >&2; exit 1; }
 [[ -n "${VAULT_ADDR:-}" ]] || { printf 'VAULT_ADDR is required.\n' >&2; exit 1; }
 
 if [[ "$preflight" == true ]]; then
-  vault token lookup >/dev/null 2>&1 || { printf 'FAIL: not logged in to %s.\n' "$VAULT_ADDR" >&2; exit 1; }
-  if version="$(vault kv metadata get -mount=kv -field=current_version "$secret_path" 2>/dev/null)"; then
+  "$vault_bin" token lookup >/dev/null 2>&1 || { printf 'FAIL: not logged in to %s.\n' "$VAULT_ADDR" >&2; exit 1; }
+  if version="$("$vault_bin" kv metadata get -mount=kv -field=current_version "$secret_path" 2>/dev/null)"; then
     printf 'OK: kv/%s exists at version %s; pass --rotate --expected-version %s to replace.\n' "$secret_path" "$version" "$version"
   else
     printf 'OK: kv/%s has no record yet (first write uses CAS=0).\n' "$secret_path"
@@ -59,29 +62,63 @@ if [[ "$preflight" == true ]]; then
   exit 0
 fi
 
-[[ -t 0 ]] || { printf 'Run interactively to enter credentials without echo.\n' >&2; exit 1; }
-printf 'Vault target: %s\nKV record: kv/%s\nCAS version: %s\n' "$VAULT_ADDR" "$secret_path" "$cas"
-read -r -p "Type '$provider' to confirm: " confirm
-[[ "$confirm" == "$provider" ]] || { printf 'Cancelled.\n' >&2; exit 1; }
+_trim() {
+  local v="${1//$'\r'/}"
+  v="${v#"${v%%[![:space:]]*}"}"
+  v="${v%"${v##*[![:space:]]}"}"
+  printf '%s' "$v"
+}
 
 field_a='' field_b=''
 trap 'unset field_a field_b' EXIT
 
-if [[ "$provider" == cloudflare ]]; then
-  read -r -p 'Enter CLOUDFLARE_ACCOUNT_ID (non-secret): ' field_b
-  read -r -s -p 'Enter CLOUDFLARE_API_TOKEN: ' field_a
-  printf '\n'
-  [[ -n "$field_a" && -n "$field_b" ]] || { printf 'Both CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are required.\n' >&2; exit 1; }
-  payload="$(python3 -c 'import json, os; print(json.dumps({"CLOUDFLARE_API_TOKEN": os.environ["A"], "CLOUDFLARE_ACCOUNT_ID": os.environ["B"]}))' A="$field_a" B="$field_b")"
+if [[ "$non_interactive" == true ]]; then
+  if [[ "$provider" == cloudflare ]]; then
+    field_a="$(_trim "${CLOUDFLARE_API_TOKEN:-}")"
+    field_b="$(_trim "${CLOUDFLARE_ACCOUNT_ID:-}")"
+    [[ -n "$field_a" && -n "$field_b" ]] || {
+      printf 'Set non-empty CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID for --non-interactive.\n' >&2
+      exit 1
+    }
+  else
+    field_a="$(_trim "${ALICLOUD_ACCESS_KEY:-${ALICLOUD_ACCESS_KEY_ID:-}}")"
+    field_b="$(_trim "${ALICLOUD_SECRET_KEY:-${ALICLOUD_ACCESS_KEY_SECRET:-}}")"
+    [[ -n "$field_a" && -n "$field_b" ]] || {
+      printf 'Set non-empty ALICLOUD_ACCESS_KEY and ALICLOUD_SECRET_KEY for --non-interactive.\n' >&2
+      exit 1
+    }
+  fi
 else
-  read -r -p 'Enter Aliyun access_key_id: ' field_a
-  read -r -s -p 'Enter Aliyun access_key_secret: ' field_b
-  printf '\n'
-  [[ -n "$field_a" && -n "$field_b" ]] || { printf 'Both access_key_id and access_key_secret are required.\n' >&2; exit 1; }
-  payload="$(python3 -c 'import json, os; print(json.dumps({"access_key_id": os.environ["A"], "access_key_secret": os.environ["B"]}))' A="$field_a" B="$field_b")"
+  [[ -t 0 ]] || { printf 'Run interactively or pass --non-interactive with env vars.\n' >&2; exit 1; }
+  printf 'Vault target: %s\nKV record: kv/%s\nCAS version: %s\n' "$VAULT_ADDR" "$secret_path" "$cas"
+  read -r -p "Type '$provider' to confirm: " confirm
+  confirm="$(_trim "$confirm")"
+  [[ "$confirm" == "$provider" ]] || { printf 'Cancelled.\n' >&2; exit 1; }
+
+  if [[ "$provider" == cloudflare ]]; then
+    read -r -p 'Enter CLOUDFLARE_ACCOUNT_ID (non-secret): ' field_b
+    read -r -s -p 'Enter CLOUDFLARE_API_TOKEN: ' field_a
+    printf '\n'
+    field_a="$(_trim "$field_a")"
+    field_b="$(_trim "$field_b")"
+    [[ -n "$field_a" && -n "$field_b" ]] || { printf 'Both CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are required.\n' >&2; exit 1; }
+  else
+    read -r -p 'Enter Aliyun access_key_id: ' field_a
+    read -r -s -p 'Enter Aliyun access_key_secret: ' field_b
+    printf '\n'
+    field_a="$(_trim "$field_a")"
+    field_b="$(_trim "$field_b")"
+    [[ -n "$field_a" && -n "$field_b" ]] || { printf 'Both access_key_id and access_key_secret are required.\n' >&2; exit 1; }
+  fi
 fi
 
-if ! printf '%s' "$payload" | vault kv put -mount=kv -cas="$cas" "$secret_path" - >/dev/null 2>&1; then
+if [[ "$provider" == cloudflare ]]; then
+  payload="$(printf '%s\n%s' "$field_a" "$field_b" | python3 -c 'import json, sys; a, b = sys.stdin.read().split("\n", 1); print(json.dumps({"CLOUDFLARE_API_TOKEN": a, "CLOUDFLARE_ACCOUNT_ID": b}))')"
+else
+  payload="$(printf '%s\n%s' "$field_a" "$field_b" | python3 -c 'import json, sys; a, b = sys.stdin.read().split("\n", 1); print(json.dumps({"access_key_id": a, "access_key_secret": b}))')"
+fi
+
+if ! printf '%s' "$payload" | "$vault_bin" kv put -mount=kv -cas="$cas" "$secret_path" - >/dev/null 2>&1; then
   printf 'Write failed. Verify Vault login, KV v2 mount, policy, and CAS version.\n' >&2
   exit 1
 fi
