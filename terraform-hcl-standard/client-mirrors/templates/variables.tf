@@ -4,7 +4,7 @@
 # TF_VAR_cloudflare_account_id come from Vault/env at runtime.
 
 variable "cloudflare_account_id" {
-  description = "Cloudflare Account ID loaded from Vault (kv/prod/platform/cloudflare -> account_id)."
+  description = "Cloudflare Account ID loaded from Vault (kv/prod/serverless/cloudflare -> CLOUDFLARE_ACCOUNT_ID)."
   type        = string
 }
 
