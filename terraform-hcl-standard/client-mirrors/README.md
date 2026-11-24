@@ -1,9 +1,12 @@
-# Client Dual-Mirror IaC (`dl.svc.plus` + `cn-dl.svc.plus`)
+# Client Dual-Mirror IaC (`mirrors` & `repos`)
 
-Automated Terraform + Vault KV v2 stack provisioning the shared multi-product client distribution mirrors for `svc.plus`:
+Automated Terraform + Vault KV v2 stack provisioning the shared multi-product dual-mirror stacks for `svc.plus`:
 
-- **Global Mirror (`https://dl.svc.plus`)**: Cloudflare R2 bucket (`apac`), R2 Custom Domain (`dl.svc.plus`), bucket CORS, and a bucket-scoped `Workers R2 Storage Bucket Item Write` Account API token (S3 access key + SHA-256 secret synced to `kv/prod/platform/storage/cloudflare-r2`).
-- **CN Mirror (`https://cn-dl.svc.plus`)**: Aliyun `oss-cn-hongkong` OSS bucket (`public-read`, CORS, versioning, AES256), Aliyun CDN `download` domain (`scope = "overseas"` by default; switchable in `mirrors.yaml` since `svc.plus` holds an ICP filing), `limit_rate` throttling (`10m` after `1m`), optional HTTPS redirect & CloudMonitor `BPS` alarm, Cloudflare non-proxied CNAME, and a least-privilege RAM publisher user (AK/SK synced to `kv/prod/platform/storage/aliyun-oss`).
+- **`mirrors` stack (`dl.svc.plus` + `cn-dl.svc.plus`, `mirrors.yaml`)**:
+  - **Global Mirror (`https://dl.svc.plus`)**: Cloudflare R2 bucket (`apac`), R2 Custom Domain (`dl.svc.plus`), bucket CORS, and a bucket-scoped `Workers R2 Storage Bucket Item Write` Account API token (S3 access key + SHA-256 secret synced to `kv/prod/platform/storage/cloudflare-r2`).
+  - **CN Mirror (`https://cn-dl.svc.plus`)**: Aliyun `oss-cn-hongkong` OSS bucket (`public-read`, CORS, versioning, AES256), Aliyun CDN `download` domain (`scope = "overseas"` by default; switchable in `mirrors.yaml` since `svc.plus` holds an ICP filing), `limit_rate` throttling (`10m` after `1m`), optional HTTPS redirect (`cdn_cas_cert_id` or `cdn_tls_vault_path`) & CloudMonitor `BPS` alarm, Cloudflare non-proxied CNAME, and a least-privilege RAM publisher user (default prefixes `["releases/*", "offline-package/*"]`, AK/SK synced to `kv/prod/platform/storage/aliyun-oss`).
+- **`repos` stack (`repo.svc.plus` + `cn-repo.svc.plus`, `repos.yaml`)**:
+  - Package repository dual-mirror stack using `spec.global.state.namespace: repos`, custom `spec.global.probe_path`, `spec.aliyun_oss_cdn.oss_policy_prefixes` for RAM bucket prefix scoping, and `spec.aliyun_oss_cdn.cdn_tls_vault_path` for edge TLS source tracking.
 
 ## Bootstrap (Reuse Existing Cloudflare / State Records + One-Time Aliyun Secret)
 
@@ -27,9 +30,13 @@ Or check existing Vault status without writing:
 ## Render, Validate & Reconcile
 
 ```bash
+# Render mirrors stack (default)
 python3 scripts/generate.py render \
-  --resources ../../gitops/resources/svc.plus/prod/client-mirrors/mirrors.yaml \
+  --manifest ../../gitops/resources/svc.plus/prod/client-mirrors/mirrors.yaml \
   --workdir envs/svc-plus-prod
+
+# Or render by stack preset (--stack mirrors|repos; defaults workdir by stack)
+python3 scripts/generate.py render --stack repos
 
 python3 scripts/generate.py check-hcl --root .
 ```

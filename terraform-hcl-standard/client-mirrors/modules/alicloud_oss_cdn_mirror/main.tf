@@ -116,10 +116,7 @@ resource "alicloud_ram_policy" "ci_rw" {
           "oss:ListMultipartUploads",
           "oss:ListParts",
         ]
-        Resource = [
-          "acs:oss:*:*:${alicloud_oss_bucket.this.bucket}/releases/*",
-          "acs:oss:*:*:${alicloud_oss_bucket.this.bucket}/offline-package/*",
-        ]
+        Resource = formatlist("acs:oss:*:*:%s/%s", alicloud_oss_bucket.this.bucket, var.oss_policy_prefixes)
       },
       {
         Effect = "Allow"
@@ -132,10 +129,7 @@ resource "alicloud_ram_policy" "ci_rw" {
         ]
         Condition = {
           StringLike = {
-            "oss:Prefix" = [
-              "releases/*",
-              "offline-package/*",
-            ]
+            "oss:Prefix" = var.oss_policy_prefixes
           }
         }
       },

@@ -8,6 +8,14 @@ on:
       - ".github/workflows/client-mirrors-iac.yml"
   workflow_dispatch:
     inputs:
+      stack:
+        description: Stack manifest to reconcile (mirrors or repos)
+        required: true
+        type: choice
+        default: mirrors
+        options:
+          - mirrors
+          - repos
       mode:
         description: Execution mode (plan, apply, or verify-only)
         required: true
@@ -18,7 +26,7 @@ on:
           - apply
           - verify
       gitops_ref:
-        description: GitOps ref containing resources/svc.plus/prod/client-mirrors/mirrors.yaml
+        description: GitOps ref containing resources/svc.plus/prod/client-mirrors/<stack>.yaml
         required: true
         type: string
         default: main
@@ -58,13 +66,19 @@ jobs:
           python3 terraform-hcl-standard/client-mirrors/scripts/generate.py check-hcl --root terraform-hcl-standard/client-mirrors
       - name: Check Terraform formatting
         run: terraform fmt -check -recursive terraform-hcl-standard/client-mirrors
-      - name: Render fixture and validate Terraform schemas
+      - name: Render fixtures and validate Terraform schemas
         run: |
           python3 terraform-hcl-standard/client-mirrors/scripts/generate.py render \
-            --resources terraform-hcl-standard/client-mirrors/tests/fixtures/mirrors.yaml \
+            --manifest terraform-hcl-standard/client-mirrors/tests/fixtures/mirrors.yaml \
             --workdir terraform-hcl-standard/client-mirrors/envs/svc-plus-prod
           terraform -chdir=terraform-hcl-standard/client-mirrors/envs/svc-plus-prod init -backend=false -input=false -no-color
           terraform -chdir=terraform-hcl-standard/client-mirrors/envs/svc-plus-prod validate -no-color
+
+          python3 terraform-hcl-standard/client-mirrors/scripts/generate.py render \
+            --manifest terraform-hcl-standard/client-mirrors/tests/fixtures/repos.yaml \
+            --workdir terraform-hcl-standard/client-mirrors/envs/svc-plus-prod-repos
+          terraform -chdir=terraform-hcl-standard/client-mirrors/envs/svc-plus-prod-repos init -backend=false -input=false -no-color
+          terraform -chdir=terraform-hcl-standard/client-mirrors/envs/svc-plus-prod-repos validate -no-color
 
   reconcile:
     name: Reconcile PROD Dual Mirrors & Vault KV
@@ -76,8 +90,9 @@ jobs:
       id-token: write
     env:
       VAULT_ADDR: ${{ vars.VAULT_ADDR || 'https://vault.svc.plus' }}
-      WORKDIR: terraform-hcl-standard/client-mirrors/envs/svc-plus-prod
-      MANIFEST_PATH: gitops/resources/svc.plus/prod/client-mirrors/mirrors.yaml
+      STACK_NAME: ${{ inputs.stack || 'mirrors' }}
+      WORKDIR: ${{ (inputs.stack || 'mirrors') == 'repos' && 'terraform-hcl-standard/client-mirrors/envs/svc-plus-prod-repos' || 'terraform-hcl-standard/client-mirrors/envs/svc-plus-prod' }}
+      MANIFEST_PATH: gitops/resources/svc.plus/prod/client-mirrors/${{ inputs.stack || 'mirrors' }}.yaml
       SCRIPTS_DIR: terraform-hcl-standard/client-mirrors/scripts
     steps:
       - uses: actions/checkout@v4
@@ -126,10 +141,24 @@ jobs:
             kv/data/CICD/prod/iac_state TF_STATE_ACCESS_KEY | TF_STATE_ACCESS_KEY ;
             kv/data/CICD/prod/iac_state TF_STATE_SECRET_KEY | TF_STATE_SECRET_KEY ;
             kv/data/CICD/prod/iac_state TF_STATE_REGION | TF_STATE_REGION
+      - name: Resolve stack domains and probe settings
+        run: |
+          python3 - "$SCRIPTS_DIR" "$MANIFEST_PATH" "$STACK_NAME" >> "$GITHUB_ENV" <<'PY'
+          import sys
+          sys.path.insert(0, sys.argv[1])
+          import generate
+          m = generate.load_and_validate_manifest(sys.argv[2], stack=sys.argv[3])
+          print(f"ZONE_NAME={m['zone_name']}")
+          print(f"R2_DOMAIN={m['r2']['custom_domain']}")
+          print(f"CN_DOMAIN={m['ali']['cdn_domain']}")
+          print(f"PROBE_PATH={m['effective_probe_path']}")
+          print(f"R2_KV_PATH={m['r2']['vault_kv_path']}")
+          print(f"OSS_KV_PATH={m['ali']['vault_kv_path']}")
+          PY
       - name: Render and validate Terraform workspace
         if: inputs.mode != 'verify'
         run: |
-          python3 "$SCRIPTS_DIR/generate.py" render --resources "$MANIFEST_PATH" --workdir "$WORKDIR"
+          python3 "$SCRIPTS_DIR/generate.py" render --stack "$STACK_NAME" --manifest "$MANIFEST_PATH" --workdir "$WORKDIR"
           python3 "$SCRIPTS_DIR/generate.py" check-hcl --root terraform-hcl-standard/client-mirrors
       - name: Ensure Aliyun CDN domain ownership TXT record in Cloudflare
         if: inputs.mode != 'verify' && inputs.run_cdn_verify_txt
@@ -143,8 +172,8 @@ jobs:
             extra_flag="--dry-run"
           fi
           python3 "$SCRIPTS_DIR/ensure_aliyun_cdn_verify_txt.py" \
-            --cdn-domain cn-dl.svc.plus \
-            --zone-name svc.plus \
+            --cdn-domain "$CN_DOMAIN" \
+            --zone-name "$ZONE_NAME" \
             $extra_flag
       - name: Terraform init & plan/apply
         if: inputs.mode != 'verify'
@@ -159,7 +188,7 @@ jobs:
           TF_STATE_SECRET_KEY: ${{ steps.vault.outputs.TF_STATE_SECRET_KEY }}
           TF_STATE_REGION: ${{ steps.vault.outputs.TF_STATE_REGION }}
         run: |
-          bash "$SCRIPTS_DIR/tf-init.sh" --workdir "$WORKDIR" --resources "$MANIFEST_PATH"
+          bash "$SCRIPTS_DIR/tf-init.sh" --workdir "$WORKDIR" --manifest "$MANIFEST_PATH" --stack "$STACK_NAME"
           terraform -chdir="$WORKDIR" validate -no-color
           if [[ "${{ inputs.mode }}" == "plan" ]]; then
             terraform -chdir="$WORKDIR" plan -input=false -no-color
@@ -174,6 +203,9 @@ jobs:
         if: inputs.mode == 'apply' || inputs.mode == 'verify'
         run: |
           bash "$SCRIPTS_DIR/verify_dual_mirrors.sh" \
-            --r2-domain dl.svc.plus \
-            --cn-domain cn-dl.svc.plus \
+            --r2-domain "$R2_DOMAIN" \
+            --cn-domain "$CN_DOMAIN" \
+            --probe-path "$PROBE_PATH" \
+            --r2-kv-path "$R2_KV_PATH" \
+            --oss-kv-path "$OSS_KV_PATH" \
             --upload-from-vault

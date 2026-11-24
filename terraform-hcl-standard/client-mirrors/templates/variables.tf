@@ -1,5 +1,5 @@
 # Non-secret workspace variables rendered into terraform.auto.tfvars.json
-# from gitops/resources/<project>/<env>/client-mirrors/mirrors.yaml.
+# from gitops/resources/<project>/<env>/client-mirrors/<stack>.yaml (mirrors.yaml / repos.yaml).
 # CLOUDFLARE_API_TOKEN, ALICLOUD_ACCESS_KEY, ALICLOUD_SECRET_KEY, and
 # TF_VAR_cloudflare_account_id come from Vault/env at runtime.
 
