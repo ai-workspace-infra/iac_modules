@@ -15,6 +15,7 @@ TESTS_DIR = Path(__file__).resolve().parent
 CLIENT_MIRRORS_ROOT = TESTS_DIR.parent
 SCRIPTS_DIR = CLIENT_MIRRORS_ROOT / "scripts"
 FIXTURE = TESTS_DIR / "fixtures" / "mirrors.yaml"
+REPOS_FIXTURE = TESTS_DIR / "fixtures" / "repos.yaml"
 
 sys.path.insert(0, str(SCRIPTS_DIR))
 import ensure_aliyun_cdn_verify_txt as verify_txt  # noqa: E402
@@ -58,7 +59,14 @@ class ClientMirrorsIaCTests(unittest.TestCase):
         self.assertIn('module "cn_oss_cdn"', generated)
         self.assertIn('cdn_scope            = "overseas"', generated)
         self.assertIn('oss_region           = "cn-hongkong"', generated)
+        self.assertIn('oss_policy_prefixes  = ["releases/*", "offline-package/*"]', generated)
         self.assertEqual(generate.check_hcl_tree(workdir), [])
+
+        summary = json.loads((workdir / "rendered_manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(summary["stack"], "mirrors")
+        self.assertEqual(summary["probe_path"], "releases/_health/probe.json")
+        self.assertEqual(summary["aliyun_oss_cdn"]["oss_policy_prefixes"], ["releases/*", "offline-package/*"])
+        self.assertEqual(summary["aliyun_oss_cdn"]["cdn_tls_vault_path"], "")
 
         tfvars = json.loads((workdir / "terraform.auto.tfvars.json").read_text(encoding="utf-8"))
         self.assertEqual(tfvars, {"alicloud_region": "cn-hongkong", "zone_name": "svc.plus"})
@@ -71,6 +79,86 @@ class ClientMirrorsIaCTests(unittest.TestCase):
             buf.getvalue().strip(),
             "terraform/prod/svc.plus/client-mirrors/svc-plus-prod/mirrors/terraform.tfstate",
         )
+
+    def test_render_repos_stack_with_manifest_and_custom_fields(self):
+        workdir = self.tmp / "repos-workdir"
+        rc = generate.main(["render", "--manifest", str(REPOS_FIXTURE), "--workdir", str(workdir)])
+        self.assertEqual(rc, 0)
+
+        generated = (workdir / "generated_mirrors.tf").read_text(encoding="utf-8")
+        self.assertIn('bucket_name          = "svc-plus-repos-global"', generated)
+        self.assertIn('custom_domain        = "repo.svc.plus"', generated)
+        self.assertIn('bucket_name          = "svc-plus-repos-cn-hk"', generated)
+        self.assertIn('cdn_domain           = "cn-repo.svc.plus"', generated)
+        self.assertIn('oss_policy_prefixes  = ["apt/*", "yum/*", "apk/*", "_health/*"]', generated)
+        self.assertIn('cdn_tls_vault_path  = "CICD/domains/svc.plus"', generated)
+        self.assertIn('probe_path = "_health/probe.json"', generated)
+        self.assertEqual(generate.check_hcl_tree(workdir), [])
+
+        summary = json.loads((workdir / "rendered_manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(summary["stack"], "repos")
+        self.assertEqual(summary["namespace"], "repos")
+        self.assertEqual(summary["probe_path"], "_health/probe.json")
+        self.assertEqual(summary["state_key"], "terraform/prod/svc.plus/client-mirrors/svc-plus-prod/repos/terraform.tfstate")
+        self.assertEqual(summary["cloudflare_r2"]["custom_domain"], "repo.svc.plus")
+        self.assertEqual(summary["aliyun_oss_cdn"]["cdn_domain"], "cn-repo.svc.plus")
+        self.assertEqual(summary["aliyun_oss_cdn"]["cdn_tls_vault_path"], "CICD/domains/svc.plus")
+        self.assertEqual(summary["aliyun_oss_cdn"]["oss_policy_prefixes"], ["apt/*", "yum/*", "apk/*", "_health/*"])
+
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            rc2 = generate.main(["state-key", "--manifest", str(REPOS_FIXTURE)])
+        self.assertEqual(rc2, 0)
+        self.assertEqual(
+            buf.getvalue().strip(),
+            "terraform/prod/svc.plus/client-mirrors/svc-plus-prod/repos/terraform.tfstate",
+        )
+
+    def test_stack_flag_resolves_gitops_manifest_and_default_workdir(self):
+        fake_root = self.tmp / "workspace"
+        gitops_dir = fake_root / "gitops" / "resources" / "svc.plus" / "prod" / "client-mirrors"
+        gitops_dir.mkdir(parents=True)
+        shutil.copyfile(FIXTURE, gitops_dir / "mirrors.yaml")
+        shutil.copyfile(REPOS_FIXTURE, gitops_dir / "repos.yaml")
+
+        resolved_mirrors = generate.resolve_manifest_path(stack="mirrors", search_roots=(fake_root,))
+        resolved_repos = generate.resolve_manifest_path(stack="repos", search_roots=(fake_root,))
+        self.assertEqual(resolved_mirrors, gitops_dir / "mirrors.yaml")
+        self.assertEqual(resolved_repos, gitops_dir / "repos.yaml")
+
+        self.assertEqual(generate.default_workdir_for_stack("mirrors"), CLIENT_MIRRORS_ROOT / "envs" / "svc-plus-prod")
+        self.assertEqual(generate.default_workdir_for_stack("repos"), CLIENT_MIRRORS_ROOT / "envs" / "svc-plus-prod-repos")
+
+        repos_workdir = self.tmp / "envs-repos"
+        with mock.patch.object(generate, "resolve_manifest_path", return_value=gitops_dir / "repos.yaml"):
+            rc = generate.main(["render", "--stack", "repos", "--workdir", str(repos_workdir)])
+        self.assertEqual(rc, 0)
+        summary = json.loads((repos_workdir / "rendered_manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(summary["stack"], "repos")
+
+    def test_manifest_validation_for_stack_prefixes_and_probe_path(self):
+        with self.assertRaises(ValueError):
+            generate.load_and_validate_manifest(FIXTURE, stack="repos")
+
+        bad_prefix_yaml = REPOS_FIXTURE.read_text(encoding="utf-8").replace("- apt/*", "- /apt/*")
+        bad_prefix_path = self.tmp / "bad-prefix.yaml"
+        bad_prefix_path.write_text(bad_prefix_yaml, encoding="utf-8")
+        with self.assertRaises(ValueError):
+            generate.load_and_validate_manifest(bad_prefix_path)
+
+        bad_wildcard_yaml = REPOS_FIXTURE.read_text(encoding="utf-8").replace("- apt/*", "- '*'")
+        bad_wildcard_path = self.tmp / "bad-wildcard.yaml"
+        bad_wildcard_path.write_text(bad_wildcard_yaml, encoding="utf-8")
+        with self.assertRaises(ValueError):
+            generate.load_and_validate_manifest(bad_wildcard_path)
+
+        bad_probe_yaml = REPOS_FIXTURE.read_text(encoding="utf-8").replace(
+            "probe_path: _health/probe.json", "probe_path: ../secret.json"
+        )
+        bad_probe_path = self.tmp / "bad-probe.yaml"
+        bad_probe_path.write_text(bad_probe_yaml, encoding="utf-8")
+        with self.assertRaises(ValueError):
+            generate.load_and_validate_manifest(bad_probe_path)
 
     def test_manifest_rejects_secret_like_keys_and_values(self):
         bad_yaml = FIXTURE.read_text(encoding="utf-8") + "\n  extra:\n    api_token: plain\n"

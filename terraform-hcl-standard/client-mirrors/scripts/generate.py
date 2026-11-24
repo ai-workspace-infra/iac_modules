@@ -16,7 +16,12 @@ import yaml
 SCRIPT_DIR = Path(__file__).resolve().parent
 CLIENT_MIRRORS_ROOT = SCRIPT_DIR.parent
 TEMPLATE_DIR = CLIENT_MIRRORS_ROOT / "templates"
+DEFAULT_STACK = "mirrors"
+ALLOWED_STACKS = frozenset({"mirrors", "repos"})
 DEFAULT_WORKDIR = CLIENT_MIRRORS_ROOT / "envs" / "svc-plus-prod"
+DEFAULT_OSS_POLICY_PREFIXES = ("releases/*", "offline-package/*")
+DEFAULT_PROBE_PATH = "releases/_health/probe.json"
+DEFAULT_REPOS_PROBE_PATH = "_health/probe.json"
 
 COPY_INTO_WORKDIR = ("backend.tf", "provider.tf", "variables.tf")
 TF_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -118,7 +123,71 @@ def _require_methods(methods, ctx):
     return cleaned
 
 
-def load_and_validate_manifest(resources_path):
+def _strip_kv_mount(path_value):
+    cleaned = str(path_value or "").strip()
+    return cleaned.removeprefix("kv/").lstrip("/") if cleaned else ""
+
+
+def _require_oss_policy_prefixes(raw_prefixes, ctx):
+    if not isinstance(raw_prefixes, list) or not raw_prefixes:
+        raise ValueError(f"{ctx} must be a non-empty list")
+    cleaned = []
+    for item in raw_prefixes:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(f"{ctx} entries must be non-empty strings")
+        prefix = item.strip()
+        if (
+            prefix.startswith("/")
+            or prefix in ("*", "**", "?")
+            or prefix.startswith("*")
+            or prefix.startswith("?")
+            or ".." in prefix.split("/")
+        ):
+            raise ValueError(
+                f"{ctx} entries must be relative object prefixes (no leading '/' or bare wildcards), got {prefix!r}"
+            )
+        cleaned.append(prefix)
+    return cleaned
+
+
+def _normalize_stack(stack):
+    cleaned = str(stack or "").strip().lower()
+    if cleaned not in ALLOWED_STACKS:
+        raise ValueError(f"stack must be one of {sorted(ALLOWED_STACKS)}, got {stack!r}")
+    return cleaned
+
+
+def default_workdir_for_stack(stack=DEFAULT_STACK):
+    cleaned = _component("stack", stack or DEFAULT_STACK)
+    if cleaned == "mirrors":
+        return DEFAULT_WORKDIR
+    return CLIENT_MIRRORS_ROOT / "envs" / f"svc-plus-prod-{cleaned}"
+
+
+def resolve_manifest_path(resources=None, stack=None, search_roots=None):
+    if resources:
+        return Path(resources)
+    effective_stack = _normalize_stack(stack) if stack else DEFAULT_STACK
+    roots = search_roots or (
+        CLIENT_MIRRORS_ROOT.parent.parent,
+        CLIENT_MIRRORS_ROOT.parent.parent.parent,
+    )
+    candidates = [
+        Path(root) / "gitops" / "resources" / "svc.plus" / "prod" / "client-mirrors" / f"{effective_stack}.yaml"
+        for root in roots
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    searched = ", ".join(str(c) for c in candidates)
+    raise FileNotFoundError(
+        f"Could not locate {effective_stack}.yaml in expected gitops paths ({searched}); "
+        "pass --manifest or --resources explicitly."
+    )
+
+
+def load_and_validate_manifest(resources_path, stack=None):
+    expected_stack = _normalize_stack(stack) if stack is not None else None
     path = Path(resources_path)
     raw_text = path.read_text(encoding="utf-8")
     pattern_hits = _scan_secret_patterns(raw_text)
@@ -141,14 +210,32 @@ def load_and_validate_manifest(resources_path):
 
     glob = spec.get("global") or {}
     zone_name = _require_non_empty_str(glob, "zone_name", "spec.global")
+    raw_probe_path = glob.get("probe_path")
+    if raw_probe_path is None:
+        probe_path = ""
+    elif not isinstance(raw_probe_path, str):
+        raise ValueError("spec.global.probe_path must be a string")
+    else:
+        probe_path = raw_probe_path.strip().lstrip("/")
+        if ".." in probe_path.split("/"):
+            raise ValueError("spec.global.probe_path must not contain '..' path segments")
+
     state_cfg = glob.get("state") or {}
     if not isinstance(state_cfg, dict):
         raise ValueError("spec.global.state must be a mapping")
+    raw_namespace = state_cfg.get("namespace")
+    if raw_namespace is None and expected_stack is not None:
+        namespace = expected_stack
+    else:
+        namespace = _require_non_empty_str(state_cfg, "namespace", "spec.global.state")
+    if expected_stack is not None and namespace != expected_stack:
+        raise ValueError(f"stack {expected_stack!r} does not match spec.global.state.namespace {namespace!r}")
+    effective_stack = expected_stack or namespace
     state_key = canonical_state_key(
         environment=_require_non_empty_str(state_cfg, "environment", "spec.global.state"),
         project=_require_non_empty_str(state_cfg, "project", "spec.global.state"),
         account=_require_non_empty_str(state_cfg, "account", "spec.global.state"),
-        namespace=_require_non_empty_str(state_cfg, "namespace", "spec.global.state"),
+        namespace=namespace,
     )
 
     products = spec.get("products") or []
@@ -186,7 +273,7 @@ def load_and_validate_manifest(resources_path):
         ),
         "cors_max_age_seconds": int(r2_raw.get("cors_max_age_seconds", 3600)),
         "token_name": _require_non_empty_str(r2_raw, "token_name", "spec.cloudflare_r2"),
-        "vault_kv_path": _require_non_empty_str(r2_raw, "vault_kv_path", "spec.cloudflare_r2").lstrip("/"),
+        "vault_kv_path": _strip_kv_mount(_require_non_empty_str(r2_raw, "vault_kv_path", "spec.cloudflare_r2")),
     }
 
     ali_raw = spec.get("aliyun_oss_cdn") or {}
@@ -202,6 +289,19 @@ def load_and_validate_manifest(resources_path):
     cdn_scope = _require_non_empty_str(ali_raw, "cdn_scope", "spec.aliyun_oss_cdn")
     if cdn_scope not in ALLOWED_CDN_SCOPES:
         raise ValueError(f"aliyun_oss_cdn.cdn_scope must be one of {sorted(ALLOWED_CDN_SCOPES)}")
+    raw_tls_vault_path = ali_raw.get("cdn_tls_vault_path", "")
+    if raw_tls_vault_path is None:
+        cdn_tls_vault_path = ""
+    elif not isinstance(raw_tls_vault_path, str):
+        raise ValueError("spec.aliyun_oss_cdn.cdn_tls_vault_path must be a string")
+    else:
+        cdn_tls_vault_path = _strip_kv_mount(raw_tls_vault_path)
+    if "oss_policy_prefixes" in ali_raw:
+        oss_policy_prefixes = _require_oss_policy_prefixes(
+            ali_raw.get("oss_policy_prefixes"), "spec.aliyun_oss_cdn.oss_policy_prefixes"
+        )
+    else:
+        oss_policy_prefixes = list(DEFAULT_OSS_POLICY_PREFIXES)
 
     ali = {
         "module_id": _require_tf_id(ali_raw.get("id", "cn_oss_cdn"), "spec.aliyun_oss_cdn.id"),
@@ -216,6 +316,7 @@ def load_and_validate_manifest(resources_path):
         "cdn_bandwidth_alarm_bps": int(ali_raw.get("cdn_bandwidth_alarm_bps", 500000000)),
         "cdn_alarm_contact_group": str(ali_raw.get("cdn_alarm_contact_group", "") or "").strip(),
         "cdn_cas_cert_id": str(ali_raw.get("cdn_cas_cert_id", "") or "").strip(),
+        "cdn_tls_vault_path": cdn_tls_vault_path,
         "cors_allowed_origins": _require_https_origins(
             ali_raw.get("cors_allowed_origins"), "spec.aliyun_oss_cdn.cors_allowed_origins"
         ),
@@ -225,12 +326,22 @@ def load_and_validate_manifest(resources_path):
         "cors_max_age_seconds": int(ali_raw.get("cors_max_age_seconds", 3600)),
         "ram_user_name": _require_non_empty_str(ali_raw, "ram_user_name", "spec.aliyun_oss_cdn"),
         "ram_policy_name": _require_non_empty_str(ali_raw, "ram_policy_name", "spec.aliyun_oss_cdn"),
-        "vault_kv_path": _require_non_empty_str(ali_raw, "vault_kv_path", "spec.aliyun_oss_cdn").lstrip("/"),
+        "oss_policy_prefixes": oss_policy_prefixes,
+        "vault_kv_path": _strip_kv_mount(_require_non_empty_str(ali_raw, "vault_kv_path", "spec.aliyun_oss_cdn")),
     }
+
+    effective_probe_path = probe_path or (
+        DEFAULT_REPOS_PROBE_PATH if effective_stack == "repos" else DEFAULT_PROBE_PATH
+    )
 
     return {
         "metadata": doc.get("metadata") or {},
+        "manifest_name": path.name,
+        "stack": effective_stack,
+        "namespace": namespace,
         "zone_name": zone_name,
+        "probe_path": probe_path,
+        "effective_probe_path": effective_probe_path,
         "state_key": state_key,
         "products": normalized_products,
         "r2": r2,
@@ -274,8 +385,9 @@ def check_hcl_tree(root):
 
 
 def cmd_render(args):
-    manifest = load_and_validate_manifest(args.resources)
-    workdir = Path(args.workdir)
+    manifest_path = resolve_manifest_path(args.resources, stack=args.stack)
+    manifest = load_and_validate_manifest(manifest_path, stack=args.stack)
+    workdir = Path(args.workdir) if args.workdir else default_workdir_for_stack(manifest["stack"])
     workdir.mkdir(parents=True, exist_ok=True)
 
     for fname in COPY_INTO_WORKDIR:
@@ -284,6 +396,10 @@ def cmd_render(args):
     env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)), keep_trailing_newline=True)
     tmpl = env.get_template("mirrors.tf.j2")
     rendered_tf = tmpl.render(
+        manifest_name=manifest["manifest_name"],
+        stack=manifest["stack"],
+        namespace=manifest["namespace"],
+        probe_path=manifest["effective_probe_path"],
         products=manifest["products"],
         r2=manifest["r2"],
         ali=manifest["ali"],
@@ -302,7 +418,10 @@ def cmd_render(args):
     )
 
     summary = {
+        "stack": manifest["stack"],
+        "namespace": manifest["namespace"],
         "zone_name": manifest["zone_name"],
+        "probe_path": manifest["effective_probe_path"],
         "state_key": manifest["state_key"],
         "products": manifest["products"],
         "cloudflare_r2": {
@@ -317,6 +436,8 @@ def cmd_render(args):
             "oss_acl": manifest["ali"]["oss_acl"],
             "cdn_domain": manifest["ali"]["cdn_domain"],
             "cdn_scope": manifest["ali"]["cdn_scope"],
+            "cdn_tls_vault_path": manifest["ali"]["cdn_tls_vault_path"],
+            "oss_policy_prefixes": manifest["ali"]["oss_policy_prefixes"],
             "vault_kv_path": manifest["ali"]["vault_kv_path"],
         },
     }
@@ -329,7 +450,8 @@ def cmd_render(args):
 
 
 def cmd_state_key(args):
-    manifest = load_and_validate_manifest(args.resources)
+    manifest_path = resolve_manifest_path(args.resources, stack=args.stack)
+    manifest = load_and_validate_manifest(manifest_path, stack=args.stack)
     print(manifest["state_key"])
     return 0
 
@@ -364,7 +486,7 @@ def _scrub_secrets(text, secrets):
 def _validate_kv_payload(name, record):
     if not isinstance(record, dict):
         raise ValueError(f"mirror_credentials.{name} must be a mapping")
-    kv_path = str(record.get("vault_kv_path") or "").strip().lstrip("/")
+    kv_path = _strip_kv_mount(record.get("vault_kv_path"))
     if not kv_path.startswith("prod/platform/storage/"):
         raise ValueError(f"unexpected vault_kv_path for {name}: {kv_path!r}")
     data = record.get("data")
@@ -383,11 +505,12 @@ def _validate_kv_payload(name, record):
 
 
 def cmd_vault_sync(args):
+    workdir = Path(args.workdir) if args.workdir else default_workdir_for_stack(args.stack or DEFAULT_STACK)
     if args.tf_output_json:
         raw_obj = json.loads(Path(args.tf_output_json).read_text(encoding="utf-8"))
     else:
         proc = subprocess.run(
-            [args.terraform_bin, f"-chdir={args.workdir}", "output", "-json", "mirror_credentials"],
+            [args.terraform_bin, f"-chdir={workdir}", "output", "-json", "mirror_credentials"],
             capture_output=True,
             text=True,
             check=False,
@@ -431,13 +554,41 @@ def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_render = sub.add_parser("render", help="Render Terraform HCL and tfvars from mirrors.yaml")
-    p_render.add_argument("--resources", required=True, help="Path to gitops mirrors.yaml")
-    p_render.add_argument("--workdir", default=str(DEFAULT_WORKDIR), help="Terraform root workdir")
+    p_render = sub.add_parser("render", help="Render Terraform HCL and tfvars from mirrors.yaml or repos.yaml")
+    p_render.add_argument(
+        "--stack",
+        choices=sorted(ALLOWED_STACKS),
+        default=None,
+        help="Stack preset to render (mirrors or repos; defaults to mirrors when --manifest/--resources is omitted)",
+    )
+    p_render.add_argument(
+        "--resources",
+        "--manifest",
+        dest="resources",
+        default=None,
+        help="Path to gitops ClientMirrorStack YAML (e.g. mirrors.yaml or repos.yaml)",
+    )
+    p_render.add_argument(
+        "--workdir",
+        default=None,
+        help="Terraform root workdir (defaults to envs/svc-plus-prod for mirrors, envs/svc-plus-prod-repos for repos)",
+    )
     p_render.set_defaults(func=cmd_render)
 
     p_state = sub.add_parser("state-key", help="Print canonical S3 remote state key")
-    p_state.add_argument("--resources", required=True, help="Path to gitops mirrors.yaml")
+    p_state.add_argument(
+        "--stack",
+        choices=sorted(ALLOWED_STACKS),
+        default=None,
+        help="Stack preset to inspect (mirrors or repos; defaults to mirrors when --manifest/--resources is omitted)",
+    )
+    p_state.add_argument(
+        "--resources",
+        "--manifest",
+        dest="resources",
+        default=None,
+        help="Path to gitops ClientMirrorStack YAML (e.g. mirrors.yaml or repos.yaml)",
+    )
     p_state.set_defaults(func=cmd_state_key)
 
     p_hcl = sub.add_parser("check-hcl", help="Verify no forbidden HCL loops/dynamic blocks exist")
@@ -445,7 +596,13 @@ def build_parser():
     p_hcl.set_defaults(func=cmd_check_hcl)
 
     p_sync = sub.add_parser("vault-sync", help="Write Terraform storage outputs to Vault KV v2")
-    p_sync.add_argument("--workdir", default=str(DEFAULT_WORKDIR), help="Terraform root workdir")
+    p_sync.add_argument(
+        "--stack",
+        choices=sorted(ALLOWED_STACKS),
+        default=None,
+        help="Stack preset used to choose default workdir (mirrors or repos)",
+    )
+    p_sync.add_argument("--workdir", default=None, help="Terraform root workdir")
     p_sync.add_argument("--tf-output-json", help="Optional JSON file overriding terraform output -json")
     p_sync.add_argument("--vault-mount", default="kv", help="Vault KV v2 mount name")
     p_sync.add_argument("--vault-bin", default=os.environ.get("VAULT_BIN", "vault"), help="Vault CLI path")

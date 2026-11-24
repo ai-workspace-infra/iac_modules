@@ -74,3 +74,20 @@ variable "ram_policy_name" {
   description = "Custom RAM policy name attached to the OSS publisher user."
   type        = string
 }
+
+variable "oss_policy_prefixes" {
+  description = "Least-privilege OSS object key prefixes granted to the RAM publisher policy."
+  type        = list(string)
+  default     = ["releases/*", "offline-package/*"]
+
+  validation {
+    condition = length(var.oss_policy_prefixes) > 0 && alltrue([
+      for p in var.oss_policy_prefixes :
+      length(trimspace(p)) > 0 &&
+      !startswith(trimspace(p), "/") &&
+      !startswith(trimspace(p), "*") &&
+      !startswith(trimspace(p), "?")
+    ])
+    error_message = "oss_policy_prefixes must be a non-empty list of relative OSS key prefixes without leading '/', '*', or '?'."
+  }
+}
